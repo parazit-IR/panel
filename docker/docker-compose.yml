@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: panel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: panel_db
+      POSTGRES_USER: panel
+      POSTGRES_PASSWORD: panel
+      # Keep database files under a dedicated subdirectory inside the mounted volume.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Bind to localhost so the development database is not exposed on external interfaces.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - panel_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - panel_network
+
+  redis:
+    image: redis:8-alpine
+    container_name: panel-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      # Bind to localhost so Redis is available to local tools without public exposure.
+      - "127.0.0.1:6379:6379"
+    volumes:
+      # Persist Redis append-only files across container restarts.
+      - panel_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - panel_network
+
+  adminer:
+    image: adminer:4.8.1-standalone
+    container_name: panel-adminer
+    restart: unless-stopped
+    environment:
+      # Preselect the PostgreSQL container on Adminer's login screen.
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - panel_network
+
+volumes:
+  panel_postgres_data:
+    name: panel_postgres_data
+  panel_redis_data:
+    name: panel_redis_data
+
+networks:
+  panel_network:
+    name: panel_network
+    driver: bridge
