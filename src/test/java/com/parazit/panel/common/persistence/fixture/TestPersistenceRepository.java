@@ -1,7 +1,6 @@
 package com.parazit.panel.common.persistence.fixture;
 
-import java.util.UUID;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.parazit.panel.domain.repository.UuidRepository;
 
-public interface TestPersistenceRepository extends JpaRepository<TestPersistenceEntity, UUID> {
+public interface TestPersistenceRepository extends UuidRepository<TestPersistenceEntity> {
 }

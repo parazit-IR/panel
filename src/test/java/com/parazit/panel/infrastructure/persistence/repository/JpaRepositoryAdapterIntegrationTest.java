@@ -1,6 +1,7 @@
-package com.parazit.panel.common.persistence;
+package com.parazit.panel.infrastructure.persistence.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import com.parazit.panel.common.persistence.fixture.TestPersistenceEntity;
 import com.parazit.panel.common.persistence.fixture.TestPersistenceRepository;
@@ -9,8 +10,9 @@ import com.parazit.panel.infrastructure.persistence.repository.fixture.TestPersi
 import com.parazit.panel.infrastructure.persistence.repository.fixture.TestPersistenceSpringDataRepository;
 import jakarta.persistence.EntityManager;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
-import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +20,7 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -31,11 +34,11 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @EntityScan(basePackageClasses = TestPersistenceEntity.class)
 @EnableJpaRepositories(basePackageClasses = TestPersistenceSpringDataRepository.class)
 @Import({JpaAuditingConfiguration.class, TestPersistenceRepositoryAdapter.class})
-class BaseEntityPersistenceTest {
+class JpaRepositoryAdapterIntegrationTest {
 
     @Container
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_test")
+            .withDatabaseName("panel_repository_test")
             .withUsername("panel")
             .withPassword("panel");
 
@@ -57,37 +60,93 @@ class BaseEntityPersistenceTest {
     @Autowired
     private Flyway flyway;
 
-    @Autowired
-    private DataSource dataSource;
-
     @Test
-    void persistsAuditedUuidEntityWithFlywayManagedSchema() throws InterruptedException {
-        assertThat(dataSource).isNotNull();
+    void delegatesRepositoryOperationsToSpringDataJpa() {
         assertThat(flyway.info().current()).isNotNull();
+        assertThat(repository).isNotInstanceOf(JpaRepository.class);
 
-        TestPersistenceEntity saved = repository.save(new TestPersistenceEntity("initial"));
-        entityManager.flush();
+        TestPersistenceEntity saved = repository.save(new TestPersistenceEntity("one"));
         UUID id = saved.getId();
 
         assertThat(id).isNotNull();
         assertThat(saved.getCreatedAt()).isNotNull();
         assertThat(saved.getUpdatedAt()).isNotNull();
+        assertThat(repository.findById(id)).contains(saved);
+        assertThat(repository.existsById(id)).isTrue();
+        assertThat(repository.count()).isEqualTo(1);
+        assertThat(repository.findAll()).extracting(TestPersistenceEntity::getName).containsExactly("one");
 
+        List<TestPersistenceEntity> savedEntities = repository.saveAll(List.of(
+                new TestPersistenceEntity("two"),
+                new TestPersistenceEntity("three")
+        ));
+
+        assertThat(savedEntities).hasSize(2);
+        assertThat(repository.count()).isEqualTo(3);
+
+        repository.delete(savedEntities.getFirst());
+        assertThat(repository.existsById(savedEntities.getFirst().getId())).isFalse();
+
+        repository.deleteById(savedEntities.getLast().getId());
+        assertThat(repository.existsById(savedEntities.getLast().getId())).isFalse();
+        assertThat(repository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void preservesUuidGenerationAndAuditingThroughAdapter() throws InterruptedException {
+        TestPersistenceEntity saved = repository.save(new TestPersistenceEntity("audit"));
+        UUID id = saved.getId();
+
+        entityManager.flush();
         entityManager.clear();
+
         TestPersistenceEntity persisted = repository.findById(id).orElseThrow();
         Instant createdAt = persisted.getCreatedAt();
         Instant updatedAt = persisted.getUpdatedAt();
 
+        assertThat(createdAt).isNotNull();
+        assertThat(updatedAt).isNotNull();
+
         Thread.sleep(10);
-        persisted.setName("updated");
+        persisted.setName("audit-updated");
         repository.save(persisted);
         entityManager.flush();
         entityManager.clear();
 
         TestPersistenceEntity found = repository.findById(id).orElseThrow();
 
-        assertThat(found.getName()).isEqualTo("updated");
+        assertThat(found.getId()).isEqualTo(id);
+        assertThat(found.getName()).isEqualTo("audit-updated");
         assertThat(found.getCreatedAt()).isEqualTo(createdAt);
         assertThat(found.getUpdatedAt()).isAfter(updatedAt);
+    }
+
+    @Test
+    void rejectsNullInputs() {
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.findById(null))
+                .withMessage("id must not be null");
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.save(null))
+                .withMessage("entity must not be null");
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.saveAll(null))
+                .withMessage("entities must not be null");
+        List<TestPersistenceEntity> entities = new ArrayList<>();
+        entities.add(new TestPersistenceEntity("valid"));
+        entities.add(null);
+
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.saveAll(entities))
+                .withMessage("entity must not be null");
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.existsById(null))
+                .withMessage("id must not be null");
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.delete(null))
+                .withMessage("entity must not be null");
+        assertThatNullPointerException()
+                .isThrownBy(() -> repository.deleteById(null))
+                .withMessage("id must not be null");
     }
 }
