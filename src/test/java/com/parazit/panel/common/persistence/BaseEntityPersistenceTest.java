@@ -13,12 +13,12 @@ import java.util.UUID;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.test.context.TestConstructor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -31,6 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @EntityScan(basePackageClasses = TestPersistenceEntity.class)
 @EnableJpaRepositories(basePackageClasses = TestPersistenceSpringDataRepository.class)
 @Import({JpaAuditingConfiguration.class, TestPersistenceRepositoryAdapter.class})
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class BaseEntityPersistenceTest {
 
     @Container
@@ -48,17 +49,25 @@ class BaseEntityPersistenceTest {
         registry.add("spring.flyway.enabled", () -> "true");
     }
 
-    @Autowired
-    private TestPersistenceRepository repository;
+    private final TestPersistenceRepository repository;
 
-    @Autowired
-    private EntityManager entityManager;
+    private final EntityManager entityManager;
 
-    @Autowired
-    private Flyway flyway;
+    private final Flyway flyway;
 
-    @Autowired
-    private DataSource dataSource;
+    private final DataSource dataSource;
+
+    BaseEntityPersistenceTest(
+            TestPersistenceRepository repository,
+            EntityManager entityManager,
+            Flyway flyway,
+            DataSource dataSource
+    ) {
+        this.repository = repository;
+        this.entityManager = entityManager;
+        this.flyway = flyway;
+        this.dataSource = dataSource;
+    }
 
     @Test
     void persistsAuditedUuidEntityWithFlywayManagedSchema() throws InterruptedException {

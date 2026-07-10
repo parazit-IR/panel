@@ -42,10 +42,13 @@ app:
     host: "${REDIS_HOST}"
     port: "${REDIS_PORT:6379}"
   telegram:
+    enabled: "${TELEGRAM_ENABLED:false}"
     bot-token: "${BOT_TOKEN}"
   panel:
+    enabled: "${PANEL_ENABLED:false}"
     url: "${PANEL_URL}"
     username: "${PANEL_USERNAME}"
     password: "${PANEL_PASSWORD}"
   payment:
+    enabled: "${PAYMENT_ENABLED:false}"
     merchant-id: "${PAYMENT_MERCHANT_ID}"

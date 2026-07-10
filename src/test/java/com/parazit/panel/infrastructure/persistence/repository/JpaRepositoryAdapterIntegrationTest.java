@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
@@ -24,6 +23,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestConstructor;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -34,6 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @EntityScan(basePackageClasses = TestPersistenceEntity.class)
 @EnableJpaRepositories(basePackageClasses = TestPersistenceSpringDataRepository.class)
 @Import({JpaAuditingConfiguration.class, TestPersistenceRepositoryAdapter.class})
+@TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class JpaRepositoryAdapterIntegrationTest {
 
     @Container
@@ -51,14 +52,21 @@ class JpaRepositoryAdapterIntegrationTest {
         registry.add("spring.flyway.enabled", () -> "true");
     }
 
-    @Autowired
-    private TestPersistenceRepository repository;
+    private final TestPersistenceRepository repository;
 
-    @Autowired
-    private EntityManager entityManager;
+    private final EntityManager entityManager;
 
-    @Autowired
-    private Flyway flyway;
+    private final Flyway flyway;
+
+    JpaRepositoryAdapterIntegrationTest(
+            TestPersistenceRepository repository,
+            EntityManager entityManager,
+            Flyway flyway
+    ) {
+        this.repository = repository;
+        this.entityManager = entityManager;
+        this.flyway = flyway;
+    }
 
     @Test
     void delegatesRepositoryOperationsToSpringDataJpa() {
