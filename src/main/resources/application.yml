@@ -23,12 +23,27 @@ spring:
     problemdetails:
       enabled: true
   datasource:
-    url: "${DATABASE_URL:jdbc:postgresql://localhost:5432/panel_db}"
-    username: "${DATABASE_USERNAME:panel}"
-    password: "${DATABASE_PASSWORD:panel}"
+    url: "${DATABASE_URL}"
+    username: "${DATABASE_USERNAME}"
+    password: "${DATABASE_PASSWORD}"
     driver-class-name: org.postgresql.Driver
+    hikari:
+      pool-name: "${DB_POOL_NAME:PanelHikariPool}"
+      maximum-pool-size: "${DB_POOL_MAX_SIZE:10}"
+      minimum-idle: "${DB_POOL_MIN_IDLE:2}"
+      connection-timeout: "${DB_CONNECTION_TIMEOUT_MS:30000}"
+      idle-timeout: "${DB_IDLE_TIMEOUT_MS:600000}"
+      max-lifetime: "${DB_MAX_LIFETIME_MS:1800000}"
   jpa:
     open-in-view: false
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -61,17 +76,17 @@ logging:
 
 app:
   database:
-    url: "${DATABASE_URL:jdbc:postgresql://localhost:5432/panel_db}"
-    username: "${DATABASE_USERNAME:panel}"
-    password: "${DATABASE_PASSWORD:panel}"
+    url: "${DATABASE_URL}"
+    username: "${DATABASE_USERNAME}"
+    password: "${DATABASE_PASSWORD}"
   redis:
     host: "${REDIS_HOST:localhost}"
     port: "${REDIS_PORT:6379}"
   telegram:
-    bot-token: "${BOT_TOKEN:}"
+    bot-token: "${BOT_TOKEN}"
   panel:
-    url: "${PANEL_URL:http://localhost:2053}"
-    username: "${PANEL_USERNAME:admin}"
-    password: "${PANEL_PASSWORD:admin}"
+    url: "${PANEL_URL}"
+    username: "${PANEL_USERNAME}"
+    password: "${PANEL_PASSWORD}"
   payment:
-    merchant-id: "${PAYMENT_MERCHANT_ID:}"
+    merchant-id: "${PAYMENT_MERCHANT_ID}"
