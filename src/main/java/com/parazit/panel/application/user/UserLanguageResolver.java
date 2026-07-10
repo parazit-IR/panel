@@ -2,33 +2,47 @@ package com.parazit.panel.application.user;
 
 import com.parazit.panel.domain.user.UserLanguage;
 import java.util.Locale;
+import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 @Component
 public class UserLanguageResolver {
 
     /**
-     * Telegram may omit or send unsupported language codes. The temporary product
-     * default is Persian until explicit user settings are introduced.
+     * Telegram may omit or send unsupported language codes during registration.
+     * The product default is Persian.
      */
     private static final UserLanguage DEFAULT_LANGUAGE = UserLanguage.FA;
 
-    public UserLanguage resolve(String languageCode) {
+    public UserLanguage resolveOrDefault(String languageCode) {
         if (languageCode == null || languageCode.isBlank()) {
             return DEFAULT_LANGUAGE;
         }
 
-        String normalized = languageCode.trim()
+        return resolveSupported(languageCode.trim()).orElse(DEFAULT_LANGUAGE);
+    }
+
+    public UserLanguage resolveRequired(String languageCode) {
+        if (languageCode == null || languageCode.isBlank()) {
+            throw new InvalidUserLanguageCommandException("languageCode must not be blank");
+        }
+
+        return resolveSupported(languageCode.trim())
+                .orElseThrow(() -> new InvalidUserLanguageCommandException("Unsupported languageCode: " + languageCode.trim()));
+    }
+
+    private Optional<UserLanguage> resolveSupported(String languageCode) {
+        String normalized = languageCode
                 .replace('_', '-')
                 .toLowerCase(Locale.ROOT);
 
-        if (normalized.equals("en") || normalized.startsWith("en-")) {
-            return UserLanguage.EN;
+        if (normalized.startsWith("en")) {
+            return Optional.of(UserLanguage.EN);
         }
-        if (normalized.equals("fa") || normalized.startsWith("fa-")) {
-            return UserLanguage.FA;
+        if (normalized.startsWith("fa")) {
+            return Optional.of(UserLanguage.FA);
         }
 
-        return DEFAULT_LANGUAGE;
+        return Optional.empty();
     }
 }

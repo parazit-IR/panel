@@ -34,18 +34,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers
 @Import(FixedClockTestConfiguration.class)
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class UserProfileControllerTest {
+class UserLanguageControllerTest {
 
     @Container
     static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_user_profile_controller_test")
+            .withDatabaseName("panel_user_language_controller_test")
             .withUsername("panel")
             .withPassword("panel");
 
     private final MockMvc mockMvc;
     private final JdbcTemplate jdbcTemplate;
 
-    UserProfileControllerTest(MockMvc mockMvc, JdbcTemplate jdbcTemplate) {
+    UserLanguageControllerTest(MockMvc mockMvc, JdbcTemplate jdbcTemplate) {
         this.mockMvc = mockMvc;
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -65,105 +65,147 @@ class UserProfileControllerTest {
     }
 
     @Test
-    void getProfileReturnsOk() throws Exception {
-        registerUser();
+    void getLanguageReturnsOk() throws Exception {
+        registerUser("fa");
 
-        mockMvc.perform(get("/internal/users/7001")
+        mockMvc.perform(get("/internal/users/7101/language")
                         .with(httpBasic("test", "test"))
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.telegramUserId").value(7001))
-                .andExpect(jsonPath("$.username").value("telegram_user"))
-                .andExpect(jsonPath("$.firstName").value("Ali"))
-                .andExpect(jsonPath("$.lastName").value("Ahmadi"))
+                .andExpect(jsonPath("$.userId").isNotEmpty())
+                .andExpect(jsonPath("$.telegramUserId").value(7101))
                 .andExpect(jsonPath("$.language").value("FA"))
-                .andExpect(jsonPath("$.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.blocked").value(false))
-                .andExpect(jsonPath("$.createdAt").value("2026-01-01T00:00:00Z"))
                 .andExpect(jsonPath("$.updatedAt").value("2026-01-01T00:00:00Z"))
-                .andExpect(jsonPath("$.lastInteractionAt").value("2026-01-01T00:00:00Z"))
-                .andExpect(jsonPath("$.id").doesNotExist());
+                .andExpect(jsonPath("$.username").doesNotExist())
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andExpect(jsonPath("$.createdAt").doesNotExist())
+                .andExpect(jsonPath("$.lastInteractionAt").doesNotExist());
     }
 
     @Test
-    void putProfileReturnsOkAndUpdatesAllowedFields() throws Exception {
-        registerUser();
-
-        mockMvc.perform(put("/internal/users/7001")
-                        .with(httpBasic("test", "test"))
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "firstName": "Sara",
-                                  "lastName": "Karimi"
-                                }
-                                """))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.telegramUserId").value(7001))
-                .andExpect(jsonPath("$.username").value("telegram_user"))
-                .andExpect(jsonPath("$.firstName").value("Sara"))
-                .andExpect(jsonPath("$.lastName").value("Karimi"))
-                .andExpect(jsonPath("$.language").value("FA"))
-                .andExpect(jsonPath("$.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.blocked").value(false));
-    }
-
-    @Test
-    void invalidPathTelegramUserIdReturnsBadRequestWithTraceId() throws Exception {
-        mockMvc.perform(get("/internal/users/0")
+    void getLanguageForMissingUserReturnsNotFoundWithTraceId() throws Exception {
+        mockMvc.perform(get("/internal/users/9999/language")
                         .with(httpBasic("test", "test"))
                         .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.message").value("User not found for telegramUserId 9999"))
                 .andExpect(jsonPath("$.traceId").isNotEmpty());
     }
 
     @Test
-    void blankFirstNameReturnsBadRequestWithTraceId() throws Exception {
-        registerUser();
+    void putLanguageAcceptsSupportedLowercaseCode() throws Exception {
+        registerUser("fa");
 
-        mockMvc.perform(put("/internal/users/7001")
+        mockMvc.perform(put("/internal/users/7101/language")
                         .with(httpBasic("test", "test"))
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .accept(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "firstName": "   "
-                                }
-                                """))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.traceId").isNotEmpty());
-    }
-
-    @Test
-    void putProfileDoesNotChangeLanguage() throws Exception {
-        registerUser();
-
-        mockMvc.perform(put("/internal/users/7001")
-                        .with(httpBasic("test", "test"))
-                        .with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .accept(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "firstName": "Ali",
-                                  "lastName": "Karimi"
+                                  "languageCode": "en"
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.firstName").value("Ali"))
-                .andExpect(jsonPath("$.lastName").value("Karimi"))
+                .andExpect(jsonPath("$.telegramUserId").value(7101))
+                .andExpect(jsonPath("$.language").value("EN"));
+    }
+
+    @Test
+    void putLanguageAcceptsRegionalCode() throws Exception {
+        registerUser("en");
+
+        mockMvc.perform(put("/internal/users/7101/language")
+                        .with(httpBasic("test", "test"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "languageCode": "fa-IR"
+                                }
+                                """))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.language").value("FA"));
     }
 
-    private void registerUser() throws Exception {
+    @Test
+    void blankLanguageReturnsBadRequest() throws Exception {
+        registerUser("fa");
+
+        mockMvc.perform(put("/internal/users/7101/language")
+                        .with(httpBasic("test", "test"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "languageCode": "   "
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    @Test
+    void unsupportedLanguageReturnsBadRequest() throws Exception {
+        registerUser("fa");
+
+        mockMvc.perform(put("/internal/users/7101/language")
+                        .with(httpBasic("test", "test"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "languageCode": "de"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.message").value("Unsupported languageCode: de"))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    @Test
+    void putLanguageForMissingUserReturnsNotFound() throws Exception {
+        mockMvc.perform(put("/internal/users/9999/language")
+                        .with(httpBasic("test", "test"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "languageCode": "en"
+                                }
+                                """))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    @Test
+    void malformedJsonReturnsBadRequest() throws Exception {
+        mockMvc.perform(put("/internal/users/7101/language")
+                        .with(httpBasic("test", "test"))
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "languageCode": "en"
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.message").value("Malformed JSON request"))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    private void registerUser(String languageCode) throws Exception {
         mockMvc.perform(post("/internal/users/register")
                         .with(httpBasic("test", "test"))
                         .with(csrf())
@@ -171,13 +213,13 @@ class UserProfileControllerTest {
                         .accept(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
-                                  "telegramUserId": 7001,
+                                  "telegramUserId": 7101,
                                   "username": "telegram_user",
                                   "firstName": "Ali",
                                   "lastName": "Ahmadi",
-                                  "languageCode": "fa"
+                                  "languageCode": "%s"
                                 }
-                                """))
+                                """.formatted(languageCode)))
                 .andExpect(status().isCreated());
     }
 }

@@ -101,12 +101,10 @@ public class User extends BaseEntity {
 
     public void updateProfile(
             String firstName,
-            String lastName,
-            UserLanguage language
+            String lastName
     ) {
         this.firstName = normalizeRequired(firstName, "firstName", FIRST_NAME_MAX_LENGTH);
         this.lastName = normalizeOptional(lastName, "lastName", LAST_NAME_MAX_LENGTH);
-        changeLanguage(language);
     }
 
     public void changeLanguage(UserLanguage language) {

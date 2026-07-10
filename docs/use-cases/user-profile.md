@@ -29,12 +29,12 @@ Only these fields can be changed through profile update:
 
 - `firstName`
 - `lastName`
-- `language`
 
 Immutable in this use case:
 
 - `telegramUserId`
 - `username`
+- `language`
 - `status`
 - `blocked`
 - `createdAt`
@@ -48,11 +48,7 @@ Immutable in this use case:
 - `firstName` is required, trimmed, nonblank, and at most 128 characters.
 - `lastName` is optional, trimmed, and at most 128 characters.
 - Blank `lastName` becomes `null`.
-- `language` is required and must be one of the supported `UserLanguage` enum
-  values.
-
-Unsupported language values are rejected. They are not defaulted. Telegram
-language-code defaulting remains limited to the registration use case.
+- Language changes are handled only by the dedicated user-language use case.
 
 ## Retrieval Flow
 
@@ -65,7 +61,7 @@ language-code defaulting remains limited to the registration use case.
 
 1. Validate `UpdateUserProfileCommand`.
 2. Load the user by `telegramUserId` through `UserRepository`.
-3. Call `User.updateProfile(firstName, lastName, language)`.
+3. Call `User.updateProfile(firstName, lastName)`.
 4. Save through `UserRepository`.
 5. Return `UpdateUserProfileResult`.
 6. Log profile update with `telegramUserId`; trace ID is supplied by MDC.
@@ -88,8 +84,7 @@ PUT request:
 ```json
 {
   "firstName": "Sara",
-  "lastName": "Karimi",
-  "language": "EN"
+  "lastName": "Karimi"
 }
 ```
 
@@ -101,7 +96,7 @@ Response:
   "username": "example_user",
   "firstName": "Sara",
   "lastName": "Karimi",
-  "language": "EN",
+  "language": "FA",
   "status": "ACTIVE",
   "blocked": false,
   "createdAt": "2026-07-10T12:00:00Z",
@@ -113,7 +108,7 @@ Response:
 Status codes:
 
 - `200 OK`: profile retrieved or updated.
-- `400 Bad Request`: invalid path variable, invalid body, or unsupported enum.
+- `400 Bad Request`: invalid path variable or invalid body.
 - `404 Not Found`: no user exists for the Telegram identity.
 - `500 Internal Server Error`: unexpected failures.
 

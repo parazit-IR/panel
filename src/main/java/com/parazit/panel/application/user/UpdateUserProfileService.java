@@ -30,7 +30,7 @@ public class UpdateUserProfileService implements UpdateUserProfileUseCase {
         User user = userRepository.findByTelegramUserId(command.telegramUserId())
                 .orElseThrow(() -> new UserProfileNotFoundException(command.telegramUserId()));
 
-        user.updateProfile(command.firstName(), command.lastName(), command.language());
+        user.updateProfile(command.firstName(), command.lastName());
         User saved = userRepository.save(user);
 
         log.atInfo()
@@ -52,9 +52,6 @@ public class UpdateUserProfileService implements UpdateUserProfileUseCase {
         }
         validateRequiredText(command.firstName(), "firstName", User.FIRST_NAME_MAX_LENGTH);
         validateOptionalText(command.lastName(), "lastName", User.LAST_NAME_MAX_LENGTH);
-        if (command.language() == null) {
-            throw new InvalidUserProfileCommandException("language must not be null");
-        }
     }
 
     private void validateRequiredText(String value, String fieldName, int maxLength) {

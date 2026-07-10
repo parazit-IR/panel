@@ -48,7 +48,7 @@ Normalization is performed by the `User` aggregate:
 - `_` is normalized to `-`.
 - Null, blank, and unsupported codes default to `FA`.
 
-The default is Persian (`FA`) until explicit user settings are implemented.
+Explicit language changes are handled by the dedicated user-language use case.
 
 ## New-User Flow
 

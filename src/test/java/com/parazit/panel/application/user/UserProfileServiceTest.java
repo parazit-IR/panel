@@ -62,7 +62,7 @@ class UserProfileServiceTest {
         repository.resetCounters();
 
         UpdateUserProfileResult result = new UpdateUserProfileService(repository)
-                .updateProfile(new UpdateUserProfileCommand(5001L, " Sara ", "   ", UserLanguage.EN));
+                .updateProfile(new UpdateUserProfileCommand(5001L, " Sara ", "   "));
 
         assertThat(repository.findByTelegramUserIdCalls).isEqualTo(1);
         assertThat(repository.saveCalls).isEqualTo(1);
@@ -70,7 +70,7 @@ class UserProfileServiceTest {
         assertThat(result.username()).isEqualTo("telegram_user");
         assertThat(result.firstName()).isEqualTo("Sara");
         assertThat(result.lastName()).isNull();
-        assertThat(result.language()).isEqualTo(UserLanguage.EN);
+        assertThat(result.language()).isEqualTo(UserLanguage.FA);
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(result.blocked()).isTrue();
         assertThat(result.createdAt()).isEqualTo(REGISTERED_AT);
@@ -82,7 +82,7 @@ class UserProfileServiceTest {
         assertThat(persisted.getUsername()).isEqualTo("telegram_user");
         assertThat(persisted.getFirstName()).isEqualTo("Sara");
         assertThat(persisted.getLastName()).isNull();
-        assertThat(persisted.getLanguage()).isEqualTo(UserLanguage.EN);
+        assertThat(persisted.getLanguage()).isEqualTo(UserLanguage.FA);
     }
 
     @Test
@@ -107,18 +107,15 @@ class UserProfileServiceTest {
         assertThatThrownBy(() -> service.updateProfile(null))
                 .isInstanceOf(InvalidUserProfileCommandException.class)
                 .hasMessage("user profile update command must not be null");
-        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(null, "Ali", null, UserLanguage.FA)))
+        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(null, "Ali", null)))
                 .isInstanceOf(InvalidUserProfileCommandException.class)
                 .hasMessage("telegramUserId must not be null");
-        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(0L, "Ali", null, UserLanguage.FA)))
+        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(0L, "Ali", null)))
                 .isInstanceOf(InvalidUserProfileCommandException.class)
                 .hasMessage("telegramUserId must be positive");
-        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(5001L, "   ", null, UserLanguage.FA)))
+        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(5001L, "   ", null)))
                 .isInstanceOf(InvalidUserProfileCommandException.class)
                 .hasMessage("firstName must not be blank");
-        assertThatThrownBy(() -> service.updateProfile(new UpdateUserProfileCommand(5001L, "Ali", null, null)))
-                .isInstanceOf(InvalidUserProfileCommandException.class)
-                .hasMessage("language must not be null");
     }
 
     @Test
@@ -129,7 +126,7 @@ class UserProfileServiceTest {
                 .isInstanceOf(UserProfileNotFoundException.class)
                 .hasMessage("User profile not found for telegramUserId 9999");
         assertThatThrownBy(() -> new UpdateUserProfileService(repository)
-                .updateProfile(new UpdateUserProfileCommand(9999L, "Ali", null, UserLanguage.FA)))
+                .updateProfile(new UpdateUserProfileCommand(9999L, "Ali", null)))
                 .isInstanceOf(UserProfileNotFoundException.class)
                 .hasMessage("User profile not found for telegramUserId 9999");
     }

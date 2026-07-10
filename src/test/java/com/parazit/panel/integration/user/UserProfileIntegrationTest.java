@@ -118,14 +118,14 @@ class UserProfileIntegrationTest {
 
         clock.setInstant(PROFILE_UPDATED_AT);
         UpdateUserProfileResult result = updateUserProfileUseCase.updateProfile(
-                new UpdateUserProfileCommand(6001L, " Sara ", "   ", UserLanguage.EN)
+                new UpdateUserProfileCommand(6001L, " Sara ", "   ")
         );
 
         assertThat(result.telegramUserId()).isEqualTo(6001L);
         assertThat(result.username()).isEqualTo("telegram_user");
         assertThat(result.firstName()).isEqualTo("Sara");
         assertThat(result.lastName()).isNull();
-        assertThat(result.language()).isEqualTo(UserLanguage.EN);
+        assertThat(result.language()).isEqualTo(UserLanguage.FA);
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(result.blocked()).isTrue();
         assertThat(result.createdAt()).isEqualTo(REGISTERED_AT);
@@ -135,7 +135,7 @@ class UserProfileIntegrationTest {
         User persisted = userRepository.findByTelegramUserId(6001L).orElseThrow();
         assertThat(persisted.getFirstName()).isEqualTo("Sara");
         assertThat(persisted.getLastName()).isNull();
-        assertThat(persisted.getLanguage()).isEqualTo(UserLanguage.EN);
+        assertThat(persisted.getLanguage()).isEqualTo(UserLanguage.FA);
         assertThat(persisted.getTelegramUserId()).isEqualTo(6001L);
         assertThat(persisted.getUsername()).isEqualTo("telegram_user");
         assertThat(persisted.getStatus()).isEqualTo(UserStatus.SUSPENDED);
@@ -147,7 +147,7 @@ class UserProfileIntegrationTest {
         registerUser();
 
         assertThatThrownBy(() -> updateUserProfileUseCase.updateProfile(
-                new UpdateUserProfileCommand(6001L, "   ", null, UserLanguage.FA)
+                new UpdateUserProfileCommand(6001L, "   ", null)
         ))
                 .isInstanceOf(InvalidUserProfileCommandException.class)
                 .hasMessage("firstName must not be blank");

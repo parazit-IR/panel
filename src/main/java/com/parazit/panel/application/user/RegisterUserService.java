@@ -51,7 +51,7 @@ public class RegisterUserService implements RegisterUserUseCase {
     }
 
     private RegisterUserResult registerNewUser(RegisterUserCommand command, Instant now) {
-        UserLanguage initialLanguage = userLanguageResolver.resolve(command.languageCode());
+        UserLanguage initialLanguage = userLanguageResolver.resolveOrDefault(command.languageCode());
         User user = User.create(
                 command.telegramUserId(),
                 command.username(),

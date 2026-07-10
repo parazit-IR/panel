@@ -1,5 +1,6 @@
 package com.parazit.panel.common.exception;
 
+import com.parazit.panel.application.user.UserNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.time.OffsetDateTime;
@@ -87,6 +88,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             NoSuchElementException exception,
             HttpServletRequest request
     ) {
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(UserNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleUserNotFound(
+            UserNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        log.debug("User resource not found: {}", exception.getMessage());
         return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
     }
 

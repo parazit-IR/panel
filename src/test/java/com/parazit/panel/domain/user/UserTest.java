@@ -151,18 +151,18 @@ class UserTest {
     }
 
     @Test
-    void updatesProfileWithoutChangingTelegramIdentityUsernameStatusOrBlockedState() {
+    void updatesProfileWithoutChangingTelegramIdentityUsernameLanguageStatusOrBlockedState() {
         User user = createUser();
         user.suspend();
         user.block();
 
-        user.updateProfile(" Sara ", "   ", UserLanguage.EN);
+        user.updateProfile(" Sara ", "   ");
 
         assertThat(user.getTelegramUserId()).isEqualTo(1001L);
         assertThat(user.getUsername()).isEqualTo("telegram_user");
         assertThat(user.getFirstName()).isEqualTo("Sara");
         assertThat(user.getLastName()).isNull();
-        assertThat(user.getLanguage()).isEqualTo(UserLanguage.EN);
+        assertThat(user.getLanguage()).isEqualTo(UserLanguage.FA);
         assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(user.getBlocked()).isTrue();
     }
@@ -172,11 +172,8 @@ class UserTest {
         User user = createUser();
 
         assertThatIllegalArgumentException()
-                .isThrownBy(() -> user.updateProfile("   ", null, UserLanguage.FA))
+                .isThrownBy(() -> user.updateProfile("   ", null))
                 .withMessage("firstName must not be blank");
-        assertThatNullPointerException()
-                .isThrownBy(() -> user.updateProfile("Ali", null, null))
-                .withMessage("language must not be null");
     }
 
     @Test

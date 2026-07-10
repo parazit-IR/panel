@@ -17,8 +17,7 @@ public class ProfileApiMapper {
         return new UpdateUserProfileCommand(
                 telegramUserId,
                 request.firstName(),
-                request.lastName(),
-                request.language()
+                request.lastName()
         );
     }
 
