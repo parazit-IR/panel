@@ -6,10 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.parazit.panel.application.port.out.SystemClockPort;
 import com.parazit.panel.application.user.command.RegisterUserCommand;
 import com.parazit.panel.application.user.result.RegisterUserResult;
+import com.parazit.panel.application.user.settings.UserSettingsCreationService;
+import com.parazit.panel.application.user.settings.UserSettingsDefaultsService;
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserLanguage;
 import com.parazit.panel.domain.user.UserStatus;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.user.settings.UserSettings;
+import com.parazit.panel.domain.user.settings.repository.UserSettingsRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -31,7 +35,8 @@ class RegisterUserServiceTest {
     @Test
     void registersNewUser() {
         FakeUserRepository repository = new FakeUserRepository();
-        RegisterUserService service = service(repository, () -> NOW);
+        FakeUserSettingsRepository settingsRepository = new FakeUserSettingsRepository();
+        RegisterUserService service = service(repository, settingsRepository, () -> NOW);
 
         RegisterUserResult result = service.register(new RegisterUserCommand(
                 1001L,
@@ -56,19 +61,30 @@ class RegisterUserServiceTest {
         assertThat(result.newlyCreated()).isTrue();
         assertThat(result.registeredAt()).isEqualTo(CREATED_AT);
         assertThat(result.lastInteractionAt()).isEqualTo(NOW);
+        assertThat(settingsRepository.saveCalls).isEqualTo(1);
+        UserSettings settings = settingsRepository.findByUserId(result.userId()).orElseThrow();
+        assertThat(settings.isNotificationsEnabled()).isTrue();
+        assertThat(settings.isRenewalRemindersEnabled()).isTrue();
+        assertThat(settings.isUsageAlertsEnabled()).isTrue();
+        assertThat(settings.getUsageAlertThresholdPercent()).isEqualTo(80);
     }
 
     @Test
     void refreshesExistingUserWithoutChangingBusinessStateOrLanguage() {
         FakeUserRepository repository = new FakeUserRepository();
+        FakeUserSettingsRepository settingsRepository = new FakeUserSettingsRepository();
         User existing = User.create(1002L, "old_username", "Ali", "Ahmadi", UserLanguage.FA, NOW);
         existing.changeLanguage(UserLanguage.EN);
         existing.suspend();
         existing.block();
         repository.save(existing);
+        UserSettings existingSettings = UserSettings.createDefault(existing.getId());
+        existingSettings.updatePreferences(false, false, true, 35);
+        settingsRepository.save(existingSettings);
         repository.resetCounters();
+        settingsRepository.resetCounters();
 
-        RegisterUserService service = service(repository, () -> LATER);
+        RegisterUserService service = service(repository, settingsRepository, () -> LATER);
 
         RegisterUserResult result = service.register(new RegisterUserCommand(
                 1002L,
@@ -91,11 +107,17 @@ class RegisterUserServiceTest {
         assertThat(result.status()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(result.blocked()).isTrue();
         assertThat(result.newlyCreated()).isFalse();
+        assertThat(settingsRepository.saveCalls).isZero();
+        UserSettings preservedSettings = settingsRepository.findByUserId(existing.getId()).orElseThrow();
+        assertThat(preservedSettings.isNotificationsEnabled()).isFalse();
+        assertThat(preservedSettings.isRenewalRemindersEnabled()).isFalse();
+        assertThat(preservedSettings.isUsageAlertsEnabled()).isTrue();
+        assertThat(preservedSettings.getUsageAlertThresholdPercent()).isEqualTo(35);
     }
 
     @Test
     void rejectsNullCommand() {
-        RegisterUserService service = service(new FakeUserRepository(), () -> NOW);
+        RegisterUserService service = service(new FakeUserRepository(), new FakeUserSettingsRepository(), () -> NOW);
 
         assertThatThrownBy(() -> service.register(null))
                 .isInstanceOf(InvalidRegistrationCommandException.class)
@@ -104,7 +126,7 @@ class RegisterUserServiceTest {
 
     @Test
     void rejectsNonPositiveTelegramUserId() {
-        RegisterUserService service = service(new FakeUserRepository(), () -> NOW);
+        RegisterUserService service = service(new FakeUserRepository(), new FakeUserSettingsRepository(), () -> NOW);
 
         assertThatThrownBy(() -> service.register(new RegisterUserCommand(0L, null, "Ali", null, null)))
                 .isInstanceOf(InvalidRegistrationCommandException.class)
@@ -113,7 +135,7 @@ class RegisterUserServiceTest {
 
     @Test
     void rejectsBlankFirstName() {
-        RegisterUserService service = service(new FakeUserRepository(), () -> NOW);
+        RegisterUserService service = service(new FakeUserRepository(), new FakeUserSettingsRepository(), () -> NOW);
 
         assertThatThrownBy(() -> service.register(new RegisterUserCommand(1003L, null, "   ", null, null)))
                 .isInstanceOf(InvalidRegistrationCommandException.class)
@@ -123,19 +145,25 @@ class RegisterUserServiceTest {
     @Test
     void usesSystemClockPortForInteractionTime() {
         FakeUserRepository repository = new FakeUserRepository();
-        RegisterUserService service = service(repository, () -> LATER);
+        RegisterUserService service = service(repository, new FakeUserSettingsRepository(), () -> LATER);
 
         RegisterUserResult result = service.register(new RegisterUserCommand(1004L, null, "Ali", null, null));
 
         assertThat(result.lastInteractionAt()).isEqualTo(LATER);
     }
 
-    private RegisterUserService service(FakeUserRepository repository, SystemClockPort clockPort) {
+    private RegisterUserService service(
+            FakeUserRepository repository,
+            FakeUserSettingsRepository settingsRepository,
+            SystemClockPort clockPort
+    ) {
+        UserSettingsCreationService creationService = new UserSettingsCreationService(settingsRepository);
         return new RegisterUserService(
                 repository,
                 clockPort,
                 new UserLanguageResolver(),
-                new RegisterUserCreationService(repository)
+                new RegisterUserCreationService(repository),
+                new UserSettingsDefaultsService(settingsRepository, creationService)
         );
     }
 
@@ -220,6 +248,78 @@ class RegisterUserServiceTest {
                 ReflectionTestUtils.setField(user, "createdAt", CREATED_AT);
             }
             ReflectionTestUtils.setField(user, "updatedAt", UPDATED_AT);
+        }
+    }
+
+    private static final class FakeUserSettingsRepository implements UserSettingsRepository {
+
+        private final Map<UUID, UserSettings> settingsByUserId = new LinkedHashMap<>();
+        private int saveCalls;
+
+        @Override
+        public Optional<UserSettings> findByUserId(UUID userId) {
+            return Optional.ofNullable(settingsByUserId.get(userId));
+        }
+
+        @Override
+        public boolean existsByUserId(UUID userId) {
+            return settingsByUserId.containsKey(userId);
+        }
+
+        @Override
+        public Optional<UserSettings> findById(UUID id) {
+            return settingsByUserId.values()
+                    .stream()
+                    .filter(settings -> id.equals(settings.getId()))
+                    .findFirst();
+        }
+
+        @Override
+        public List<UserSettings> findAll() {
+            return new ArrayList<>(settingsByUserId.values());
+        }
+
+        @Override
+        public UserSettings save(UserSettings settings) {
+            saveCalls++;
+            if (settings.getId() == null) {
+                ReflectionTestUtils.setField(settings, "id", UUID.randomUUID());
+            }
+            if (settings.getCreatedAt() == null) {
+                ReflectionTestUtils.setField(settings, "createdAt", CREATED_AT);
+            }
+            ReflectionTestUtils.setField(settings, "updatedAt", UPDATED_AT);
+            settingsByUserId.put(settings.getUserId(), settings);
+            return settings;
+        }
+
+        @Override
+        public List<UserSettings> saveAll(Collection<UserSettings> entities) {
+            return entities.stream().map(this::save).toList();
+        }
+
+        @Override
+        public boolean existsById(UUID id) {
+            return findById(id).isPresent();
+        }
+
+        @Override
+        public long count() {
+            return settingsByUserId.size();
+        }
+
+        @Override
+        public void delete(UserSettings entity) {
+            settingsByUserId.remove(entity.getUserId());
+        }
+
+        @Override
+        public void deleteById(UUID id) {
+            findById(id).ifPresent(this::delete);
+        }
+
+        private void resetCounters() {
+            saveCalls = 0;
         }
     }
 }

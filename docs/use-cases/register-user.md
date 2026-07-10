@@ -64,7 +64,8 @@ New users start with:
 - resolved initial language;
 - `ACTIVE` status;
 - `blocked=false`;
-- `lastInteractionAt` set from `SystemClockPort`.
+- `lastInteractionAt` set from `SystemClockPort`;
+- default `UserSettings` preferences.
 
 ## Existing-User Flow
 
@@ -80,6 +81,7 @@ Repeated registration preserves:
 - selected language;
 - status;
 - blocked state;
+- existing settings;
 - original `createdAt`.
 
 Re-registration never unblocks, activates, unsuspends, or changes the selected
@@ -92,6 +94,7 @@ The use case is idempotent by Telegram identity:
 - repeated calls for the same `telegramUserId` return the same internal user ID;
 - repeated calls do not increase row count;
 - profile fields and `lastInteractionAt` are refreshed;
+- missing settings are recreated;
 - the database unique constraint on `telegram_user_id` is the final authority.
 
 ## Transaction Boundary

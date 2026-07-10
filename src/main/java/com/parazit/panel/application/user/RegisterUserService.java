@@ -4,6 +4,7 @@ import com.parazit.panel.application.port.in.user.RegisterUserUseCase;
 import com.parazit.panel.application.port.out.SystemClockPort;
 import com.parazit.panel.application.user.command.RegisterUserCommand;
 import com.parazit.panel.application.user.result.RegisterUserResult;
+import com.parazit.panel.application.user.settings.UserSettingsDefaultsService;
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserLanguage;
 import com.parazit.panel.domain.user.repository.UserRepository;
@@ -24,17 +25,20 @@ public class RegisterUserService implements RegisterUserUseCase {
     private final SystemClockPort systemClockPort;
     private final UserLanguageResolver userLanguageResolver;
     private final RegisterUserCreationService creationService;
+    private final UserSettingsDefaultsService userSettingsDefaultsService;
 
     public RegisterUserService(
             UserRepository userRepository,
             SystemClockPort systemClockPort,
             UserLanguageResolver userLanguageResolver,
-            RegisterUserCreationService creationService
+            RegisterUserCreationService creationService,
+            UserSettingsDefaultsService userSettingsDefaultsService
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.systemClockPort = Objects.requireNonNull(systemClockPort, "systemClockPort must not be null");
         this.userLanguageResolver = Objects.requireNonNull(userLanguageResolver, "userLanguageResolver must not be null");
         this.creationService = Objects.requireNonNull(creationService, "creationService must not be null");
+        this.userSettingsDefaultsService = Objects.requireNonNull(userSettingsDefaultsService, "userSettingsDefaultsService must not be null");
     }
 
     @Override
@@ -63,6 +67,7 @@ public class RegisterUserService implements RegisterUserUseCase {
 
         try {
             User saved = creationService.create(user);
+            userSettingsDefaultsService.ensureDefaults(saved);
             log.atInfo()
                     .addKeyValue("userId", saved.getId())
                     .addKeyValue("telegramUserId", saved.getTelegramUserId())
@@ -88,6 +93,7 @@ public class RegisterUserService implements RegisterUserUseCase {
     private RegisterUserResult refreshExistingUser(User user, RegisterUserCommand command, Instant now) {
         user.updateTelegramProfile(command.username(), command.firstName(), command.lastName(), now);
         User saved = userRepository.save(user);
+        userSettingsDefaultsService.ensureDefaults(saved);
 
         log.atDebug()
                 .addKeyValue("userId", saved.getId())

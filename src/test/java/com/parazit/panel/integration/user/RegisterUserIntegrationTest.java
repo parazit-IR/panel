@@ -9,6 +9,8 @@ import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserLanguage;
 import com.parazit.panel.domain.user.UserStatus;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.user.settings.UserSettings;
+import com.parazit.panel.domain.user.settings.repository.UserSettingsRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -49,6 +51,7 @@ class RegisterUserIntegrationTest {
 
     private final RegisterUserUseCase registerUserUseCase;
     private final UserRepository userRepository;
+    private final UserSettingsRepository userSettingsRepository;
     private final JdbcTemplate jdbcTemplate;
     private final Flyway flyway;
     private final MutableClock clock;
@@ -56,12 +59,14 @@ class RegisterUserIntegrationTest {
     RegisterUserIntegrationTest(
             RegisterUserUseCase registerUserUseCase,
             UserRepository userRepository,
+            UserSettingsRepository userSettingsRepository,
             JdbcTemplate jdbcTemplate,
             Flyway flyway,
             Clock clock
     ) {
         this.registerUserUseCase = registerUserUseCase;
         this.userRepository = userRepository;
+        this.userSettingsRepository = userSettingsRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.flyway = flyway;
         this.clock = (MutableClock) clock;
@@ -78,6 +83,7 @@ class RegisterUserIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.update("DELETE FROM user_settings");
         jdbcTemplate.update("DELETE FROM users");
         clock.setInstant(FIRST_INSTANT);
     }
@@ -98,11 +104,18 @@ class RegisterUserIntegrationTest {
         assertThat(result.registeredAt()).isEqualTo(FIRST_INSTANT);
         assertThat(result.lastInteractionAt()).isEqualTo(FIRST_INSTANT);
         assertThat(rowCount()).isEqualTo(1);
+        assertThat(settingsRowCount()).isEqualTo(1);
 
         User persisted = userRepository.findByTelegramUserId(2001L).orElseThrow();
         assertThat(persisted.getId()).isEqualTo(result.userId());
         assertThat(persisted.getCreatedAt()).isEqualTo(FIRST_INSTANT);
         assertThat(persisted.getUpdatedAt()).isEqualTo(FIRST_INSTANT);
+
+        UserSettings settings = userSettingsRepository.findByUserId(result.userId()).orElseThrow();
+        assertThat(settings.isNotificationsEnabled()).isTrue();
+        assertThat(settings.isRenewalRemindersEnabled()).isTrue();
+        assertThat(settings.isUsageAlertsEnabled()).isTrue();
+        assertThat(settings.getUsageAlertThresholdPercent()).isEqualTo(80);
     }
 
     @Test
@@ -114,6 +127,9 @@ class RegisterUserIntegrationTest {
         persisted.suspend();
         persisted.block();
         userRepository.save(persisted);
+        UserSettings existingSettings = userSettingsRepository.findByUserId(first.userId()).orElseThrow();
+        existingSettings.updatePreferences(false, false, true, 40);
+        userSettingsRepository.save(existingSettings);
 
         clock.setInstant(SECOND_INSTANT);
         RegisterUserResult second = registerUserUseCase.register(new RegisterUserCommand(
@@ -127,6 +143,7 @@ class RegisterUserIntegrationTest {
         assertThat(second.newlyCreated()).isFalse();
         assertThat(second.userId()).isEqualTo(first.userId());
         assertThat(rowCount()).isEqualTo(1);
+        assertThat(settingsRowCount()).isEqualTo(1);
         assertThat(second.username()).isEqualTo("updated_user");
         assertThat(second.firstName()).isEqualTo("Sara");
         assertThat(second.lastName()).isEqualTo("Karimi");
@@ -143,13 +160,43 @@ class RegisterUserIntegrationTest {
         assertThat(refreshed.getStatus()).isEqualTo(UserStatus.SUSPENDED);
         assertThat(refreshed.getBlocked()).isTrue();
         assertThat(refreshed.getLastInteractionAt()).isEqualTo(SECOND_INSTANT);
+
+        UserSettings preservedSettings = userSettingsRepository.findByUserId(first.userId()).orElseThrow();
+        assertThat(preservedSettings.isNotificationsEnabled()).isFalse();
+        assertThat(preservedSettings.isRenewalRemindersEnabled()).isFalse();
+        assertThat(preservedSettings.isUsageAlertsEnabled()).isTrue();
+        assertThat(preservedSettings.getUsageAlertThresholdPercent()).isEqualTo(40);
+    }
+
+    @Test
+    void repeatedRegistrationRecreatesMissingSettings() {
+        RegisterUserResult first = registerUserUseCase.register(command("fa"));
+        jdbcTemplate.update("DELETE FROM user_settings WHERE user_id = ?", first.userId());
+
+        clock.setInstant(SECOND_INSTANT);
+        RegisterUserResult second = registerUserUseCase.register(new RegisterUserCommand(
+                2001L,
+                "@updated_user",
+                " Sara ",
+                " Karimi ",
+                "en-US"
+        ));
+
+        assertThat(second.newlyCreated()).isFalse();
+        assertThat(second.userId()).isEqualTo(first.userId());
+        assertThat(settingsRowCount()).isEqualTo(1);
+        UserSettings settings = userSettingsRepository.findByUserId(first.userId()).orElseThrow();
+        assertThat(settings.isNotificationsEnabled()).isTrue();
+        assertThat(settings.isRenewalRemindersEnabled()).isTrue();
+        assertThat(settings.isUsageAlertsEnabled()).isTrue();
+        assertThat(settings.getUsageAlertThresholdPercent()).isEqualTo(80);
     }
 
     @Test
     void flywayMigrationRunsAndHibernateValidationSucceeds() {
         assertThat(flyway.info().current()).isNotNull();
         assertThat(Arrays.stream(flyway.info().applied()))
-                .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("2"));
+                .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("3"));
     }
 
     private RegisterUserCommand command(String languageCode) {
@@ -158,6 +205,11 @@ class RegisterUserIntegrationTest {
 
     private long rowCount() {
         Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Long.class);
+        return count == null ? 0 : count;
+    }
+
+    private long settingsRowCount() {
+        Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_settings", Long.class);
         return count == null ? 0 : count;
     }
 

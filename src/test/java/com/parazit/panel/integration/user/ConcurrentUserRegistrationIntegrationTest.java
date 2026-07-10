@@ -68,11 +68,12 @@ class ConcurrentUserRegistrationIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        jdbcTemplate.update("DELETE FROM user_settings");
         jdbcTemplate.update("DELETE FROM users");
     }
 
     @Test
-    void concurrentRegistrationsCreateOnlyOneUser() throws Exception {
+    void concurrentRegistrationsCreateOnlyOneUserAndOneSettingsRow() throws Exception {
         ExecutorService executorService = Executors.newFixedThreadPool(2);
         CyclicBarrier barrier = new CyclicBarrier(2);
         RegisterUserCommand command = new RegisterUserCommand(3001L, "same_user", "Ali", null, "fa");
@@ -88,6 +89,7 @@ class ConcurrentUserRegistrationIntegrationTest {
             assertThat(List.of(firstResult.newlyCreated(), secondResult.newlyCreated()))
                     .containsExactlyInAnyOrder(true, false);
             assertThat(rowCount()).isEqualTo(1);
+            assertThat(settingsRowCount()).isEqualTo(1);
         } finally {
             executorService.shutdownNow();
             assertThat(executorService.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
@@ -104,6 +106,11 @@ class ConcurrentUserRegistrationIntegrationTest {
 
     private long rowCount() {
         Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Long.class);
+        return count == null ? 0 : count;
+    }
+
+    private long settingsRowCount() {
+        Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_settings", Long.class);
         return count == null ? 0 : count;
     }
 

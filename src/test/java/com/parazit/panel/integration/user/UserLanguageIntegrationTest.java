@@ -181,7 +181,7 @@ class UserLanguageIntegrationTest {
     void flywayMigrationRunsAndHibernateValidationSucceeds() {
         assertThat(flyway.info().current()).isNotNull();
         assertThat(Arrays.stream(flyway.info().applied()))
-                .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("2"));
+                .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("3"));
     }
 
     private void registerUser(String languageCode) {
