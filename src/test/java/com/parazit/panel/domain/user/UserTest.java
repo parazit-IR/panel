@@ -151,6 +151,35 @@ class UserTest {
     }
 
     @Test
+    void updatesProfileWithoutChangingTelegramIdentityUsernameStatusOrBlockedState() {
+        User user = createUser();
+        user.suspend();
+        user.block();
+
+        user.updateProfile(" Sara ", "   ", UserLanguage.EN);
+
+        assertThat(user.getTelegramUserId()).isEqualTo(1001L);
+        assertThat(user.getUsername()).isEqualTo("telegram_user");
+        assertThat(user.getFirstName()).isEqualTo("Sara");
+        assertThat(user.getLastName()).isNull();
+        assertThat(user.getLanguage()).isEqualTo(UserLanguage.EN);
+        assertThat(user.getStatus()).isEqualTo(UserStatus.SUSPENDED);
+        assertThat(user.getBlocked()).isTrue();
+    }
+
+    @Test
+    void rejectsInvalidProfileUpdate() {
+        User user = createUser();
+
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> user.updateProfile("   ", null, UserLanguage.FA))
+                .withMessage("firstName must not be blank");
+        assertThatNullPointerException()
+                .isThrownBy(() -> user.updateProfile("Ali", null, null))
+                .withMessage("language must not be null");
+    }
+
+    @Test
     void doesNotAllowTelegramUserIdMutationThroughDomainOperations() {
         User user = createUser();
         Long originalTelegramUserId = user.getTelegramUserId();

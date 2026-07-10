@@ -19,6 +19,11 @@ public class UserRepositoryAdapter extends JpaRepositoryAdapter<User, UUID> impl
     }
 
     @Override
+    public User save(User user) {
+        return repository.saveAndFlush(Objects.requireNonNull(user, "user must not be null"));
+    }
+
+    @Override
     public Optional<User> findByTelegramUserId(Long telegramUserId) {
         return repository.findByTelegramUserId(requireTelegramUserId(telegramUserId));
     }

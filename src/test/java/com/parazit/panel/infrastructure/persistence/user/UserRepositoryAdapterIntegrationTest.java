@@ -132,9 +132,14 @@ class UserRepositoryAdapterIntegrationTest {
         entityManager.flush();
         entityManager.clear();
 
-        repository.save(User.create(1003L, "another_user", "Sara", null, UserLanguage.EN, NOW));
-
-        assertThatThrownBy(entityManager::flush)
+        assertThatThrownBy(() -> repository.save(User.create(
+                1003L,
+                "another_user",
+                "Sara",
+                null,
+                UserLanguage.EN,
+                NOW
+        )))
                 .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
     }
 
