@@ -50,3 +50,5 @@ app:
   payment:
     enabled: "${PAYMENT_ENABLED:false}"
     merchant-id: "${PAYMENT_MERCHANT_ID:}"
+  plan-selection:
+    ttl: "${PLAN_SELECTION_TTL:PT30M}"

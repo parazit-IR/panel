@@ -5,6 +5,9 @@ import com.parazit.panel.application.plan.admin.InvalidPlanStateTransitionExcept
 import com.parazit.panel.application.plan.admin.PlanCodeAlreadyExistsException;
 import com.parazit.panel.application.plan.admin.PlanModificationNotAllowedException;
 import com.parazit.panel.application.plan.admin.PlanNotFoundException;
+import com.parazit.panel.application.plan.selection.PlanSelectionConflictException;
+import com.parazit.panel.application.plan.selection.PlanSelectionNotFoundException;
+import com.parazit.panel.application.plan.selection.UserNotEligibleForPlanSelectionException;
 import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
 import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
 import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
@@ -161,10 +164,28 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
     }
 
+    @ExceptionHandler(PlanSelectionNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handlePlanSelectionNotFound(
+            PlanSelectionNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        log.debug("Plan selection resource not found: {}", exception.getMessage());
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(UserNotEligibleForPlanSelectionException.class)
+    public ResponseEntity<ApiErrorResponse> handleUserNotEligibleForPlanSelection(
+            UserNotEligibleForPlanSelectionException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.FORBIDDEN, exception.getMessage(), request);
+    }
+
     @ExceptionHandler({
             PlanCodeAlreadyExistsException.class,
             PlanModificationNotAllowedException.class,
-            InvalidPlanStateTransitionException.class
+            InvalidPlanStateTransitionException.class,
+            PlanSelectionConflictException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,

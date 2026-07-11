@@ -30,6 +30,11 @@ public class UserRepositoryAdapter extends JpaRepositoryAdapter<User, UUID> impl
     }
 
     @Override
+    public Optional<User> findByTelegramUserIdForUpdate(Long telegramUserId) {
+        return repository.findWithLockByTelegramUserId(requireTelegramUserId(telegramUserId));
+    }
+
+    @Override
     public boolean existsByTelegramUserId(Long telegramUserId) {
         return repository.existsByTelegramUserId(requireTelegramUserId(telegramUserId));
     }
