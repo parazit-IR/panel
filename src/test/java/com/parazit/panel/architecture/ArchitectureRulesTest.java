@@ -100,9 +100,10 @@ class ArchitectureRulesTest {
     }
 
     @Test
-    void planTaskDoesNotAddApiSurfaceOrEntityRelationships() throws IOException {
-        List<Path> apiViolations = javaFiles("com/parazit/panel/api")
-                .filter(path -> source(path).contains("domain.plan"))
+    void planTaskDoesNotAddPublicApiSurfaceOrEntityRelationships() throws IOException {
+        List<Path> publicApiViolations = javaFiles("com/parazit/panel/api")
+                .filter(path -> source(path).contains("domain.plan")
+                        && !path.toString().contains("/api/internal/plan/admin/"))
                 .toList();
         List<Path> relationshipViolations = javaFiles("com/parazit/panel/domain/plan")
                 .filter(path -> {
@@ -114,8 +115,45 @@ class ArchitectureRulesTest {
                 })
                 .toList();
 
-        assertThat(apiViolations).isEmpty();
+        assertThat(publicApiViolations).isEmpty();
         assertThat(relationshipViolations).isEmpty();
+    }
+
+    @Test
+    void adminPlanControllerDependsOnInputPortsOnly() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/api/internal/plan/admin")
+                .filter(path -> path.getFileName().toString().endsWith("Controller.java"))
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.domain.plan.repository")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("SpringData")
+                            || source.contains("JpaRepository");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void planManagementDoesNotAddDeferredOperationalModules() throws IOException {
+        List<Path> violations = javaFiles("")
+                .filter(path -> !path.toString().contains("/domain/plan/")
+                        && !path.toString().contains("/application/plan/")
+                        && !path.toString().contains("/api/internal/plan/admin/")
+                        && !path.toString().contains("/infrastructure/persistence/plan/"))
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("PlanPayment")
+                            || source.contains("PlanSubscription")
+                            || source.contains("PlanOrder")
+                            || source.contains("PlanTelegram")
+                            || source.contains("ThreeX")
+                            || source.contains("3x");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
     }
 
     private static Stream<Path> javaFiles(String packagePath) throws IOException {

@@ -66,7 +66,7 @@ INACTIVE --> ARCHIVED
 ARCHIVED --> [*]
 ```
 
-Invalid same-state transitions are rejected. Archived plans cannot change state or details.
+Invalid same-state transitions are rejected. Archived plans cannot change state or details. Task 17 admin update use cases map archived detail changes to `409 Conflict` so retired commercial definitions remain stable for future orders, payments, and subscriptions.
 
 ## Plan Type Rules
 
@@ -124,7 +124,7 @@ The aggregate validates:
 - Positive optional `maxDevices`.
 - Non-negative `displayOrder`.
 
-`updateDetails` cannot change `code` or `status` and revalidates all detail invariants.
+`updateDetails` cannot change `code` or `status` and revalidates all detail invariants. Administrative update flows are expected to call this method only after loading the aggregate by UUID.
 
 ## Database Constraints
 

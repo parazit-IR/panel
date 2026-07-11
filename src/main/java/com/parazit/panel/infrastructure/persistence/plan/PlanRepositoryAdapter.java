@@ -2,6 +2,7 @@ package com.parazit.panel.infrastructure.persistence.plan;
 
 import com.parazit.panel.domain.plan.Plan;
 import com.parazit.panel.domain.plan.PlanStatus;
+import com.parazit.panel.domain.plan.PlanType;
 import com.parazit.panel.domain.plan.repository.PlanRepository;
 import com.parazit.panel.infrastructure.persistence.repository.JpaRepositoryAdapter;
 import java.util.List;
@@ -36,14 +37,29 @@ public class PlanRepositoryAdapter extends JpaRepositoryAdapter<Plan, UUID> impl
     }
 
     @Override
-    public List<Plan> findAllByStatusOrderByDisplayOrderAsc(PlanStatus status) {
+    public List<Plan> findAllByStatusOrderByDisplayOrderAscCodeAsc(PlanStatus status) {
         return repository.findAllByStatusOrderByDisplayOrderAscCodeAsc(
                 Objects.requireNonNull(status, "status must not be null")
         );
     }
 
     @Override
-    public List<Plan> findAllOrderByDisplayOrderAsc() {
+    public List<Plan> findAllByTypeOrderByDisplayOrderAscCodeAsc(PlanType type) {
+        return repository.findAllByTypeOrderByDisplayOrderAscCodeAsc(
+                Objects.requireNonNull(type, "type must not be null")
+        );
+    }
+
+    @Override
+    public List<Plan> findAllByStatusAndTypeOrderByDisplayOrderAscCodeAsc(PlanStatus status, PlanType type) {
+        return repository.findAllByStatusAndTypeOrderByDisplayOrderAscCodeAsc(
+                Objects.requireNonNull(status, "status must not be null"),
+                Objects.requireNonNull(type, "type must not be null")
+        );
+    }
+
+    @Override
+    public List<Plan> findAllOrderByDisplayOrderAscCodeAsc() {
         return repository.findAllByOrderByDisplayOrderAscCodeAsc();
     }
 }

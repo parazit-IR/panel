@@ -13,6 +13,11 @@ public final class DatabaseCleaner {
                 .execute("TRUNCATE TABLE referrals, user_settings, users RESTART IDENTITY");
     }
 
+    public static void cleanPlanTables(JdbcTemplate jdbcTemplate) {
+        Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null")
+                .execute("TRUNCATE TABLE plans RESTART IDENTITY");
+    }
+
     public static void cleanTestPersistenceTables(JdbcTemplate jdbcTemplate) {
         Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null")
                 .execute("TRUNCATE TABLE test_persistence_entities RESTART IDENTITY");

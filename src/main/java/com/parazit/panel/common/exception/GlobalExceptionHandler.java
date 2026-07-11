@@ -1,5 +1,9 @@
 package com.parazit.panel.common.exception;
 
+import com.parazit.panel.application.plan.admin.InvalidPlanStateTransitionException;
+import com.parazit.panel.application.plan.admin.PlanCodeAlreadyExistsException;
+import com.parazit.panel.application.plan.admin.PlanModificationNotAllowedException;
+import com.parazit.panel.application.plan.admin.PlanNotFoundException;
 import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
 import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
 import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
@@ -22,6 +26,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
@@ -94,6 +99,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
     }
 
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiErrorResponse> handleMethodArgumentTypeMismatch(
+            MethodArgumentTypeMismatchException exception,
+            HttpServletRequest request
+    ) {
+        String name = exception.getName();
+        return buildResponse(HttpStatus.BAD_REQUEST, name + " has an invalid value", request);
+    }
+
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<ApiErrorResponse> handleUserNotFound(
             UserNotFoundException exception,
@@ -123,6 +137,27 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ReferralAlreadyAssignedException.class)
     public ResponseEntity<ApiErrorResponse> handleReferralAlreadyAssigned(
             ReferralAlreadyAssignedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(PlanNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handlePlanNotFound(
+            PlanNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        log.debug("Plan resource not found: {}", exception.getMessage());
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            PlanCodeAlreadyExistsException.class,
+            PlanModificationNotAllowedException.class,
+            InvalidPlanStateTransitionException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handlePlanConflict(
+            RuntimeException exception,
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);

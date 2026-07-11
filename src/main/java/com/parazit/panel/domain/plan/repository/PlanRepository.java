@@ -2,6 +2,7 @@ package com.parazit.panel.domain.plan.repository;
 
 import com.parazit.panel.domain.plan.Plan;
 import com.parazit.panel.domain.plan.PlanStatus;
+import com.parazit.panel.domain.plan.PlanType;
 import com.parazit.panel.domain.repository.UuidRepository;
 import java.util.List;
 import java.util.Optional;
@@ -12,7 +13,11 @@ public interface PlanRepository extends UuidRepository<Plan> {
 
     boolean existsByCode(String code);
 
-    List<Plan> findAllByStatusOrderByDisplayOrderAsc(PlanStatus status);
+    List<Plan> findAllByStatusOrderByDisplayOrderAscCodeAsc(PlanStatus status);
 
-    List<Plan> findAllOrderByDisplayOrderAsc();
+    List<Plan> findAllByTypeOrderByDisplayOrderAscCodeAsc(PlanType type);
+
+    List<Plan> findAllByStatusAndTypeOrderByDisplayOrderAscCodeAsc(PlanStatus status, PlanType type);
+
+    List<Plan> findAllOrderByDisplayOrderAscCodeAsc();
 }

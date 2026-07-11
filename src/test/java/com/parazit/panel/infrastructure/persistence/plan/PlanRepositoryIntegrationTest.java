@@ -1,6 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.plan;
 
 import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+import com.parazit.panel.test.support.DatabaseCleaner;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -21,6 +22,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -28,6 +30,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestConstructor;
 
 @DataJpaTest
@@ -42,17 +45,26 @@ class PlanRepositoryIntegrationTest extends PostgreSqlContainerSupport {
     private final EntityManager entityManager;
     private final Flyway flyway;
     private final MutableTestClock clock;
+    private final JdbcTemplate jdbcTemplate;
 
     PlanRepositoryIntegrationTest(
             PlanRepository repository,
             EntityManager entityManager,
             Flyway flyway,
-            Clock clock
+            Clock clock,
+            JdbcTemplate jdbcTemplate
     ) {
         this.repository = repository;
         this.entityManager = entityManager;
         this.flyway = flyway;
         this.clock = (MutableTestClock) clock;
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @BeforeEach
+    void setUp() {
+        DatabaseCleaner.cleanPlanTables(jdbcTemplate);
+        entityManager.clear();
     }
 
     @Test
@@ -109,10 +121,10 @@ class PlanRepositoryIntegrationTest extends PostgreSqlContainerSupport {
         entityManager.flush();
         entityManager.clear();
 
-        assertThat(repository.findAllByStatusOrderByDisplayOrderAsc(PlanStatus.DRAFT))
+        assertThat(repository.findAllByStatusOrderByDisplayOrderAscCodeAsc(PlanStatus.DRAFT))
                 .extracting(Plan::getCode)
                 .containsExactly("A_LIMITED", "C_LIMITED", "B_UNLIMITED");
-        assertThat(repository.findAllOrderByDisplayOrderAsc())
+        assertThat(repository.findAllOrderByDisplayOrderAscCodeAsc())
                 .extracting(Plan::getCode)
                 .containsExactly("INACTIVE_PLAN", "A_LIMITED", "C_LIMITED", "B_UNLIMITED");
     }
