@@ -21,9 +21,12 @@ class XuiPropertiesTest {
                         "app.xui.password=secret",
                         "app.xui.connect-timeout=3s",
                         "app.xui.read-timeout=9s",
+                        "app.xui.login-timeout=4s",
                         "app.xui.max-retries=2",
                         "app.xui.retry-delay=250ms",
-                        "app.xui.verify-ssl=false"
+                        "app.xui.verify-ssl=false",
+                        "app.xui.auto-login=false",
+                        "app.xui.session-timeout=PT10M"
                 )
                 .run(context -> {
                     XuiProperties properties = context.getBean(XuiProperties.class);
@@ -33,9 +36,12 @@ class XuiPropertiesTest {
                     assertThat(properties.password()).isEqualTo("secret");
                     assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
                     assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(9));
+                    assertThat(properties.loginTimeout()).isEqualTo(Duration.ofSeconds(4));
                     assertThat(properties.maxRetries()).isEqualTo(2);
                     assertThat(properties.retryDelay()).isEqualTo(Duration.ofMillis(250));
                     assertThat(properties.verifySsl()).isFalse();
+                    assertThat(properties.autoLogin()).isFalse();
+                    assertThat(properties.sessionTimeout()).isEqualTo(Duration.ofMinutes(10));
                 });
     }
 
@@ -65,7 +71,10 @@ class XuiPropertiesTest {
 
                     assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(5));
                     assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(20));
+                    assertThat(properties.loginTimeout()).isEqualTo(Duration.ofSeconds(10));
                     assertThat(properties.retryDelay()).isEqualTo(Duration.ofSeconds(1));
+                    assertThat(properties.autoLogin()).isTrue();
+                    assertThat(properties.sessionTimeout()).isNull();
                 });
     }
 

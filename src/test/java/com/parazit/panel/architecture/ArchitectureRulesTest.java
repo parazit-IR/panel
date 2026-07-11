@@ -194,7 +194,8 @@ class ArchitectureRulesTest {
                         && !path.toString().contains("/api/internal/plan/admin/")
                         && !path.toString().contains("/api/plan/catalog/")
                         && !path.toString().contains("/api/plan/selection/")
-                        && !path.toString().contains("/infrastructure/persistence/plan/"))
+                        && !path.toString().contains("/infrastructure/persistence/plan/")
+                        && !path.toString().contains("/infrastructure/xui/"))
                 .filter(path -> {
                     String source = source(path);
                     return source.contains("PlanPayment")

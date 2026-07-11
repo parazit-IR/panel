@@ -5,6 +5,7 @@ import com.parazit.panel.infrastructure.xui.XuiLoggingInterceptor;
 import com.parazit.panel.infrastructure.xui.exception.XuiExceptionMapper;
 import com.parazit.panel.infrastructure.xui.retry.XuiRetryExecutor;
 import java.security.GeneralSecurityException;
+import java.time.Duration;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -29,8 +30,29 @@ public class XuiRestClientConfiguration {
     @Bean
     public RestClient xuiRestClient(XuiProperties properties, ObjectMapper objectMapper)
             throws GeneralSecurityException {
+        return restClient(properties, objectMapper, properties.readTimeout());
+    }
+
+    @Bean
+    public RestClient xuiLoginRestClient(XuiProperties properties, ObjectMapper objectMapper)
+            throws GeneralSecurityException {
+        return restClient(properties, objectMapper, properties.loginTimeout());
+    }
+
+    @Bean
+    public XuiRetryExecutor xuiRetryExecutor(XuiProperties properties) {
+        return new XuiRetryExecutor(properties.maxRetries(), properties.retryDelay());
+    }
+
+    @Bean
+    public XuiExceptionMapper xuiExceptionMapper() {
+        return new XuiExceptionMapper();
+    }
+
+    private RestClient restClient(XuiProperties properties, ObjectMapper objectMapper, Duration readTimeout)
+            throws GeneralSecurityException {
         HttpComponentsClientHttpRequestFactory requestFactory = new HttpComponentsClientHttpRequestFactory(
-                httpClient(properties)
+                httpClient(properties, readTimeout)
         );
 
         return RestClient.builder()
@@ -47,22 +69,13 @@ public class XuiRestClientConfiguration {
                 .build();
     }
 
-    @Bean
-    public XuiRetryExecutor xuiRetryExecutor(XuiProperties properties) {
-        return new XuiRetryExecutor(properties.maxRetries(), properties.retryDelay());
-    }
-
-    @Bean
-    public XuiExceptionMapper xuiExceptionMapper() {
-        return new XuiExceptionMapper();
-    }
-
-    private CloseableHttpClient httpClient(XuiProperties properties) throws GeneralSecurityException {
+    private CloseableHttpClient httpClient(XuiProperties properties, Duration readTimeout)
+            throws GeneralSecurityException {
         PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder =
                 PoolingHttpClientConnectionManagerBuilder.create()
                         .setDefaultConnectionConfig(ConnectionConfig.custom()
                                 .setConnectTimeout(Timeout.of(properties.connectTimeout()))
-                                .setSocketTimeout(Timeout.of(properties.readTimeout()))
+                                .setSocketTimeout(Timeout.of(readTimeout))
                                 .build());
 
         if (!properties.verifySsl()) {
@@ -77,7 +90,8 @@ public class XuiRestClientConfiguration {
         return HttpClients.custom()
                 .setConnectionManager(connectionManagerBuilder.build())
                 .setDefaultRequestConfig(RequestConfig.custom()
-                        .setResponseTimeout(Timeout.of(properties.readTimeout()))
+                        .setRedirectsEnabled(false)
+                        .setResponseTimeout(Timeout.of(readTimeout))
                         .build())
                 .disableAutomaticRetries()
                 .build();

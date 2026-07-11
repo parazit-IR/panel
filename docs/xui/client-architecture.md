@@ -117,10 +117,11 @@ It can:
 - store a named cookie;
 - parse and store `Set-Cookie` headers;
 - provide the current `Cookie` header;
+- expose the last successful login time;
 - expose a snapshot for diagnostics/tests;
 - clear session state.
 
-It does not persist sessions and does not perform login.
+It does not persist sessions.
 
 ## SSL
 
@@ -130,11 +131,19 @@ It does not persist sessions and does not perform login.
 
 ## Current XuiClient Contract
 
-`ping()` performs a lightweight GET against the configured base URL and returns `true` on success.
+`ping()` performs a lightweight unauthenticated GET against the configured base URL and returns `true` on success.
 
-The following methods intentionally throw `UnsupportedOperationException` in Task 21:
+Task 22 implements:
 
 - `login()`
+- `logout()`
+- `isLoggedIn()`
+- `isAuthenticated()`
+- `refreshSession()`
+- `pingAuthenticated()`
+
+The following methods intentionally throw `UnsupportedOperationException` until later Xui API tasks:
+
 - `getInbounds()`
 - `createClient()`
 - `updateClient()`
@@ -153,6 +162,7 @@ Covered behavior:
 - headers;
 - JSON serialization;
 - cookie persistence;
+- login and session lifecycle;
 - retry behavior;
 - timeout mapping;
 - SSL-disabled self-signed certificate support;
@@ -163,7 +173,6 @@ Covered behavior:
 
 Future tasks will add:
 
-- login request and session refresh;
 - inbound retrieval;
 - client creation/update/delete payloads;
 - subscription generation;

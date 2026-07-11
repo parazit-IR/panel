@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.parazit.panel.infrastructure.xui.authentication.AuthenticatedRequestExecutor;
+import com.parazit.panel.infrastructure.xui.authentication.XuiAuthenticationManager;
 import com.parazit.panel.infrastructure.xui.config.XuiProperties;
 import com.parazit.panel.infrastructure.xui.config.XuiRestClientConfiguration;
 import com.parazit.panel.infrastructure.xui.exception.XuiExceptionMapper;
@@ -12,7 +14,10 @@ import com.parazit.panel.infrastructure.xui.exception.XuiTimeoutException;
 import com.parazit.panel.infrastructure.xui.retry.XuiRetryExecutor;
 import com.parazit.panel.infrastructure.xui.session.XuiSessionStore;
 import com.parazit.panel.test.xui.XuiMockServerSupport;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.concurrent.TimeUnit;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -136,7 +141,6 @@ class RestClientXuiClientIntegrationTest extends XuiMockServerSupport {
     void unsupportedOperationsRemainOutOfScope() {
         RestClientXuiClient client = client(0, Duration.ofSeconds(2), true);
 
-        assertThatThrownBy(client::login).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(client::getInbounds).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(client::createClient).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(client::updateClient).isInstanceOf(UnsupportedOperationException.class);
@@ -147,24 +151,44 @@ class RestClientXuiClientIntegrationTest extends XuiMockServerSupport {
         try {
             XuiProperties properties = new XuiProperties(
                     baseUrl(),
-                    "",
-                    "",
+                    "admin",
+                    "secret",
                     Duration.ofSeconds(1),
                     readTimeout,
+                    Duration.ofSeconds(1),
                     maxRetries,
                     Duration.ZERO,
-                    verifySsl
+                    verifySsl,
+                    true,
+                    Duration.ofMinutes(30)
             );
-            RestClient restClient = new XuiRestClientConfiguration()
-                    .xuiRestClient(properties, new ObjectMapper());
+            XuiRestClientConfiguration configuration = new XuiRestClientConfiguration();
+            ObjectMapper objectMapper = new ObjectMapper();
+            RestClient restClient = configuration.xuiRestClient(properties, objectMapper);
+            RestClient loginRestClient = configuration.xuiLoginRestClient(properties, objectMapper);
             sessionStore = new XuiSessionStore();
+            XuiRetryExecutor retryExecutor = new XuiRetryExecutor(maxRetries, Duration.ZERO);
+            XuiExceptionMapper exceptionMapper = new XuiExceptionMapper();
             requestExecutor = new XuiRequestExecutor(
                     restClient,
                     sessionStore,
-                    new XuiRetryExecutor(maxRetries, Duration.ZERO),
-                    new XuiExceptionMapper()
+                    retryExecutor,
+                    exceptionMapper
             );
-            return new RestClientXuiClient(requestExecutor);
+            XuiAuthenticationManager authenticationManager = new XuiAuthenticationManager(
+                    loginRestClient,
+                    properties,
+                    sessionStore,
+                    retryExecutor,
+                    exceptionMapper,
+                    Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC)
+            );
+            AuthenticatedRequestExecutor authenticatedRequestExecutor = new AuthenticatedRequestExecutor(
+                    authenticationManager,
+                    requestExecutor,
+                    properties
+            );
+            return new RestClientXuiClient(requestExecutor, authenticationManager, authenticatedRequestExecutor);
         } catch (Exception exception) {
             throw new IllegalStateException("Could not create Xui test client", exception);
         }

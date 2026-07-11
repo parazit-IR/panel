@@ -21,16 +21,21 @@ class XuiRestClientConfigurationTest {
                 "",
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(2),
+                Duration.ofSeconds(3),
                 2,
                 Duration.ZERO,
-                true
+                true,
+                true,
+                Duration.ofMinutes(30)
         );
 
         RestClient restClient = configuration.xuiRestClient(properties, new ObjectMapper());
+        RestClient loginRestClient = configuration.xuiLoginRestClient(properties, new ObjectMapper());
         XuiRetryExecutor retryExecutor = configuration.xuiRetryExecutor(properties);
         XuiExceptionMapper exceptionMapper = configuration.xuiExceptionMapper();
 
         assertThat(restClient).isNotNull();
+        assertThat(loginRestClient).isNotNull();
         assertThat(retryExecutor).isNotNull();
         assertThat(exceptionMapper).isNotNull();
     }
@@ -43,9 +48,12 @@ class XuiRestClientConfigurationTest {
                 "",
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(2),
+                Duration.ofSeconds(3),
                 0,
                 Duration.ZERO,
-                false
+                false,
+                true,
+                null
         );
 
         RestClient restClient = configuration.xuiRestClient(properties, new ObjectMapper());

@@ -4,6 +4,12 @@ public interface XuiClient {
 
     void login();
 
+    void logout();
+
+    boolean isLoggedIn();
+
+    void refreshSession();
+
     String getInbounds();
 
     void createClient();
@@ -13,4 +19,8 @@ public interface XuiClient {
     void deleteClient();
 
     boolean ping();
+
+    boolean isAuthenticated();
+
+    boolean pingAuthenticated();
 }

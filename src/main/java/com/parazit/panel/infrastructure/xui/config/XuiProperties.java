@@ -19,11 +19,14 @@ public record XuiProperties(
         Duration connectTimeout,
         @NotNull
         Duration readTimeout,
+        Duration loginTimeout,
         @Min(0)
         int maxRetries,
         @NotNull
         Duration retryDelay,
-        boolean verifySsl
+        boolean verifySsl,
+        Boolean autoLogin,
+        Duration sessionTimeout
 ) {
 
     public XuiProperties {
@@ -37,8 +40,14 @@ public record XuiProperties(
         if (readTimeout == null) {
             readTimeout = Duration.ofSeconds(20);
         }
+        if (loginTimeout == null) {
+            loginTimeout = Duration.ofSeconds(10);
+        }
         if (retryDelay == null) {
             retryDelay = Duration.ofSeconds(1);
+        }
+        if (autoLogin == null) {
+            autoLogin = true;
         }
         if (connectTimeout.isZero() || connectTimeout.isNegative()) {
             throw new IllegalArgumentException("app.xui.connect-timeout must be positive");
@@ -46,11 +55,17 @@ public record XuiProperties(
         if (readTimeout.isZero() || readTimeout.isNegative()) {
             throw new IllegalArgumentException("app.xui.read-timeout must be positive");
         }
+        if (loginTimeout.isZero() || loginTimeout.isNegative()) {
+            throw new IllegalArgumentException("app.xui.login-timeout must be positive");
+        }
         if (retryDelay.isNegative()) {
             throw new IllegalArgumentException("app.xui.retry-delay must be zero or positive");
         }
         if (maxRetries < 0) {
             throw new IllegalArgumentException("app.xui.max-retries must be zero or positive");
+        }
+        if (sessionTimeout != null && (sessionTimeout.isZero() || sessionTimeout.isNegative())) {
+            throw new IllegalArgumentException("app.xui.session-timeout must be positive when configured");
         }
     }
 

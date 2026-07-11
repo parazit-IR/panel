@@ -56,8 +56,11 @@ app:
     password: "${XUI_PASSWORD:}"
     connect-timeout: "${XUI_CONNECT_TIMEOUT:5s}"
     read-timeout: "${XUI_READ_TIMEOUT:20s}"
+    login-timeout: "${XUI_LOGIN_TIMEOUT:10s}"
     max-retries: "${XUI_MAX_RETRIES:3}"
     retry-delay: "${XUI_RETRY_DELAY:1s}"
     verify-ssl: "${XUI_VERIFY_SSL:true}"
+    auto-login: "${XUI_AUTO_LOGIN:true}"
+    session-timeout: "${XUI_SESSION_TIMEOUT:PT30M}"
   plan-selection:
     ttl: "${PLAN_SELECTION_TTL:PT30M}"
