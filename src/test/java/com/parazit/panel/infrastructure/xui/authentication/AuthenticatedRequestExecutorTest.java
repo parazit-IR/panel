@@ -153,7 +153,11 @@ class AuthenticatedRequestExecutorTest extends XuiMockServerSupport {
                 true,
                 autoLogin,
                 Duration.ofMinutes(30),
-                "/panel/api/inbounds/list"
+                "/panel/api/inbounds/list",
+                "/panel/api/inbounds/addClient",
+                "xtls-rprx-vision",
+                16,
+                1
         );
     }
 

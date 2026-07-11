@@ -63,5 +63,10 @@ app:
     auto-login: "${XUI_AUTO_LOGIN:true}"
     session-timeout: "${XUI_SESSION_TIMEOUT:PT30M}"
     inbound-list-path: "${XUI_INBOUND_LIST_PATH:/panel/api/inbounds/list}"
+    client-create-path: "${XUI_CLIENT_CREATE_PATH:/panel/api/inbounds/addClient}"
+    subscription-id-length: "${XUI_SUBSCRIPTION_ID_LENGTH:16}"
+  xui-client-provisioning:
+    default-flow: "${XUI_CLIENT_DEFAULT_FLOW:xtls-rprx-vision}"
+    reconciliation-attempts: "${XUI_CLIENT_RECONCILIATION_ATTEMPTS:1}"
   plan-selection:
     ttl: "${PLAN_SELECTION_TTL:PT30M}"

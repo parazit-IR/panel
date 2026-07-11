@@ -27,7 +27,11 @@ class XuiPropertiesTest {
                         "app.xui.verify-ssl=false",
                         "app.xui.auto-login=false",
                         "app.xui.session-timeout=PT10M",
-                        "app.xui.inbound-list-path=/custom/api/inbounds"
+                        "app.xui.inbound-list-path=/custom/api/inbounds",
+                        "app.xui.client-create-path=/custom/api/addClient",
+                        "app.xui.client-default-flow=",
+                        "app.xui.subscription-id-length=24",
+                        "app.xui.client-reconciliation-attempts=2"
                 )
                 .run(context -> {
                     XuiProperties properties = context.getBean(XuiProperties.class);
@@ -44,6 +48,10 @@ class XuiPropertiesTest {
                     assertThat(properties.autoLogin()).isFalse();
                     assertThat(properties.sessionTimeout()).isEqualTo(Duration.ofMinutes(10));
                     assertThat(properties.inboundListPath()).isEqualTo("/custom/api/inbounds");
+                    assertThat(properties.clientCreatePath()).isEqualTo("/custom/api/addClient");
+                    assertThat(properties.clientDefaultFlow()).isEqualTo("");
+                    assertThat(properties.subscriptionIdLength()).isEqualTo(24);
+                    assertThat(properties.clientReconciliationAttempts()).isEqualTo(2);
                 });
     }
 
@@ -78,6 +86,10 @@ class XuiPropertiesTest {
                     assertThat(properties.autoLogin()).isTrue();
                     assertThat(properties.sessionTimeout()).isNull();
                     assertThat(properties.inboundListPath()).isEqualTo("/panel/api/inbounds/list");
+                    assertThat(properties.clientCreatePath()).isEqualTo("/panel/api/inbounds/addClient");
+                    assertThat(properties.clientDefaultFlow()).isEqualTo("xtls-rprx-vision");
+                    assertThat(properties.subscriptionIdLength()).isEqualTo(16);
+                    assertThat(properties.clientReconciliationAttempts()).isEqualTo(1);
                 });
     }
 

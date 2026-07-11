@@ -142,14 +142,12 @@ Task 22 implements:
 - `refreshSession()`
 - `pingAuthenticated()`
 
-The following methods intentionally throw `UnsupportedOperationException` until later Xui API tasks:
+The broad placeholder methods on `XuiClient` intentionally remain unsupported for mutation workflows. Focused ports are used instead:
 
-- `getInbounds()`
-- `createClient()`
-- `updateClient()`
-- `deleteClient()`
+- Task 23: `XuiInboundClient` for authenticated inbound discovery.
+- Task 24: `XuiClientManagementClient` for authenticated create-client POSTs.
 
-They exist to establish the port shape for later tasks without implementing workflows early.
+Update/delete, subscription generation, and VPN URI creation remain out of scope.
 
 ## Test Foundation
 
@@ -167,14 +165,17 @@ Covered behavior:
 - timeout mapping;
 - SSL-disabled self-signed certificate support;
 - safe exception mapping;
-- unsupported out-of-scope operations.
+- inbound discovery;
+- idempotent create-client provisioning;
+- unsupported out-of-scope update/delete/subscription operations.
 
 ## Deferred Work
 
 Future tasks will add:
 
-- client creation/update/delete payloads;
+- client update/delete payloads;
 - subscription generation;
-- VPN provisioning workflows;
 - business orchestration with orders, payments, or subscriptions;
 - Telegram-facing flows.
+
+See `docs/xui/client-provisioning.md` for Task 24 create-client provisioning details.

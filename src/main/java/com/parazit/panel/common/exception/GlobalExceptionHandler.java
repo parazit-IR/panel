@@ -15,6 +15,10 @@ import com.parazit.panel.application.user.UserNotFoundException;
 import com.parazit.panel.application.xui.inbound.XuiEligibleInboundNotFoundException;
 import com.parazit.panel.application.xui.inbound.XuiInboundAmbiguousException;
 import com.parazit.panel.application.xui.inbound.XuiInboundNotFoundException;
+import com.parazit.panel.application.xui.client.XuiClientProvisionFailedException;
+import com.parazit.panel.application.xui.client.XuiClientProvisionNotAllowedException;
+import com.parazit.panel.application.xui.client.XuiClientProvisionUnknownException;
+import com.parazit.panel.application.xui.client.XuiInboundNotEligibleException;
 import com.parazit.panel.infrastructure.xui.exception.XuiAuthenticationException;
 import com.parazit.panel.infrastructure.xui.exception.XuiClientException;
 import com.parazit.panel.infrastructure.xui.exception.XuiConnectionException;
@@ -214,6 +218,33 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            XuiClientProvisionNotAllowedException.class,
+            XuiInboundNotEligibleException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleXuiProvisionConflict(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(XuiClientProvisionFailedException.class)
+    public ResponseEntity<ApiErrorResponse> handleXuiProvisionFailed(
+            XuiClientProvisionFailedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(XuiClientProvisionUnknownException.class)
+    public ResponseEntity<ApiErrorResponse> handleXuiProvisionUnknown(
+            XuiClientProvisionUnknownException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
     @ExceptionHandler(XuiInvalidResponseException.class)

@@ -1,6 +1,7 @@
 package com.parazit.panel.infrastructure.xui.inbound;
 
 import com.parazit.panel.application.port.out.xui.XuiInboundClient;
+import com.parazit.panel.application.xui.model.XuiClientSnapshot;
 import com.parazit.panel.application.xui.model.XuiInboundSnapshot;
 import com.parazit.panel.infrastructure.xui.authentication.AuthenticatedRequestExecutor;
 import com.parazit.panel.infrastructure.xui.config.XuiProperties;
@@ -68,5 +69,24 @@ public class RestClientXuiInboundClient implements XuiInboundClient {
                 .stream()
                 .filter(inbound -> inbound.id() == inboundId)
                 .findFirst();
+    }
+
+    @Override
+    public Optional<XuiClientSnapshot> findClient(long inboundId, String clientId, String email) {
+        return getInboundById(inboundId)
+                .stream()
+                .flatMap(inbound -> inbound.clients().stream())
+                .filter(client -> matches(client, clientId, email))
+                .findFirst();
+    }
+
+    private static boolean matches(XuiClientSnapshot client, String clientId, String email) {
+        boolean clientIdMatches = clientId != null
+                && client.clientId() != null
+                && client.clientId().equalsIgnoreCase(clientId);
+        boolean emailMatches = email != null
+                && client.email() != null
+                && client.email().equalsIgnoreCase(email);
+        return clientIdMatches || emailMatches;
     }
 }

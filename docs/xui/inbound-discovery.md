@@ -254,6 +254,10 @@ Safe logging includes request starts/completions, inbound count, and selected el
 
 Never log credentials, cookies, session IDs, private keys, full nested settings JSON, client identifiers in bulk, or subscription IDs.
 
+## Task 24 Usage
+
+Task 24 reuses inbound discovery to validate explicit inbound IDs and to select the lowest-ID eligible inbound when no inbound is supplied. It also adds a focused `findClient(inboundId, clientId, email)` lookup for timeout reconciliation after create-client requests.
+
 ## Deferred Work
 
-Task 24 or later may add client creation against an eligible inbound. Later tasks may also add subscription generation, VPN provisioning, order/payment integration, Telegram-facing flows, and production authentication for internal verification endpoints.
+Later tasks may add subscription generation, client update/delete, order/payment integration, Telegram-facing flows, and production authentication for internal verification endpoints.

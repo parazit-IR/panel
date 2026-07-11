@@ -161,7 +161,11 @@ class RestClientXuiClientIntegrationTest extends XuiMockServerSupport {
                     verifySsl,
                     true,
                     Duration.ofMinutes(30),
-                    "/panel/api/inbounds/list"
+                    "/panel/api/inbounds/list",
+                    "/panel/api/inbounds/addClient",
+                    "xtls-rprx-vision",
+                    16,
+                    1
             );
             XuiRestClientConfiguration configuration = new XuiRestClientConfiguration();
             ObjectMapper objectMapper = new ObjectMapper();

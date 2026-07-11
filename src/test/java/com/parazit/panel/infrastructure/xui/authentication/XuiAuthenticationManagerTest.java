@@ -203,7 +203,11 @@ class XuiAuthenticationManagerTest extends XuiMockServerSupport {
                 true,
                 autoLogin,
                 sessionTimeout,
-                "/panel/api/inbounds/list"
+                "/panel/api/inbounds/list",
+                "/panel/api/inbounds/addClient",
+                "xtls-rprx-vision",
+                16,
+                1
         );
     }
 

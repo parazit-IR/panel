@@ -27,7 +27,11 @@ class XuiRestClientConfigurationTest {
                 true,
                 true,
                 Duration.ofMinutes(30),
-                "/panel/api/inbounds/list"
+                "/panel/api/inbounds/list",
+                "/panel/api/inbounds/addClient",
+                "xtls-rprx-vision",
+                16,
+                1
         );
 
         RestClient restClient = configuration.xuiRestClient(properties, new ObjectMapper());
@@ -55,7 +59,11 @@ class XuiRestClientConfigurationTest {
                 false,
                 true,
                 null,
-                "/panel/api/inbounds/list"
+                "/panel/api/inbounds/list",
+                "/panel/api/inbounds/addClient",
+                "xtls-rprx-vision",
+                16,
+                1
         );
 
         RestClient restClient = configuration.xuiRestClient(properties, new ObjectMapper());

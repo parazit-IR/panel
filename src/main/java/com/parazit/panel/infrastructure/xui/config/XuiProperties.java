@@ -27,7 +27,11 @@ public record XuiProperties(
         boolean verifySsl,
         Boolean autoLogin,
         Duration sessionTimeout,
-        String inboundListPath
+        String inboundListPath,
+        String clientCreatePath,
+        String clientDefaultFlow,
+        Integer subscriptionIdLength,
+        Integer clientReconciliationAttempts
 ) {
 
     public XuiProperties {
@@ -54,6 +58,20 @@ public record XuiProperties(
             inboundListPath = "/panel/api/inbounds/list";
         }
         inboundListPath = normalizeRelativePath(inboundListPath);
+        if (clientCreatePath == null || clientCreatePath.isBlank()) {
+            clientCreatePath = "/panel/api/inbounds/addClient";
+        }
+        clientCreatePath = normalizeRelativePath(clientCreatePath);
+        if (clientDefaultFlow == null) {
+            clientDefaultFlow = "xtls-rprx-vision";
+        }
+        clientDefaultFlow = clientDefaultFlow.trim();
+        if (subscriptionIdLength == null) {
+            subscriptionIdLength = 16;
+        }
+        if (clientReconciliationAttempts == null) {
+            clientReconciliationAttempts = 1;
+        }
         if (connectTimeout.isZero() || connectTimeout.isNegative()) {
             throw new IllegalArgumentException("app.xui.connect-timeout must be positive");
         }
@@ -71,6 +89,12 @@ public record XuiProperties(
         }
         if (sessionTimeout != null && (sessionTimeout.isZero() || sessionTimeout.isNegative())) {
             throw new IllegalArgumentException("app.xui.session-timeout must be positive when configured");
+        }
+        if (subscriptionIdLength < 8 || subscriptionIdLength > 64) {
+            throw new IllegalArgumentException("app.xui.subscription-id-length must be between 8 and 64");
+        }
+        if (clientReconciliationAttempts < 0 || clientReconciliationAttempts > 3) {
+            throw new IllegalArgumentException("app.xui.client-reconciliation-attempts must be between 0 and 3");
         }
     }
 

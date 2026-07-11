@@ -183,12 +183,10 @@ Never logged:
 
 Future Xui operations should use `AuthenticatedRequestExecutor` rather than `XuiRequestExecutor` directly when they require a logged-in panel session.
 
-Task 22 intentionally left these methods out of scope. Task 23 adds a focused `XuiInboundClient` for inbound discovery while the broad placeholder methods on `XuiClient` remain out of scope for mutation workflows:
+Task 23 adds a focused `XuiInboundClient` for inbound discovery. Task 24 adds `XuiClientManagementClient` for create-client POSTs. The create-client adapter uses the authenticated executor for session reuse and one automatic re-login, but intentionally uses a one-shot POST path for the remote create call so timeout recovery can reconcile by client ID/email before retrying.
 
-- client creation;
 - client update;
 - client deletion;
 - subscription generation;
-- VPN provisioning;
 - payment or order workflows;
 - Telegram workflows.

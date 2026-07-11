@@ -77,6 +77,22 @@ public class XuiRequestExecutor {
         });
     }
 
+    public <T> ResponseEntity<T> postEntityOnce(String path, Object body, Class<T> responseType) {
+        try {
+            ResponseEntity<T> response = restClient.post()
+                    .uri(path)
+                    .headers(this::applySessionCookie)
+                    .body(body)
+                    .retrieve()
+                    .toEntity(responseType);
+            storeSessionCookies(response.getHeaders());
+            rejectExpiredSession(response);
+            return response;
+        } catch (RuntimeException exception) {
+            throw mapAndClearExpiredSession(exception);
+        }
+    }
+
     private void applySessionCookie(HttpHeaders headers) {
         sessionStore.cookieHeader().ifPresent(value -> headers.set(HttpHeaders.COOKIE, value));
     }

@@ -9,4 +9,10 @@ public interface XuiInboundClient {
     List<XuiInboundSnapshot> getInbounds();
 
     Optional<XuiInboundSnapshot> getInboundById(long inboundId);
+
+    Optional<com.parazit.panel.application.xui.model.XuiClientSnapshot> findClient(
+            long inboundId,
+            String clientId,
+            String email
+    );
 }

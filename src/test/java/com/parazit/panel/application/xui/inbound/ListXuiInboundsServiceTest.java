@@ -70,5 +70,19 @@ class ListXuiInboundsServiceTest {
                     .filter(inbound -> inbound.id() == inboundId)
                     .findFirst();
         }
+
+        @Override
+        public Optional<com.parazit.panel.application.xui.model.XuiClientSnapshot> findClient(
+                long inboundId,
+                String clientId,
+                String email
+        ) {
+            return getInboundById(inboundId)
+                    .stream()
+                    .flatMap(inbound -> inbound.clients().stream())
+                    .filter(client -> clientId != null && clientId.equalsIgnoreCase(client.clientId())
+                            || email != null && email.equalsIgnoreCase(client.email()))
+                    .findFirst();
+        }
     }
 }

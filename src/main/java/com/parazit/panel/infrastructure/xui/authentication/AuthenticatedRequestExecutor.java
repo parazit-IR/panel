@@ -57,6 +57,15 @@ public class AuthenticatedRequestExecutor {
         }
     }
 
+    public <T> ResponseEntity<T> postEntityOnce(String path, Object body, Class<T> responseType) {
+        authenticationManager.ensureAuthenticated();
+        try {
+            return requestExecutor.postEntityOnce(path, body, responseType);
+        } catch (XuiAuthenticationException exception) {
+            return retryAfterRelogin(() -> requestExecutor.postEntityOnce(path, body, responseType));
+        }
+    }
+
     private <T> T retryAfterRelogin(RequestSupplier<T> supplier) {
         if (!Boolean.TRUE.equals(properties.autoLogin())) {
             throw new XuiAuthenticationException("Xui session is not authenticated");
