@@ -146,3 +146,7 @@ sequenceDiagram
         Controller-->>Client: 200 OK
     end
 ```
+
+## Test Guarantees
+
+Phase 2 tests verify profile retrieval and update through application and controller paths, first-name validation, optional last-name normalization, username and Telegram ID immutability, language/status/blocked preservation, auditing, standard error responses, and absence of JPA entity internals.

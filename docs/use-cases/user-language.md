@@ -171,3 +171,7 @@ sequenceDiagram
     UseCase-->>Controller: UserLanguageResult
     Controller-->>Client: 200 OK
 ```
+
+## Test Guarantees
+
+Phase 2 tests verify default registration language behavior, supported FA and EN variants, unsupported explicit language rejection, same-language idempotency, profile/status/blocked preservation, controller validation errors, and stable trace IDs in error responses.

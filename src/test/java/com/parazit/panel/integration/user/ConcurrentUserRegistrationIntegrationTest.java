@@ -1,5 +1,8 @@
 package com.parazit.panel.integration.user;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+import com.parazit.panel.test.support.DatabaseCleaner;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.parazit.panel.application.port.in.user.RegisterUserUseCase;
@@ -22,29 +25,18 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {
         "spring.profiles.active=local",
         "spring.security.user.name=test",
         "spring.security.user.password=test"
 })
-@Testcontainers
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class ConcurrentUserRegistrationIntegrationTest {
+class ConcurrentUserRegistrationIntegrationTest extends PostgreSqlContainerSupport {
 
     private static final Instant NOW = Instant.parse("2026-07-10T12:00:00Z");
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_concurrent_register_user_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final RegisterUserUseCase registerUserUseCase;
     private final JdbcTemplate jdbcTemplate;
@@ -57,19 +49,10 @@ class ConcurrentUserRegistrationIntegrationTest {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.update("DELETE FROM user_settings");
-        jdbcTemplate.update("DELETE FROM users");
+        DatabaseCleaner.cleanUserModuleTables(jdbcTemplate);
     }
 
     @Test
@@ -90,6 +73,7 @@ class ConcurrentUserRegistrationIntegrationTest {
                     .containsExactlyInAnyOrder(true, false);
             assertThat(rowCount()).isEqualTo(1);
             assertThat(settingsRowCount()).isEqualTo(1);
+            assertThat(referralCodes()).hasSize(1).first().asString().isNotBlank();
         } finally {
             executorService.shutdownNow();
             assertThat(executorService.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
@@ -112,6 +96,14 @@ class ConcurrentUserRegistrationIntegrationTest {
     private long settingsRowCount() {
         Long count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM user_settings", Long.class);
         return count == null ? 0 : count;
+    }
+
+    private List<String> referralCodes() {
+        return jdbcTemplate.queryForList(
+                "SELECT referral_code FROM users WHERE telegram_user_id = ?",
+                String.class,
+                3001L
+        );
     }
 
     @TestConfiguration

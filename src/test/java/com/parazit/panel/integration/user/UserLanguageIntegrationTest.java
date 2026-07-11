@@ -1,5 +1,8 @@
 package com.parazit.panel.integration.user;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+import com.parazit.panel.test.support.DatabaseCleaner;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -28,31 +31,20 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {
         "spring.profiles.active=local",
         "spring.security.user.name=test",
         "spring.security.user.password=test"
 })
-@Testcontainers
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class UserLanguageIntegrationTest {
+class UserLanguageIntegrationTest extends PostgreSqlContainerSupport {
 
     private static final Instant REGISTERED_AT = Instant.parse("2026-07-10T12:00:00Z");
     private static final Instant STATE_UPDATED_AT = Instant.parse("2026-07-10T12:05:00Z");
     private static final Instant LANGUAGE_UPDATED_AT = Instant.parse("2026-07-10T12:15:00Z");
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_user_language_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final RegisterUserUseCase registerUserUseCase;
     private final GetUserLanguageUseCase getUserLanguageUseCase;
@@ -80,18 +72,10 @@ class UserLanguageIntegrationTest {
         this.clock = (MutableClock) clock;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.update("DELETE FROM users");
+        DatabaseCleaner.cleanUserModuleTables(jdbcTemplate);
         clock.setInstant(REGISTERED_AT);
     }
 

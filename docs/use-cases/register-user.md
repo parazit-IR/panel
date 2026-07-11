@@ -215,3 +215,7 @@ sequenceDiagram
         Controller-->>Client: 200 OK
     end
 ```
+
+## Test Guarantees
+
+Phase 2 tests verify new registration, repeated registration, profile refresh, language/status/blocked preservation, default settings creation, referral-code creation and stability, existing-user backfill, auditing, and concurrent registration recovery with one user row and one settings row.

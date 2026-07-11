@@ -1,5 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.referral;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -24,29 +26,18 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @DataJpaTest
-@Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @EntityScan(basePackageClasses = {User.class, Referral.class})
 @EnableJpaRepositories(basePackageClasses = {SpringDataUserRepository.class, SpringDataReferralRepository.class})
 @Import({JpaAuditingConfiguration.class, UserRepositoryAdapter.class, ReferralRepositoryAdapter.class})
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class ReferralRepositoryIntegrationTest {
+class ReferralRepositoryIntegrationTest extends PostgreSqlContainerSupport {
 
     private static final Instant NOW = Instant.parse("2026-07-10T12:00:00Z");
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_referral_repository_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final UserRepository userRepository;
     private final ReferralRepository referralRepository;
@@ -65,14 +56,6 @@ class ReferralRepositoryIntegrationTest {
         this.flyway = flyway;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @Test
     void savesReferralAndFindsByRepositoryMethods() {

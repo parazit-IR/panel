@@ -1,5 +1,8 @@
 package com.parazit.panel.api.internal.user;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+import com.parazit.panel.test.support.DatabaseCleaner;
+
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -17,13 +20,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {
         "spring.profiles.active=local",
@@ -31,16 +29,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "spring.security.user.password=test"
 })
 @AutoConfigureMockMvc
-@Testcontainers
 @Import(FixedClockTestConfiguration.class)
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class UserLanguageControllerTest {
+class UserLanguageControllerTest extends PostgreSqlContainerSupport {
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_user_language_controller_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final MockMvc mockMvc;
     private final JdbcTemplate jdbcTemplate;
@@ -50,18 +42,10 @@ class UserLanguageControllerTest {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.update("DELETE FROM users");
+        DatabaseCleaner.cleanUserModuleTables(jdbcTemplate);
     }
 
     @Test

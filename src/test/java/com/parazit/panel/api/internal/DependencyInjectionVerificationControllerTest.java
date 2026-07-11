@@ -1,5 +1,7 @@
 package com.parazit.panel.api.internal;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -14,14 +16,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {
         "spring.profiles.active=local",
@@ -29,16 +26,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
         "spring.security.user.password=test"
 })
 @AutoConfigureMockMvc
-@Testcontainers
 @Import(FixedClockTestConfiguration.class)
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class DependencyInjectionVerificationControllerTest {
+class DependencyInjectionVerificationControllerTest extends PostgreSqlContainerSupport {
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_di_web_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final MockMvc mockMvc;
 
@@ -46,14 +37,6 @@ class DependencyInjectionVerificationControllerTest {
         this.mockMvc = mockMvc;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @Test
     void returnsCurrentTimeFromFixedClock() throws Exception {

@@ -225,3 +225,7 @@ sequenceDiagram
     SettingsCreation-->>SettingsDefaults: UserSettings
     RegisterUseCase-->>Client: RegisterUserResult
 ```
+
+## Test Guarantees
+
+Phase 2 tests verify default settings on registration, lazy defaults for older users, one settings row per user, GET and PUT behavior, threshold boundaries, invalid threshold rejection, user profile/language/status/blocked preservation, auditing, and concurrent default creation without duplicates.

@@ -1,5 +1,8 @@
 package com.parazit.panel.integration.referral;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+import com.parazit.panel.test.support.DatabaseCleaner;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.parazit.panel.application.port.in.referral.AssignReferralUseCase;
@@ -18,27 +21,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {
         "spring.profiles.active=local",
         "spring.security.user.name=test",
         "spring.security.user.password=test"
 })
-@Testcontainers
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class ConcurrentReferralAssignmentIntegrationTest {
+class ConcurrentReferralAssignmentIntegrationTest extends PostgreSqlContainerSupport {
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_concurrent_referral_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final RegisterUserUseCase registerUserUseCase;
     private final AssignReferralUseCase assignReferralUseCase;
@@ -54,20 +46,10 @@ class ConcurrentReferralAssignmentIntegrationTest {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @BeforeEach
     void setUp() {
-        jdbcTemplate.update("DELETE FROM referrals");
-        jdbcTemplate.update("DELETE FROM user_settings");
-        jdbcTemplate.update("DELETE FROM users");
+        DatabaseCleaner.cleanUserModuleTables(jdbcTemplate);
     }
 
     @Test

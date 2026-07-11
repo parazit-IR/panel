@@ -1,5 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.user;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -8,8 +10,11 @@ import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserLanguage;
 import com.parazit.panel.domain.user.UserStatus;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.test.support.MutableClockTestConfiguration;
+import com.parazit.panel.test.support.MutableTestClock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
@@ -21,52 +26,36 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @DataJpaTest
-@Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @EntityScan(basePackageClasses = User.class)
 @EnableJpaRepositories(basePackageClasses = SpringDataUserRepository.class)
-@Import({JpaAuditingConfiguration.class, UserRepositoryAdapter.class})
+@Import({JpaAuditingConfiguration.class, UserRepositoryAdapter.class, MutableClockTestConfiguration.class})
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class UserRepositoryAdapterIntegrationTest {
+class UserRepositoryAdapterIntegrationTest extends PostgreSqlContainerSupport {
 
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_user_repository_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final UserRepository repository;
     private final EntityManager entityManager;
     private final Flyway flyway;
+    private final MutableTestClock clock;
 
     UserRepositoryAdapterIntegrationTest(
             UserRepository repository,
             EntityManager entityManager,
-            Flyway flyway
+            Flyway flyway,
+            Clock clock
     ) {
         this.repository = repository;
         this.entityManager = entityManager;
         this.flyway = flyway;
+        this.clock = (MutableTestClock) clock;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @Test
     void persistsUserAndFindsByTelegramUserId() {
@@ -94,7 +83,8 @@ class UserRepositoryAdapterIntegrationTest {
     }
 
     @Test
-    void updatesProfileLanguageStatusBlockedAndAuditTimestamp() throws InterruptedException {
+    void updatesProfileLanguageStatusBlockedAndAuditTimestamp() {
+        clock.setInstant(MutableClockTestConfiguration.DEFAULT_INSTANT);
         User saved = repository.save(createUser(1002L));
         entityManager.flush();
         entityManager.clear();
@@ -104,7 +94,7 @@ class UserRepositoryAdapterIntegrationTest {
         Instant updatedAt = persisted.getUpdatedAt();
         Instant interactionTime = NOW.plusSeconds(120);
 
-        Thread.sleep(10);
+        clock.setInstant(MutableClockTestConfiguration.DEFAULT_INSTANT.plusSeconds(60));
         persisted.updateTelegramProfile("@updated_user", " Sara ", "   ", interactionTime);
         persisted.changeLanguage(UserLanguage.EN);
         persisted.suspend();

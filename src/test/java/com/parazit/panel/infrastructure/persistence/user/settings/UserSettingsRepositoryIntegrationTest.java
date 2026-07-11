@@ -1,5 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.user.settings;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -8,8 +10,11 @@ import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserLanguage;
 import com.parazit.panel.domain.user.settings.UserSettings;
 import com.parazit.panel.domain.user.settings.repository.UserSettingsRepository;
+import com.parazit.panel.test.support.MutableClockTestConfiguration;
+import com.parazit.panel.test.support.MutableTestClock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.UUID;
@@ -22,56 +27,40 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @DataJpaTest
-@Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @EntityScan(basePackageClasses = {User.class, UserSettings.class})
 @EnableJpaRepositories(basePackageClasses = SpringDataUserSettingsRepository.class)
-@Import({JpaAuditingConfiguration.class, UserSettingsRepositoryAdapter.class})
+@Import({JpaAuditingConfiguration.class, UserSettingsRepositoryAdapter.class, MutableClockTestConfiguration.class})
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class UserSettingsRepositoryIntegrationTest {
+class UserSettingsRepositoryIntegrationTest extends PostgreSqlContainerSupport {
 
     private static final Instant NOW = Instant.parse("2026-07-10T12:00:00Z");
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_user_settings_repository_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
     private final UserSettingsRepository settingsRepository;
     private final EntityManager entityManager;
     private final JdbcTemplate jdbcTemplate;
     private final Flyway flyway;
+    private final MutableTestClock clock;
 
     UserSettingsRepositoryIntegrationTest(
             UserSettingsRepository settingsRepository,
             EntityManager entityManager,
             JdbcTemplate jdbcTemplate,
-            Flyway flyway
+            Flyway flyway,
+            Clock clock
     ) {
         this.settingsRepository = settingsRepository;
         this.entityManager = entityManager;
         this.jdbcTemplate = jdbcTemplate;
         this.flyway = flyway;
+        this.clock = (MutableTestClock) clock;
     }
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     @Test
     void savesSettingsAndFindsByUserId() {
@@ -116,11 +105,12 @@ class UserSettingsRepositoryIntegrationTest {
     }
 
     @Test
-    void persistsBooleanAndThresholdUpdates() throws InterruptedException {
+    void persistsBooleanAndThresholdUpdates() {
+        clock.setInstant(MutableClockTestConfiguration.DEFAULT_INSTANT);
         User user = persistUser(1004L);
         UserSettings saved = settingsRepository.save(UserSettings.createDefault(user.getId()));
 
-        Thread.sleep(10);
+        clock.setInstant(MutableClockTestConfiguration.DEFAULT_INSTANT.plusSeconds(60));
         saved.updatePreferences(false, false, false, 35);
         settingsRepository.save(saved);
         entityManager.flush();

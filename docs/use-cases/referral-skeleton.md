@@ -205,3 +205,7 @@ Telegram deep-link parsing can call the assignment use case in a later task.
 Reward calculation, fraud checks, payout state, wallet balances, campaigns, and
 multi-level referral logic belong in future modules and are deliberately absent
 from this skeleton.
+
+## Test Guarantees
+
+Phase 2 tests verify stable referral-code creation, lazy backfill, case-insensitive assignment input, first assignment, idempotent repeat assignment, conflicting referrer rejection, self-referral rejection, unknown-code rejection, referral counts, one referral row per referred user, concurrency recovery, and preservation of user language/settings. No reward, wallet, commission, Telegram, payment, or future-phase behavior is introduced.

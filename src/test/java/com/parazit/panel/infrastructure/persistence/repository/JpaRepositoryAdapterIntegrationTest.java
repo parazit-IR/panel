@@ -1,5 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.repository;
 
+import com.parazit.panel.test.support.PostgreSqlContainerSupport;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
@@ -8,7 +10,10 @@ import com.parazit.panel.common.persistence.fixture.TestPersistenceRepository;
 import com.parazit.panel.config.persistence.JpaAuditingConfiguration;
 import com.parazit.panel.infrastructure.persistence.repository.fixture.TestPersistenceRepositoryAdapter;
 import com.parazit.panel.infrastructure.persistence.repository.fixture.TestPersistenceSpringDataRepository;
+import com.parazit.panel.test.support.MutableClockTestConfiguration;
+import com.parazit.panel.test.support.MutableTestClock;
 import jakarta.persistence.EntityManager;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,51 +26,35 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestConstructor;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 @DataJpaTest
-@Testcontainers
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @EntityScan(basePackageClasses = TestPersistenceEntity.class)
 @EnableJpaRepositories(basePackageClasses = TestPersistenceSpringDataRepository.class)
-@Import({JpaAuditingConfiguration.class, TestPersistenceRepositoryAdapter.class})
+@Import({JpaAuditingConfiguration.class, TestPersistenceRepositoryAdapter.class, MutableClockTestConfiguration.class})
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
-class JpaRepositoryAdapterIntegrationTest {
+class JpaRepositoryAdapterIntegrationTest extends PostgreSqlContainerSupport {
 
-    @Container
-    static final PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine")
-            .withDatabaseName("panel_repository_test")
-            .withUsername("panel")
-            .withPassword("panel");
 
-    @DynamicPropertySource
-    static void registerDatasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", postgres::getJdbcUrl);
-        registry.add("spring.datasource.username", postgres::getUsername);
-        registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.jpa.hibernate.ddl-auto", () -> "validate");
-        registry.add("spring.flyway.enabled", () -> "true");
-    }
 
     private final TestPersistenceRepository repository;
 
     private final EntityManager entityManager;
 
     private final Flyway flyway;
+    private final MutableTestClock clock;
 
     JpaRepositoryAdapterIntegrationTest(
             TestPersistenceRepository repository,
             EntityManager entityManager,
-            Flyway flyway
+            Flyway flyway,
+            Clock clock
     ) {
         this.repository = repository;
         this.entityManager = entityManager;
         this.flyway = flyway;
+        this.clock = (MutableTestClock) clock;
     }
 
     @Test
@@ -101,7 +90,8 @@ class JpaRepositoryAdapterIntegrationTest {
     }
 
     @Test
-    void preservesUuidGenerationAndAuditingThroughAdapter() throws InterruptedException {
+    void preservesUuidGenerationAndAuditingThroughAdapter() {
+        clock.setInstant(MutableClockTestConfiguration.DEFAULT_INSTANT);
         TestPersistenceEntity saved = repository.save(new TestPersistenceEntity("audit"));
         UUID id = saved.getId();
 
@@ -115,7 +105,7 @@ class JpaRepositoryAdapterIntegrationTest {
         assertThat(createdAt).isNotNull();
         assertThat(updatedAt).isNotNull();
 
-        Thread.sleep(10);
+        clock.setInstant(MutableClockTestConfiguration.DEFAULT_INSTANT.plusSeconds(60));
         persisted.setName("audit-updated");
         repository.save(persisted);
         entityManager.flush();
