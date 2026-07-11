@@ -81,6 +81,43 @@ class ArchitectureRulesTest {
         assertThat(violations).isEmpty();
     }
 
+    @Test
+    void planDomainStaysIndependentFromDeferredModules() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/domain/plan")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.api.")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("com.parazit.panel.domain.user.")
+                            || source.contains("com.parazit.panel.payment")
+                            || source.contains("com.parazit.panel.subscription")
+                            || source.contains("com.parazit.panel.telegram")
+                            || source.contains("com.parazit.panel.panel");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void planTaskDoesNotAddApiSurfaceOrEntityRelationships() throws IOException {
+        List<Path> apiViolations = javaFiles("com/parazit/panel/api")
+                .filter(path -> source(path).contains("domain.plan"))
+                .toList();
+        List<Path> relationshipViolations = javaFiles("com/parazit/panel/domain/plan")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("@OneToOne")
+                            || source.contains("@OneToMany")
+                            || source.contains("@ManyToOne")
+                            || source.contains("@ManyToMany");
+                })
+                .toList();
+
+        assertThat(apiViolations).isEmpty();
+        assertThat(relationshipViolations).isEmpty();
+    }
+
     private static Stream<Path> javaFiles(String packagePath) throws IOException {
         Path root = packagePath.isBlank() ? MAIN_JAVA : MAIN_JAVA.resolve(packagePath);
         return Files.walk(root)
