@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Task 22 implements authentication and memory-only session management for the Xui HTTP client foundation. It does not implement inbound listing, client creation, client updates, client deletion, subscriptions, payments, Telegram flows, or VPN provisioning.
+Task 22 implements authentication and memory-only session management for the Xui HTTP client foundation. Task 23 uses this authenticated request flow for inbound discovery. It does not implement client creation, client updates, client deletion, subscriptions, payments, Telegram flows, or VPN provisioning.
 
 ## Login Flow
 
@@ -183,9 +183,8 @@ Never logged:
 
 Future Xui operations should use `AuthenticatedRequestExecutor` rather than `XuiRequestExecutor` directly when they require a logged-in panel session.
 
-Task 22 intentionally leaves these methods out of scope:
+Task 22 intentionally left these methods out of scope. Task 23 adds a focused `XuiInboundClient` for inbound discovery while the broad placeholder methods on `XuiClient` remain out of scope for mutation workflows:
 
-- inbound listing;
 - client creation;
 - client update;
 - client deletion;

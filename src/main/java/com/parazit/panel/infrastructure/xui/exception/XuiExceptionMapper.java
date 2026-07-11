@@ -5,7 +5,9 @@ import java.net.NoRouteToHostException;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.converter.HttpMessageConversionException;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 public class XuiExceptionMapper {
@@ -26,6 +28,9 @@ public class XuiExceptionMapper {
                 return new XuiConnectionException("Xui server is unreachable", exception);
             }
             return new XuiConnectionException("Xui request failed before a response was received", exception);
+        }
+        if (isInvalidResponse(exception)) {
+            return new XuiInvalidResponseException("Xui response could not be parsed", exception);
         }
         Throwable rootCause = rootCause(exception);
         if (isTimeout(rootCause)) {
@@ -68,5 +73,14 @@ public class XuiExceptionMapper {
         return throwable instanceof ConnectException
                 || throwable instanceof NoRouteToHostException
                 || throwable instanceof UnknownHostException;
+    }
+
+    private static boolean isInvalidResponse(RuntimeException exception) {
+        Throwable rootCause = rootCause(exception);
+        return exception instanceof HttpMessageConversionException
+                || exception instanceof RestClientException
+                && (rootCause.getClass().getName().contains("jackson")
+                || rootCause.getClass().getSimpleName().contains("Json")
+                || rootCause.getClass().getSimpleName().contains("MessageConversion"));
     }
 }

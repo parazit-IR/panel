@@ -26,7 +26,8 @@ class XuiRestClientConfigurationTest {
                 Duration.ZERO,
                 true,
                 true,
-                Duration.ofMinutes(30)
+                Duration.ofMinutes(30),
+                "/panel/api/inbounds/list"
         );
 
         RestClient restClient = configuration.xuiRestClient(properties, new ObjectMapper());
@@ -53,7 +54,8 @@ class XuiRestClientConfigurationTest {
                 Duration.ZERO,
                 false,
                 true,
-                null
+                null,
+                "/panel/api/inbounds/list"
         );
 
         RestClient restClient = configuration.xuiRestClient(properties, new ObjectMapper());

@@ -12,6 +12,15 @@ import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
 import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
 import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
 import com.parazit.panel.application.user.UserNotFoundException;
+import com.parazit.panel.application.xui.inbound.XuiEligibleInboundNotFoundException;
+import com.parazit.panel.application.xui.inbound.XuiInboundAmbiguousException;
+import com.parazit.panel.application.xui.inbound.XuiInboundNotFoundException;
+import com.parazit.panel.infrastructure.xui.exception.XuiAuthenticationException;
+import com.parazit.panel.infrastructure.xui.exception.XuiClientException;
+import com.parazit.panel.infrastructure.xui.exception.XuiConnectionException;
+import com.parazit.panel.infrastructure.xui.exception.XuiInvalidResponseException;
+import com.parazit.panel.infrastructure.xui.exception.XuiServerException;
+import com.parazit.panel.infrastructure.xui.exception.XuiTimeoutException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.time.OffsetDateTime;
@@ -173,6 +182,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
     }
 
+    @ExceptionHandler({
+            XuiInboundNotFoundException.class,
+            XuiEligibleInboundNotFoundException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        log.debug("Xui inbound resource not found: {}", exception.getMessage());
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
     @ExceptionHandler(UserNotEligibleForPlanSelectionException.class)
     public ResponseEntity<ApiErrorResponse> handleUserNotEligibleForPlanSelection(
             UserNotEligibleForPlanSelectionException exception,
@@ -185,13 +206,54 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             PlanCodeAlreadyExistsException.class,
             PlanModificationNotAllowedException.class,
             InvalidPlanStateTransitionException.class,
-            PlanSelectionConflictException.class
+            PlanSelectionConflictException.class,
+            XuiInboundAmbiguousException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(XuiInvalidResponseException.class)
+    public ResponseEntity<ApiErrorResponse> handleXuiInvalidResponse(
+            XuiInvalidResponseException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Xui invalid response: {}", exception.getMessage());
+        return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            XuiServerException.class,
+            XuiAuthenticationException.class,
+            XuiClientException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleXuiRemoteFailure(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Xui remote failure: {}", exception.getMessage());
+        return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(XuiConnectionException.class)
+    public ResponseEntity<ApiErrorResponse> handleXuiConnection(
+            XuiConnectionException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Xui connection failure: {}", exception.getMessage());
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(XuiTimeoutException.class)
+    public ResponseEntity<ApiErrorResponse> handleXuiTimeout(
+            XuiTimeoutException exception,
+            HttpServletRequest request
+    ) {
+        log.warn("Xui timeout: {}", exception.getMessage());
+        return buildResponse(HttpStatus.GATEWAY_TIMEOUT, exception.getMessage(), request);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Task 21 adds the infrastructure foundation for outbound Xui HTTP communication. It does not implement authentication, inbound retrieval, client creation, subscriptions, VPN provisioning, payments, orders, or Telegram workflows.
+Task 21 adds the infrastructure foundation for outbound Xui HTTP communication. Later tasks add authentication and inbound discovery. It does not implement client creation, subscriptions, VPN provisioning, payments, orders, or Telegram workflows.
 
 ## Layers
 
@@ -173,7 +173,6 @@ Covered behavior:
 
 Future tasks will add:
 
-- inbound retrieval;
 - client creation/update/delete payloads;
 - subscription generation;
 - VPN provisioning workflows;

@@ -26,7 +26,8 @@ public record XuiProperties(
         Duration retryDelay,
         boolean verifySsl,
         Boolean autoLogin,
-        Duration sessionTimeout
+        Duration sessionTimeout,
+        String inboundListPath
 ) {
 
     public XuiProperties {
@@ -49,6 +50,10 @@ public record XuiProperties(
         if (autoLogin == null) {
             autoLogin = true;
         }
+        if (inboundListPath == null || inboundListPath.isBlank()) {
+            inboundListPath = "/panel/api/inbounds/list";
+        }
+        inboundListPath = normalizeRelativePath(inboundListPath);
         if (connectTimeout.isZero() || connectTimeout.isNegative()) {
             throw new IllegalArgumentException("app.xui.connect-timeout must be positive");
         }
@@ -79,5 +84,17 @@ public record XuiProperties(
             return normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
+    }
+
+    private static String normalizeRelativePath(String value) {
+        String trimmed = value.trim();
+        URI uri = URI.create(trimmed);
+        if (uri.isAbsolute()) {
+            throw new IllegalArgumentException("app.xui.inbound-list-path must be relative to app.xui.base-url");
+        }
+        if (!trimmed.startsWith("/")) {
+            throw new IllegalArgumentException("app.xui.inbound-list-path must start with /");
+        }
+        return trimmed;
     }
 }

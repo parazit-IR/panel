@@ -202,7 +202,8 @@ class XuiAuthenticationManagerTest extends XuiMockServerSupport {
                 Duration.ZERO,
                 true,
                 autoLogin,
-                sessionTimeout
+                sessionTimeout,
+                "/panel/api/inbounds/list"
         );
     }
 

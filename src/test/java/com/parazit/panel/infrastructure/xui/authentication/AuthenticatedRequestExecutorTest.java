@@ -152,7 +152,8 @@ class AuthenticatedRequestExecutorTest extends XuiMockServerSupport {
                 Duration.ZERO,
                 true,
                 autoLogin,
-                Duration.ofMinutes(30)
+                Duration.ofMinutes(30),
+                "/panel/api/inbounds/list"
         );
     }
 

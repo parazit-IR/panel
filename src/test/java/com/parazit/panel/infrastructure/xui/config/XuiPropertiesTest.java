@@ -26,7 +26,8 @@ class XuiPropertiesTest {
                         "app.xui.retry-delay=250ms",
                         "app.xui.verify-ssl=false",
                         "app.xui.auto-login=false",
-                        "app.xui.session-timeout=PT10M"
+                        "app.xui.session-timeout=PT10M",
+                        "app.xui.inbound-list-path=/custom/api/inbounds"
                 )
                 .run(context -> {
                     XuiProperties properties = context.getBean(XuiProperties.class);
@@ -42,6 +43,7 @@ class XuiPropertiesTest {
                     assertThat(properties.verifySsl()).isFalse();
                     assertThat(properties.autoLogin()).isFalse();
                     assertThat(properties.sessionTimeout()).isEqualTo(Duration.ofMinutes(10));
+                    assertThat(properties.inboundListPath()).isEqualTo("/custom/api/inbounds");
                 });
     }
 
@@ -75,7 +77,18 @@ class XuiPropertiesTest {
                     assertThat(properties.retryDelay()).isEqualTo(Duration.ofSeconds(1));
                     assertThat(properties.autoLogin()).isTrue();
                     assertThat(properties.sessionTimeout()).isNull();
+                    assertThat(properties.inboundListPath()).isEqualTo("/panel/api/inbounds/list");
                 });
+    }
+
+    @Test
+    void rejectsAbsoluteInboundListPath() {
+        contextRunner
+                .withPropertyValues(
+                        "app.xui.base-url=http://localhost:2053",
+                        "app.xui.inbound-list-path=http://localhost/panel/api/inbounds/list"
+                )
+                .run(context -> assertThat(context).hasFailed());
     }
 
     @EnableConfigurationProperties(XuiProperties.class)

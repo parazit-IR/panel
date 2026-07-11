@@ -229,6 +229,34 @@ class ArchitectureRulesTest {
         assertThat(apiViolations).isEmpty();
     }
 
+    @Test
+    void xuiInboundDiscoveryKeepsRemoteDetailsInInfrastructure() throws IOException {
+        List<Path> applicationViolations = javaFiles("com/parazit/panel/application")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.fasterxml.jackson")
+                            || source.contains("org.springframework.web.client")
+                            || source.contains("infrastructure.xui.dto")
+                            || source.contains("JsonNode")
+                            || source.contains("RestClient");
+                })
+                .toList();
+        List<Path> apiViolations = javaFiles("com/parazit/panel/api/internal/xui")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("com.parazit.panel.application.port.out.xui")
+                            || source.contains("RestClient")
+                            || source.contains("settings")
+                            || source.contains("streamSettings")
+                            || source.contains("privateKey");
+                })
+                .toList();
+
+        assertThat(applicationViolations).isEmpty();
+        assertThat(apiViolations).isEmpty();
+    }
+
     private static Stream<Path> javaFiles(String packagePath) throws IOException {
         Path root = packagePath.isBlank() ? MAIN_JAVA : MAIN_JAVA.resolve(packagePath);
         return Files.walk(root)

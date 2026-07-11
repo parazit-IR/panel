@@ -160,7 +160,8 @@ class RestClientXuiClientIntegrationTest extends XuiMockServerSupport {
                     Duration.ZERO,
                     verifySsl,
                     true,
-                    Duration.ofMinutes(30)
+                    Duration.ofMinutes(30),
+                    "/panel/api/inbounds/list"
             );
             XuiRestClientConfiguration configuration = new XuiRestClientConfiguration();
             ObjectMapper objectMapper = new ObjectMapper();

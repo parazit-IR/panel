@@ -108,6 +108,7 @@ app:
     verify-ssl: "${XUI_VERIFY_SSL:true}"
     auto-login: "${XUI_AUTO_LOGIN:true}"
     session-timeout: "${XUI_SESSION_TIMEOUT:PT30M}"
+    inbound-list-path: "${XUI_INBOUND_LIST_PATH:/panel/api/inbounds/list}"
   referral:
     enabled: "${REFERRAL_ENABLED:true}"
     code-length: "${REFERRAL_CODE_LENGTH:10}"
