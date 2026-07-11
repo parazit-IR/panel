@@ -112,6 +112,24 @@ class PlanSelectionRepositoryIntegrationTest extends PostgreSqlContainerSupport 
     }
 
     @Test
+    void allowsMultipleExpiredHistoricalRowsForOneUser() {
+        UUID userId = insertUser(1007L);
+        Plan plan = activePlan(insertPlan("EXPIRED_HISTORY_PLAN", PlanType.UNLIMITED, null));
+        PlanSelection first = PlanSelection.create(userId, plan, NOW, TTL);
+        first.expire(NOW.plus(TTL));
+        repository.save(first);
+        PlanSelection second = PlanSelection.create(userId, plan, NOW.plusSeconds(10), TTL);
+        second.expire(NOW.plusSeconds(10).plus(TTL));
+        repository.save(second);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(repository.findAllByUserIdOrderBySelectedAtDesc(userId))
+                .extracting(PlanSelection::getStatus)
+                .containsExactly(PlanSelectionStatus.EXPIRED, PlanSelectionStatus.EXPIRED);
+    }
+
+    @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void enforcesOneActiveSelectionPerUserButAllowsTerminalHistory() {
         UUID userId = insertUser(1003L);
@@ -146,6 +164,16 @@ class PlanSelectionRepositoryIntegrationTest extends PostgreSqlContainerSupport 
         assertThatThrownBy(() -> insertInvalidSelection(userId, plan.getId(), "UNLIMITED", "NULL", "BAD", NOW.plus(TTL)))
                 .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
         assertThatThrownBy(() -> insertInvalidSelection(userId, plan.getId(), "UNLIMITED", "NULL", "ACTIVE", NOW))
+                .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
+        assertThatThrownBy(() -> insertInvalidSelectionWithValues(userId, plan.getId(), "UNLIMITED", "NULL", "ACTIVE", NOW.plus(TTL), "-1", "30", "NULL", "BAD_SELECTION", "Bad Selection"))
+                .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
+        assertThatThrownBy(() -> insertInvalidSelectionWithValues(userId, plan.getId(), "UNLIMITED", "NULL", "ACTIVE", NOW.plus(TTL), "500000", "0", "NULL", "BAD_SELECTION", "Bad Selection"))
+                .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
+        assertThatThrownBy(() -> insertInvalidSelectionWithValues(userId, plan.getId(), "UNLIMITED", "NULL", "ACTIVE", NOW.plus(TTL), "500000", "30", "0", "BAD_SELECTION", "Bad Selection"))
+                .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
+        assertThatThrownBy(() -> insertInvalidSelectionWithValues(userId, plan.getId(), "UNLIMITED", "NULL", "ACTIVE", NOW.plus(TTL), "500000", "30", "NULL", null, "Bad Selection"))
+                .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
+        assertThatThrownBy(() -> insertInvalidSelectionWithValues(userId, plan.getId(), "UNLIMITED", "NULL", "ACTIVE", NOW.plus(TTL), "500000", "30", "NULL", "BAD_SELECTION", null))
                 .isInstanceOfAny(DataIntegrityViolationException.class, PersistenceException.class);
     }
 
@@ -223,6 +251,34 @@ class PlanSelectionRepositoryIntegrationTest extends PostgreSqlContainerSupport 
             String status,
             Instant expiresAt
     ) {
+        insertInvalidSelectionWithValues(
+                userId,
+                planId,
+                type,
+                trafficLimitBytes,
+                status,
+                expiresAt,
+                "500000",
+                "30",
+                "NULL",
+                "BAD_SELECTION",
+                "Bad Selection"
+        );
+    }
+
+    private void insertInvalidSelectionWithValues(
+            UUID userId,
+            UUID planId,
+            String type,
+            String trafficLimitBytes,
+            String status,
+            Instant expiresAt,
+            String priceAmount,
+            String durationDays,
+            String maxDevices,
+            String code,
+            String name
+    ) {
         jdbcTemplate.update("""
                 INSERT INTO plan_selections (
                     id, user_id, plan_id, plan_code_snapshot, plan_name_snapshot, plan_type_snapshot,
@@ -231,12 +287,14 @@ class PlanSelectionRepositoryIntegrationTest extends PostgreSqlContainerSupport 
                     created_at, updated_at
                 )
                 VALUES (
-                    gen_random_uuid(), ?, ?, 'BAD_SELECTION', 'Bad Selection', ?,
-                    500000, 'IRT', 30, %s, NULL, ?, ?, ?, ?, ?
+                    gen_random_uuid(), ?, ?, ?, ?, ?,
+                    %s, 'IRT', %s, %s, %s, ?, ?, ?, ?, ?
                 )
-                """.formatted(trafficLimitBytes),
+                """.formatted(priceAmount, durationDays, trafficLimitBytes, maxDevices),
                 userId,
                 planId,
+                code,
+                name,
                 type,
                 status,
                 timestamp(NOW),

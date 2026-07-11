@@ -130,6 +130,44 @@ class ConcurrentPlanSelectionIntegrationTest extends PostgreSqlContainerSupport 
         }
     }
 
+    @Test
+    void concurrentReplacementOfExistingSelectionLeavesExactlyOneActiveSelectionAndValidHistory() throws Exception {
+        User user = activeUser(9003L);
+        Plan originalPlan = activePlan(PlanTestData.unlimitedPlan("CONCURRENT_ORIGINAL", 1));
+        Plan firstReplacement = activePlan(PlanTestData.unlimitedPlan("CONCURRENT_REPLACE_A", 2));
+        Plan secondReplacement = activePlan(PlanTestData.trafficLimitedPlan("CONCURRENT_REPLACE_B", 3));
+        PlanSelectionResult original = selectPlanUseCase.select(new SelectPlanCommand(9003L, originalPlan.getId()));
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            Callable<PlanSelectionResult> firstTask = () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return selectPlanUseCase.select(new SelectPlanCommand(9003L, firstReplacement.getId()));
+            };
+            Callable<PlanSelectionResult> secondTask = () -> {
+                barrier.await(10, TimeUnit.SECONDS);
+                return selectPlanUseCase.select(new SelectPlanCommand(9003L, secondReplacement.getId()));
+            };
+
+            Future<PlanSelectionResult> firstFuture = executor.submit(firstTask);
+            Future<PlanSelectionResult> secondFuture = executor.submit(secondTask);
+            PlanSelectionResult first = firstFuture.get(20, TimeUnit.SECONDS);
+            PlanSelectionResult second = secondFuture.get(20, TimeUnit.SECONDS);
+
+            assertThat(first.selectionId()).isNotEqualTo(second.selectionId());
+            assertThat(activeSelectionCount(user.getId())).isEqualTo(1);
+            assertThat(totalSelectionCount(user.getId())).isEqualTo(3);
+            assertThat(planSelectionRepository.findById(original.selectionId()).orElseThrow().getStatus().name())
+                    .isEqualTo("CLEARED");
+            UUID activePlanId = planSelectionRepository.findActiveByUserId(user.getId()).orElseThrow().getPlanId();
+            assertThat(activePlanId).isIn(firstReplacement.getId(), secondReplacement.getId());
+        } finally {
+            executor.shutdownNow();
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
     private User activeUser(Long telegramUserId) {
         return userRepository.save(User.create(telegramUserId, "user" + telegramUserId, "Ali", null, UserLanguage.FA, NOW));
     }

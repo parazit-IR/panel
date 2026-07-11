@@ -17,6 +17,7 @@ import com.parazit.panel.test.support.MutableClockTestConfiguration;
 import com.parazit.panel.test.support.MutableTestClock;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceException;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
@@ -32,6 +33,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestConstructor;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -40,6 +43,8 @@ import org.springframework.test.context.TestConstructor;
 @Import({JpaAuditingConfiguration.class, PlanRepositoryAdapter.class, MutableClockTestConfiguration.class})
 @TestConstructor(autowireMode = TestConstructor.AutowireMode.ALL)
 class PlanRepositoryIntegrationTest extends PostgreSqlContainerSupport {
+
+    private static final Timestamp TEST_TIMESTAMP = Timestamp.from(Instant.parse("2026-07-11T00:00:00Z"));
 
     private final PlanRepository repository;
     private final EntityManager entityManager;
@@ -210,6 +215,26 @@ class PlanRepositoryIntegrationTest extends PostgreSqlContainerSupport {
     }
 
     @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void enforcesStatusTypeAndCurrencyConstraints() {
+        assertThatThrownBy(() -> insertRawPlan("BAD_STATUS", "BAD", "UNLIMITED", "IRT", TEST_TIMESTAMP, TEST_TIMESTAMP))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertRawPlan("BAD_TYPE", "DRAFT", "BAD", "IRT", TEST_TIMESTAMP, TEST_TIMESTAMP))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertRawPlan("BAD_CURRENCY", "DRAFT", "UNLIMITED", "USD", TEST_TIMESTAMP, TEST_TIMESTAMP))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void enforcesRequiredAuditTimestamps() {
+        assertThatThrownBy(() -> insertRawPlan("NO_CREATED_AT", "DRAFT", "UNLIMITED", "IRT", null, TEST_TIMESTAMP))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> insertRawPlan("NO_UPDATED_AT", "DRAFT", "UNLIMITED", "IRT", TEST_TIMESTAMP, null))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     void flywayMigrationRunsAndHibernateValidationSucceeds() {
         assertThat(flyway.info().current()).isNotNull();
         assertThat(Arrays.stream(flyway.info().applied()))
@@ -259,5 +284,22 @@ class PlanRepositoryIntegrationTest extends PostgreSqlContainerSupport {
                 """.formatted(UUID.randomUUID(), code, type, priceAmount, durationDays, trafficLimitBytes, maxDevices, displayOrder))
                 .executeUpdate();
         entityManager.flush();
+    }
+
+    private void insertRawPlan(
+            String code,
+            String status,
+            String type,
+            String currency,
+            Timestamp createdAt,
+            Timestamp updatedAt
+    ) {
+        jdbcTemplate.update("""
+                INSERT INTO plans (
+                    id, code, name, status, type, price_amount, currency, duration_days,
+                    traffic_limit_bytes, max_devices, display_order, created_at, updated_at
+                )
+                VALUES (?, ?, 'Invalid Plan', ?, ?, 500000, ?, 30, NULL, NULL, 0, ?, ?)
+                """, UUID.randomUUID(), code, status, type, currency, createdAt, updatedAt);
     }
 }
