@@ -96,3 +96,6 @@ app:
   payment:
     enabled: "${PAYMENT_ENABLED:false}"
     merchant-id: "${PAYMENT_MERCHANT_ID}"
+  referral:
+    enabled: "${REFERRAL_ENABLED:true}"
+    code-length: "${REFERRAL_CODE_LENGTH:10}"

@@ -1,5 +1,8 @@
 package com.parazit.panel.common.exception;
 
+import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
+import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
+import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
 import com.parazit.panel.application.user.UserNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -98,6 +101,31 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     ) {
         log.debug("User resource not found: {}", exception.getMessage());
         return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ReferralCodeNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleReferralCodeNotFound(
+            ReferralCodeNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        log.debug("Referral code not found");
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(SelfReferralNotAllowedException.class)
+    public ResponseEntity<ApiErrorResponse> handleSelfReferralNotAllowed(
+            SelfReferralNotAllowedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ReferralAlreadyAssignedException.class)
+    public ResponseEntity<ApiErrorResponse> handleReferralAlreadyAssigned(
+            ReferralAlreadyAssignedException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
     }
 
     @ExceptionHandler(AccessDeniedException.class)

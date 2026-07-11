@@ -1,6 +1,7 @@
 package com.parazit.panel.domain.user;
 
 import com.parazit.panel.common.persistence.BaseEntity;
+import com.parazit.panel.domain.referral.ReferralCodePolicy;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -15,10 +16,12 @@ import java.util.Objects;
 @Table(
         name = "users",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uq_users_telegram_user_id", columnNames = "telegram_user_id")
+                @UniqueConstraint(name = "uq_users_telegram_user_id", columnNames = "telegram_user_id"),
+                @UniqueConstraint(name = "uq_users_referral_code", columnNames = "referral_code")
         },
         indexes = {
                 @Index(name = "idx_users_telegram_user_id", columnList = "telegram_user_id"),
+                @Index(name = "idx_users_referral_code", columnList = "referral_code"),
                 @Index(name = "idx_users_status", columnList = "status"),
                 @Index(name = "idx_users_created_at", columnList = "created_at")
         }
@@ -31,6 +34,9 @@ public class User extends BaseEntity {
 
     @Column(name = "telegram_user_id", nullable = false, updatable = false)
     private Long telegramUserId;
+
+    @Column(name = "referral_code", length = ReferralCodePolicy.MAX_LENGTH)
+    private String referralCode;
 
     @Column(name = "username", length = USERNAME_MAX_LENGTH)
     private String username;
@@ -135,8 +141,23 @@ public class User extends BaseEntity {
         this.lastInteractionAt = requireInstant(interactionTime, "interactionTime");
     }
 
+    public void assignReferralCode(String referralCode) {
+        String normalized = ReferralCodePolicy.normalizeAndValidate(referralCode);
+        if (this.referralCode == null) {
+            this.referralCode = normalized;
+            return;
+        }
+        if (!this.referralCode.equals(normalized)) {
+            throw new IllegalStateException("referralCode cannot be reassigned");
+        }
+    }
+
     public Long getTelegramUserId() {
         return telegramUserId;
+    }
+
+    public String getReferralCode() {
+        return referralCode;
     }
 
     public String getUsername() {

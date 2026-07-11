@@ -2,6 +2,7 @@ package com.parazit.panel.domain.user;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
 import java.time.Instant;
@@ -188,6 +189,53 @@ class UserTest {
         user.recordInteraction(NOW.plusSeconds(120));
 
         assertThat(user.getTelegramUserId()).isEqualTo(originalTelegramUserId);
+    }
+
+    @Test
+    void assignsReferralCodeOnceWithNormalization() {
+        User user = createUser();
+
+        user.assignReferralCode(" abcd2345 ");
+        user.assignReferralCode("ABCD2345");
+
+        assertThat(user.getReferralCode()).isEqualTo("ABCD2345");
+    }
+
+    @Test
+    void rejectsInvalidReferralCodeAssignment() {
+        User user = createUser();
+
+        assertThatNullPointerException()
+                .isThrownBy(() -> user.assignReferralCode(null))
+                .withMessage("referralCode must not be null");
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> user.assignReferralCode("   "))
+                .withMessage("referralCode must not be blank");
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> user.assignReferralCode("ABC01I23"));
+    }
+
+    @Test
+    void rejectsDifferentReferralCodeReassignment() {
+        User user = createUser();
+
+        user.assignReferralCode("ABCD2345");
+
+        assertThatIllegalStateException()
+                .isThrownBy(() -> user.assignReferralCode("EFGH6789"))
+                .withMessage("referralCode cannot be reassigned");
+    }
+
+    @Test
+    void referralCodeRemainsStableAcrossProfileChanges() {
+        User user = createUser();
+        user.assignReferralCode("ABCD2345");
+
+        user.updateTelegramProfile("@new_username", "Sara", "Karimi", NOW.plusSeconds(60));
+        user.updateProfile("Mina", null);
+        user.changeLanguage(UserLanguage.EN);
+
+        assertThat(user.getReferralCode()).isEqualTo("ABCD2345");
     }
 
     private User createUser() {

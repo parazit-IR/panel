@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.parazit.panel.application.port.out.SystemClockPort;
+import com.parazit.panel.application.port.out.referral.ReferralCodeGenerator;
+import com.parazit.panel.application.referral.EnsureUserReferralCodeService;
 import com.parazit.panel.application.user.command.RegisterUserCommand;
 import com.parazit.panel.application.user.result.RegisterUserResult;
 import com.parazit.panel.application.user.settings.UserSettingsCreationService;
@@ -152,6 +154,21 @@ class RegisterUserServiceTest {
         assertThat(result.lastInteractionAt()).isEqualTo(LATER);
     }
 
+    @Test
+    void assignsReferralCodeToNewUserAndPreservesItOnRepeatedRegistration() {
+        FakeUserRepository repository = new FakeUserRepository();
+        FakeUserSettingsRepository settingsRepository = new FakeUserSettingsRepository();
+        RegisterUserService service = service(repository, settingsRepository, () -> NOW);
+
+        RegisterUserResult first = service.register(new RegisterUserCommand(1005L, null, "Ali", null, null));
+        String referralCode = repository.findById(first.userId()).orElseThrow().getReferralCode();
+        RegisterUserResult second = service.register(new RegisterUserCommand(1005L, "updated", "Sara", null, null));
+
+        assertThat(referralCode).isEqualTo("ABCD2345EF");
+        assertThat(second.userId()).isEqualTo(first.userId());
+        assertThat(repository.findById(first.userId()).orElseThrow().getReferralCode()).isEqualTo(referralCode);
+    }
+
     private RegisterUserService service(
             FakeUserRepository repository,
             FakeUserSettingsRepository settingsRepository,
@@ -163,8 +180,17 @@ class RegisterUserServiceTest {
                 clockPort,
                 new UserLanguageResolver(),
                 new RegisterUserCreationService(repository),
-                new UserSettingsDefaultsService(settingsRepository, creationService)
+                new UserSettingsDefaultsService(settingsRepository, creationService),
+                new EnsureUserReferralCodeService(repository, new FixedReferralCodeGenerator())
         );
+    }
+
+    private static final class FixedReferralCodeGenerator implements ReferralCodeGenerator {
+
+        @Override
+        public String generate() {
+            return "ABCD2345EF";
+        }
     }
 
     private static final class FakeUserRepository implements UserRepository {
@@ -184,6 +210,19 @@ class RegisterUserServiceTest {
         public boolean existsByTelegramUserId(Long telegramUserId) {
             existsByTelegramUserIdCalls++;
             return users.containsKey(telegramUserId);
+        }
+
+        @Override
+        public Optional<User> findByReferralCode(String referralCode) {
+            return users.values()
+                    .stream()
+                    .filter(user -> referralCode.equals(user.getReferralCode()))
+                    .findFirst();
+        }
+
+        @Override
+        public boolean existsByReferralCode(String referralCode) {
+            return findByReferralCode(referralCode).isPresent();
         }
 
         @Override

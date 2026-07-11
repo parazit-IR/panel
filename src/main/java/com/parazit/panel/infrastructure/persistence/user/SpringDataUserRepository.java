@@ -9,4 +9,8 @@ public interface SpringDataUserRepository extends SpringDataUuidRepository<User>
     Optional<User> findByTelegramUserId(Long telegramUserId);
 
     boolean existsByTelegramUserId(Long telegramUserId);
+
+    Optional<User> findByReferralCode(String referralCode);
+
+    boolean existsByReferralCode(String referralCode);
 }

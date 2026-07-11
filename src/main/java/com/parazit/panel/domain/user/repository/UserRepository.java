@@ -9,4 +9,12 @@ public interface UserRepository extends UuidRepository<User> {
     Optional<User> findByTelegramUserId(Long telegramUserId);
 
     boolean existsByTelegramUserId(Long telegramUserId);
+
+    default Optional<User> findByReferralCode(String referralCode) {
+        throw new UnsupportedOperationException("findByReferralCode is not implemented");
+    }
+
+    default boolean existsByReferralCode(String referralCode) {
+        throw new UnsupportedOperationException("existsByReferralCode is not implemented");
+    }
 }

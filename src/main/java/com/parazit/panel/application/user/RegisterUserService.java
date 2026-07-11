@@ -2,6 +2,7 @@ package com.parazit.panel.application.user;
 
 import com.parazit.panel.application.port.in.user.RegisterUserUseCase;
 import com.parazit.panel.application.port.out.SystemClockPort;
+import com.parazit.panel.application.referral.EnsureUserReferralCodeService;
 import com.parazit.panel.application.user.command.RegisterUserCommand;
 import com.parazit.panel.application.user.result.RegisterUserResult;
 import com.parazit.panel.application.user.settings.UserSettingsDefaultsService;
@@ -20,25 +21,29 @@ import org.springframework.transaction.annotation.Transactional;
 public class RegisterUserService implements RegisterUserUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(RegisterUserService.class);
+    private static final int MAX_REFERRAL_CODE_COLLISION_RETRIES = 5;
 
     private final UserRepository userRepository;
     private final SystemClockPort systemClockPort;
     private final UserLanguageResolver userLanguageResolver;
     private final RegisterUserCreationService creationService;
     private final UserSettingsDefaultsService userSettingsDefaultsService;
+    private final EnsureUserReferralCodeService ensureUserReferralCodeService;
 
     public RegisterUserService(
             UserRepository userRepository,
             SystemClockPort systemClockPort,
             UserLanguageResolver userLanguageResolver,
             RegisterUserCreationService creationService,
-            UserSettingsDefaultsService userSettingsDefaultsService
+            UserSettingsDefaultsService userSettingsDefaultsService,
+            EnsureUserReferralCodeService ensureUserReferralCodeService
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.systemClockPort = Objects.requireNonNull(systemClockPort, "systemClockPort must not be null");
         this.userLanguageResolver = Objects.requireNonNull(userLanguageResolver, "userLanguageResolver must not be null");
         this.creationService = Objects.requireNonNull(creationService, "creationService must not be null");
         this.userSettingsDefaultsService = Objects.requireNonNull(userSettingsDefaultsService, "userSettingsDefaultsService must not be null");
+        this.ensureUserReferralCodeService = Objects.requireNonNull(ensureUserReferralCodeService, "ensureUserReferralCodeService must not be null");
     }
 
     @Override
@@ -56,31 +61,41 @@ public class RegisterUserService implements RegisterUserUseCase {
 
     private RegisterUserResult registerNewUser(RegisterUserCommand command, Instant now) {
         UserLanguage initialLanguage = userLanguageResolver.resolveOrDefault(command.languageCode());
-        User user = User.create(
-                command.telegramUserId(),
-                command.username(),
-                command.firstName(),
-                command.lastName(),
-                initialLanguage,
-                now
-        );
+        for (int attempt = 1; attempt <= MAX_REFERRAL_CODE_COLLISION_RETRIES; attempt++) {
+            User user = User.create(
+                    command.telegramUserId(),
+                    command.username(),
+                    command.firstName(),
+                    command.lastName(),
+                    initialLanguage,
+                    now
+            );
+            ensureUserReferralCodeService.assignReferralCode(user);
 
-        try {
-            User saved = creationService.create(user);
-            userSettingsDefaultsService.ensureDefaults(saved);
-            log.atInfo()
-                    .addKeyValue("userId", saved.getId())
-                    .addKeyValue("telegramUserId", saved.getTelegramUserId())
-                    .addKeyValue("newlyCreated", true)
-                    .log("Registered new Telegram user");
-            return RegisterUserResult.from(saved, true);
-        } catch (DataIntegrityViolationException exception) {
-            log.atWarn()
-                    .addKeyValue("telegramUserId", command.telegramUserId())
-                    .addKeyValue("newlyCreated", false)
-                    .log("Recovered concurrent Telegram user registration");
-            return recoverConcurrentRegistration(command, now);
+            try {
+                User saved = creationService.create(user);
+                userSettingsDefaultsService.ensureDefaults(saved);
+                log.atInfo()
+                        .addKeyValue("userId", saved.getId())
+                        .addKeyValue("telegramUserId", saved.getTelegramUserId())
+                        .addKeyValue("newlyCreated", true)
+                        .log("Registered new Telegram user");
+                return RegisterUserResult.from(saved, true);
+            } catch (DataIntegrityViolationException exception) {
+                if (userRepository.findByTelegramUserId(command.telegramUserId()).isPresent()) {
+                    log.atWarn()
+                            .addKeyValue("telegramUserId", command.telegramUserId())
+                            .addKeyValue("newlyCreated", false)
+                            .log("Recovered concurrent Telegram user registration");
+                    return recoverConcurrentRegistration(command, now);
+                }
+                log.atDebug()
+                        .addKeyValue("attempt", attempt)
+                        .log("Retrying registration after referral code collision");
+            }
         }
+
+        throw new UserRegistrationException("Could not register user with a unique referral code");
     }
 
     private RegisterUserResult recoverConcurrentRegistration(RegisterUserCommand command, Instant now) {
@@ -92,6 +107,7 @@ public class RegisterUserService implements RegisterUserUseCase {
 
     private RegisterUserResult refreshExistingUser(User user, RegisterUserCommand command, Instant now) {
         user.updateTelegramProfile(command.username(), command.firstName(), command.lastName(), now);
+        ensureUserReferralCodeService.assignReferralCode(user);
         User saved = userRepository.save(user);
         userSettingsDefaultsService.ensureDefaults(saved);
 

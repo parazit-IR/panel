@@ -2,6 +2,7 @@ package com.parazit.panel.infrastructure.persistence.user;
 
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.referral.ReferralCodePolicy;
 import com.parazit.panel.infrastructure.persistence.repository.JpaRepositoryAdapter;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,6 +32,16 @@ public class UserRepositoryAdapter extends JpaRepositoryAdapter<User, UUID> impl
     @Override
     public boolean existsByTelegramUserId(Long telegramUserId) {
         return repository.existsByTelegramUserId(requireTelegramUserId(telegramUserId));
+    }
+
+    @Override
+    public Optional<User> findByReferralCode(String referralCode) {
+        return repository.findByReferralCode(ReferralCodePolicy.normalizeAndValidate(referralCode));
+    }
+
+    @Override
+    public boolean existsByReferralCode(String referralCode) {
+        return repository.existsByReferralCode(ReferralCodePolicy.normalizeAndValidate(referralCode));
     }
 
     private Long requireTelegramUserId(Long telegramUserId) {
