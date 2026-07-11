@@ -32,6 +32,22 @@ public class PlanRepositoryAdapter extends JpaRepositoryAdapter<Plan, UUID> impl
     }
 
     @Override
+    public Optional<Plan> findByIdAndStatus(UUID id, PlanStatus status) {
+        return repository.findByIdAndStatus(
+                Objects.requireNonNull(id, "id must not be null"),
+                Objects.requireNonNull(status, "status must not be null")
+        );
+    }
+
+    @Override
+    public Optional<Plan> findByCodeAndStatus(String code, PlanStatus status) {
+        return repository.findByCodeAndStatus(
+                Plan.normalizeCode(code),
+                Objects.requireNonNull(status, "status must not be null")
+        );
+    }
+
+    @Override
     public boolean existsByCode(String code) {
         return repository.existsByCode(Plan.normalizeCode(code));
     }

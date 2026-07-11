@@ -103,7 +103,8 @@ class ArchitectureRulesTest {
     void planTaskDoesNotAddPublicApiSurfaceOrEntityRelationships() throws IOException {
         List<Path> publicApiViolations = javaFiles("com/parazit/panel/api")
                 .filter(path -> source(path).contains("domain.plan")
-                        && !path.toString().contains("/api/internal/plan/admin/"))
+                        && !path.toString().contains("/api/internal/plan/admin/")
+                        && !path.toString().contains("/api/plan/catalog/"))
                 .toList();
         List<Path> relationshipViolations = javaFiles("com/parazit/panel/domain/plan")
                 .filter(path -> {
@@ -136,11 +137,44 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    void catalogPlanControllerDependsOnInputPortsOnlyAndDoesNotExposeStatusFilter() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/api/plan/catalog")
+                .filter(path -> path.getFileName().toString().endsWith("Controller.java"))
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.domain.plan.repository")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("SpringData")
+                            || source.contains("JpaRepository")
+                            || source.contains("PlanStatus")
+                            || source.contains("@RequestParam(required = false) PlanStatus");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void catalogPlanApiDoesNotReuseAdminDtos() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/api/plan/catalog")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("api.internal.plan.admin")
+                            || source.contains("import com.parazit.panel.api.internal.plan.admin.PlanResponse")
+                            || source.contains("new PlanResponse(");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
     void planManagementDoesNotAddDeferredOperationalModules() throws IOException {
         List<Path> violations = javaFiles("")
                 .filter(path -> !path.toString().contains("/domain/plan/")
                         && !path.toString().contains("/application/plan/")
                         && !path.toString().contains("/api/internal/plan/admin/")
+                        && !path.toString().contains("/api/plan/catalog/")
                         && !path.toString().contains("/infrastructure/persistence/plan/"))
                 .filter(path -> {
                     String source = source(path);

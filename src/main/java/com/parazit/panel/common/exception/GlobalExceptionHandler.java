@@ -1,5 +1,6 @@
 package com.parazit.panel.common.exception;
 
+import com.parazit.panel.application.plan.catalog.AvailablePlanNotFoundException;
 import com.parazit.panel.application.plan.admin.InvalidPlanStateTransitionException;
 import com.parazit.panel.application.plan.admin.PlanCodeAlreadyExistsException;
 import com.parazit.panel.application.plan.admin.PlanModificationNotAllowedException;
@@ -148,6 +149,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         log.debug("Plan resource not found: {}", exception.getMessage());
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(AvailablePlanNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleAvailablePlanNotFound(
+            AvailablePlanNotFoundException exception,
+            HttpServletRequest request
+    ) {
+        log.debug("Available plan resource not found: {}", exception.getMessage());
         return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
     }
 

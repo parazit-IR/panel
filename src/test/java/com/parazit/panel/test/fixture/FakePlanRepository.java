@@ -26,6 +26,8 @@ public class FakePlanRepository implements PlanRepository {
 
     public int findByIdCalls;
     public int findByCodeCalls;
+    public int findByIdAndStatusCalls;
+    public int findByCodeAndStatusCalls;
     public int findAllOrderByDisplayOrderAscCodeAscCalls;
     public int findAllByStatusOrderByDisplayOrderAscCodeAscCalls;
     public int findAllByTypeOrderByDisplayOrderAscCodeAscCalls;
@@ -41,6 +43,24 @@ public class FakePlanRepository implements PlanRepository {
         return plansById.values()
                 .stream()
                 .filter(plan -> normalizedCode.equals(plan.getCode()))
+                .findFirst();
+    }
+
+    @Override
+    public Optional<Plan> findByIdAndStatus(UUID id, PlanStatus status) {
+        findByIdAndStatusCalls++;
+        return Optional.ofNullable(plansById.get(id))
+                .filter(plan -> status == plan.getStatus());
+    }
+
+    @Override
+    public Optional<Plan> findByCodeAndStatus(String code, PlanStatus status) {
+        findByCodeAndStatusCalls++;
+        String normalizedCode = Plan.normalizeCode(code);
+        return plansById.values()
+                .stream()
+                .filter(plan -> normalizedCode.equals(plan.getCode()))
+                .filter(plan -> status == plan.getStatus())
                 .findFirst();
     }
 
