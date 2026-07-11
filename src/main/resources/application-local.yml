@@ -50,5 +50,14 @@ app:
   payment:
     enabled: "${PAYMENT_ENABLED:false}"
     merchant-id: "${PAYMENT_MERCHANT_ID:}"
+  xui:
+    base-url: "${XUI_BASE_URL:http://localhost:2053}"
+    username: "${XUI_USERNAME:}"
+    password: "${XUI_PASSWORD:}"
+    connect-timeout: "${XUI_CONNECT_TIMEOUT:5s}"
+    read-timeout: "${XUI_READ_TIMEOUT:20s}"
+    max-retries: "${XUI_MAX_RETRIES:3}"
+    retry-delay: "${XUI_RETRY_DELAY:1s}"
+    verify-ssl: "${XUI_VERIFY_SSL:true}"
   plan-selection:
     ttl: "${PLAN_SELECTION_TTL:PT30M}"

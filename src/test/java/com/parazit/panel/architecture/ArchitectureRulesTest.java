@@ -209,6 +209,25 @@ class ArchitectureRulesTest {
         assertThat(violations).isEmpty();
     }
 
+    @Test
+    void xuiClientFoundationStaysInfrastructureOnly() throws IOException {
+        List<Path> portViolations = javaFiles("com/parazit/panel/application/port/out/xui")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("org.springframework.web.client")
+                            || source.contains("org.apache.hc.");
+                })
+                .toList();
+        List<Path> apiViolations = javaFiles("com/parazit/panel/api")
+                .filter(path -> source(path).contains("application.port.out.xui")
+                        || source(path).contains("infrastructure.xui"))
+                .toList();
+
+        assertThat(portViolations).isEmpty();
+        assertThat(apiViolations).isEmpty();
+    }
+
     private static Stream<Path> javaFiles(String packagePath) throws IOException {
         Path root = packagePath.isBlank() ? MAIN_JAVA : MAIN_JAVA.resolve(packagePath);
         return Files.walk(root)
