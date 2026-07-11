@@ -110,6 +110,8 @@ app:
     session-timeout: "${XUI_SESSION_TIMEOUT:PT30M}"
     inbound-list-path: "${XUI_INBOUND_LIST_PATH:/panel/api/inbounds/list}"
     client-create-path: "${XUI_CLIENT_CREATE_PATH:/panel/api/inbounds/addClient}"
+    client-update-path-template: "${XUI_CLIENT_UPDATE_PATH_TEMPLATE:/panel/api/inbounds/updateClient/{clientId}}"
+    client-delete-path-template: "${XUI_CLIENT_DELETE_PATH_TEMPLATE:/panel/api/inbounds/{inboundId}/delClient/{clientId}}"
     subscription-id-length: "${XUI_SUBSCRIPTION_ID_LENGTH:16}"
   xui-client-provisioning:
     default-flow: "${XUI_CLIENT_DEFAULT_FLOW:xtls-rprx-vision}"

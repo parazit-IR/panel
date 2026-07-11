@@ -17,8 +17,16 @@ import com.parazit.panel.application.xui.inbound.XuiInboundAmbiguousException;
 import com.parazit.panel.application.xui.inbound.XuiInboundNotFoundException;
 import com.parazit.panel.application.xui.client.XuiClientProvisionFailedException;
 import com.parazit.panel.application.xui.client.XuiClientProvisionNotAllowedException;
+import com.parazit.panel.application.xui.client.XuiClientProvisionNotFoundException;
 import com.parazit.panel.application.xui.client.XuiClientProvisionUnknownException;
+import com.parazit.panel.application.xui.client.XuiClientDeleteFailedException;
+import com.parazit.panel.application.xui.client.XuiClientDeleteNotAllowedException;
+import com.parazit.panel.application.xui.client.XuiClientDisableFailedException;
+import com.parazit.panel.application.xui.client.XuiClientDisableNotAllowedException;
+import com.parazit.panel.application.xui.client.XuiClientOperationUnknownException;
 import com.parazit.panel.application.xui.client.XuiInboundNotEligibleException;
+import com.parazit.panel.application.xui.client.XuiProvisionOwnershipException;
+import com.parazit.panel.application.xui.client.XuiRemoteClientIdentityMismatchException;
 import com.parazit.panel.infrastructure.xui.exception.XuiAuthenticationException;
 import com.parazit.panel.infrastructure.xui.exception.XuiClientException;
 import com.parazit.panel.infrastructure.xui.exception.XuiConnectionException;
@@ -188,7 +196,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler({
             XuiInboundNotFoundException.class,
-            XuiEligibleInboundNotFoundException.class
+            XuiEligibleInboundNotFoundException.class,
+            XuiClientProvisionNotFoundException.class,
+            XuiProvisionOwnershipException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
             RuntimeException exception,
@@ -211,7 +221,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             PlanModificationNotAllowedException.class,
             InvalidPlanStateTransitionException.class,
             PlanSelectionConflictException.class,
-            XuiInboundAmbiguousException.class
+            XuiInboundAmbiguousException.class,
+            XuiClientDisableNotAllowedException.class,
+            XuiClientDeleteNotAllowedException.class,
+            XuiRemoteClientIdentityMismatchException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,
@@ -239,9 +252,28 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
     }
 
+    @ExceptionHandler({
+            XuiClientDisableFailedException.class,
+            XuiClientDeleteFailedException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleXuiLifecycleFailed(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
     @ExceptionHandler(XuiClientProvisionUnknownException.class)
     public ResponseEntity<ApiErrorResponse> handleXuiProvisionUnknown(
             XuiClientProvisionUnknownException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(XuiClientOperationUnknownException.class)
+    public ResponseEntity<ApiErrorResponse> handleXuiLifecycleUnknown(
+            XuiClientOperationUnknownException exception,
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);

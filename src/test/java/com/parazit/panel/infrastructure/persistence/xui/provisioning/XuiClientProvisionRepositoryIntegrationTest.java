@@ -85,6 +85,22 @@ class XuiClientProvisionRepositoryIntegrationTest extends PostgreSqlContainerSup
         provisionRepository.save(reloaded);
 
         assertThat(provisionRepository.findById(saved.getId()).orElseThrow().getProvisionedAt()).isEqualTo(NOW);
+
+        XuiClientProvision active = provisionRepository.findById(saved.getId()).orElseThrow();
+        active.markDisabling();
+        active.markDisabled(NOW.plusSeconds(1));
+        provisionRepository.save(active);
+        assertThat(provisionRepository.findById(saved.getId()).orElseThrow().getDisabledAt())
+                .isEqualTo(NOW.plusSeconds(1));
+
+        XuiClientProvision disabled = provisionRepository.findById(saved.getId()).orElseThrow();
+        disabled.markDeleting();
+        disabled.markDeleted(NOW.plusSeconds(2));
+        provisionRepository.save(disabled);
+        XuiClientProvision deleted = provisionRepository.findById(saved.getId()).orElseThrow();
+        assertThat(deleted.getStatus()).isEqualTo(XuiProvisionStatus.DELETED);
+        assertThat(deleted.getDeletedAt()).isEqualTo(NOW.plusSeconds(2));
+        assertThat(deleted.getRemoteClientId()).isEqualTo(saved.getRemoteClientId());
     }
 
     @Test
@@ -105,6 +121,8 @@ class XuiClientProvisionRepositoryIntegrationTest extends PostgreSqlContainerSup
     void flywayIncludesProvisioningMigration() {
         assertThat(Arrays.stream(flyway.info().applied()))
                 .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("7"));
+        assertThat(Arrays.stream(flyway.info().applied()))
+                .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("8"));
     }
 
     private PlanSelection selection(Long telegramUserId, String planCode) {

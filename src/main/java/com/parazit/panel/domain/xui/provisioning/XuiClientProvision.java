@@ -76,6 +76,12 @@ public class XuiClientProvision extends BaseEntity {
     @Column(name = "provisioned_at")
     private Instant provisionedAt;
 
+    @Column(name = "disabled_at")
+    private Instant disabledAt;
+
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     @Column(name = "last_synchronized_at")
     private Instant lastSynchronizedAt;
 
@@ -172,8 +178,10 @@ public class XuiClientProvision extends BaseEntity {
     }
 
     public void markFailed(String failureCode, String safeMessage) {
-        if (status == XuiProvisionStatus.ACTIVE) {
-            throw new IllegalStateException("cannot fail an active provision");
+        if (status == XuiProvisionStatus.ACTIVE
+                || status == XuiProvisionStatus.DISABLED
+                || status == XuiProvisionStatus.DELETED) {
+            throw new IllegalStateException("cannot fail a confirmed provision with status " + status);
         }
         status = XuiProvisionStatus.FAILED;
         this.failureCode = normalizeOptional(failureCode, "failureCode", FAILURE_CODE_MAX_LENGTH);
@@ -181,10 +189,85 @@ public class XuiClientProvision extends BaseEntity {
     }
 
     public void markUnknown(String failureCode, String safeMessage) {
-        if (status == XuiProvisionStatus.ACTIVE) {
+        if (status == XuiProvisionStatus.ACTIVE
+                || status == XuiProvisionStatus.DISABLED
+                || status == XuiProvisionStatus.DELETED) {
             return;
         }
         status = XuiProvisionStatus.UNKNOWN;
+        this.failureCode = normalizeOptional(failureCode, "failureCode", FAILURE_CODE_MAX_LENGTH);
+        this.failureMessage = normalizeFailureMessage(safeMessage);
+    }
+
+    public void markDisabling() {
+        if (status == XuiProvisionStatus.DISABLING
+                || status == XuiProvisionStatus.DISABLED
+                || status == XuiProvisionStatus.DELETED) {
+            return;
+        }
+        if (status != XuiProvisionStatus.ACTIVE
+                && status != XuiProvisionStatus.UNKNOWN
+                && status != XuiProvisionStatus.FAILED) {
+            throw new IllegalStateException("cannot mark disabling from status " + status);
+        }
+        status = XuiProvisionStatus.DISABLING;
+        clearFailure();
+    }
+
+    public void markDisabled(Instant disabledAt) {
+        Instant requiredDisabledAt = Objects.requireNonNull(disabledAt, "disabledAt must not be null");
+        if (status == XuiProvisionStatus.DISABLED) {
+            return;
+        }
+        if (status != XuiProvisionStatus.DISABLING && status != XuiProvisionStatus.UNKNOWN) {
+            throw new IllegalStateException("cannot mark disabled from status " + status);
+        }
+        status = XuiProvisionStatus.DISABLED;
+        this.disabledAt = requiredDisabledAt;
+        clearFailure();
+    }
+
+    public void markDeleting() {
+        if (status == XuiProvisionStatus.DELETING || status == XuiProvisionStatus.DELETED) {
+            return;
+        }
+        if (status != XuiProvisionStatus.ACTIVE
+                && status != XuiProvisionStatus.DISABLED
+                && status != XuiProvisionStatus.UNKNOWN
+                && status != XuiProvisionStatus.FAILED) {
+            throw new IllegalStateException("cannot mark deleting from status " + status);
+        }
+        status = XuiProvisionStatus.DELETING;
+        clearFailure();
+    }
+
+    public void markDeleted(Instant deletedAt) {
+        Instant requiredDeletedAt = Objects.requireNonNull(deletedAt, "deletedAt must not be null");
+        if (status == XuiProvisionStatus.DELETED) {
+            return;
+        }
+        if (status != XuiProvisionStatus.DELETING && status != XuiProvisionStatus.UNKNOWN) {
+            throw new IllegalStateException("cannot mark deleted from status " + status);
+        }
+        status = XuiProvisionStatus.DELETED;
+        this.deletedAt = requiredDeletedAt;
+        clearFailure();
+    }
+
+    public void markOperationUnknown(String failureCode, String safeMessage) {
+        if (status == XuiProvisionStatus.DELETED) {
+            return;
+        }
+        status = XuiProvisionStatus.UNKNOWN;
+        this.failureCode = normalizeOptional(failureCode, "failureCode", FAILURE_CODE_MAX_LENGTH);
+        this.failureMessage = normalizeFailureMessage(safeMessage);
+    }
+
+    public void markOperationFailed(String failureCode, String safeMessage) {
+        if (status == XuiProvisionStatus.DELETED) {
+            throw new IllegalStateException("cannot fail a deleted provision");
+        }
+        status = XuiProvisionStatus.FAILED;
         this.failureCode = normalizeOptional(failureCode, "failureCode", FAILURE_CODE_MAX_LENGTH);
         this.failureMessage = normalizeFailureMessage(safeMessage);
     }
@@ -239,6 +322,14 @@ public class XuiClientProvision extends BaseEntity {
 
     public Instant getProvisionedAt() {
         return provisionedAt;
+    }
+
+    public Instant getDisabledAt() {
+        return disabledAt;
+    }
+
+    public Instant getDeletedAt() {
+        return deletedAt;
     }
 
     public Instant getLastSynchronizedAt() {

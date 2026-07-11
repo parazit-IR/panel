@@ -5,5 +5,9 @@ public enum XuiProvisionStatus {
     PROVISIONING,
     ACTIVE,
     FAILED,
-    UNKNOWN
+    UNKNOWN,
+    DISABLING,
+    DISABLED,
+    DELETING,
+    DELETED
 }

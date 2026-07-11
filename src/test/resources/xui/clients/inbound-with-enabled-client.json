@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "msg": "",
+  "obj": [
+    {
+      "id": 7,
+      "up": 0,
+      "down": 0,
+      "total": 0,
+      "remark": "Reality Main",
+      "enable": true,
+      "expiryTime": 0,
+      "listen": "",
+      "port": 443,
+      "protocol": "vless",
+      "settings": "{\"clients\":[{\"id\":\"11111111-1111-1111-1111-111111111111\",\"flow\":\"xtls-rprx-vision\",\"email\":\"vpn_abc_def\",\"enable\":true,\"totalGB\":1024,\"expiryTime\":1893456000000,\"limitIp\":2,\"subId\":\"sub123\"}]}",
+      "streamSettings": "{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"serverNames\":[\"vpn.example.test\"],\"shortIds\":[\"abcd1234\"],\"settings\":{\"publicKey\":\"PUBLIC_KEY_TEST\"}}}"
+    }
+  ]
+}

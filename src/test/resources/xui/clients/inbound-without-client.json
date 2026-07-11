@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "msg": "",
+  "obj": [
+    {
+      "id": 7,
+      "up": 0,
+      "down": 0,
+      "total": 0,
+      "remark": "Reality Main",
+      "enable": true,
+      "expiryTime": 0,
+      "listen": "",
+      "port": 443,
+      "protocol": "vless",
+      "settings": "{\"clients\":[]}",
+      "streamSettings": "{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"serverNames\":[\"vpn.example.test\"],\"shortIds\":[\"abcd1234\"],\"settings\":{\"publicKey\":\"PUBLIC_KEY_TEST\"}}}"
+    }
+  ]
+}

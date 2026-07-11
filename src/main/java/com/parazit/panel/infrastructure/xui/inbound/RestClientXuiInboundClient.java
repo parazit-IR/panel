@@ -82,11 +82,16 @@ public class RestClientXuiInboundClient implements XuiInboundClient {
 
     private static boolean matches(XuiClientSnapshot client, String clientId, String email) {
         boolean clientIdMatches = clientId != null
+                && !clientId.isBlank()
                 && client.clientId() != null
                 && client.clientId().equalsIgnoreCase(clientId);
+        if (clientId != null && !clientId.isBlank()) {
+            return clientIdMatches;
+        }
         boolean emailMatches = email != null
+                && !email.isBlank()
                 && client.email() != null
                 && client.email().equalsIgnoreCase(email);
-        return clientIdMatches || emailMatches;
+        return emailMatches;
     }
 }

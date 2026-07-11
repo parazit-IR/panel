@@ -164,6 +164,10 @@ Response contains only safe fields: provision ID, plan IDs, inbound ID, remote c
 
 All error responses use the standard error payload with `traceId` and no secrets.
 
+## Lifecycle After Provisioning
+
+Task 25 adds safe disable and permanent-delete operations for existing provisions. `ACTIVE` is no longer the only confirmed lifecycle state; a provision may later become `DISABLED` or `DELETED` while the local row remains retained for audit history.
+
 ## Deferred Work
 
-Task 25 and later may add client update/deletion, subscription URI generation, QR codes, payment/order integration, Telegram delivery, traffic synchronization, and lifecycle automation.
+Task 26 and later may add client re-enable/update/renewal, subscription URI generation, QR codes, payment/order integration, Telegram delivery, traffic synchronization, and lifecycle automation.

@@ -11,6 +11,7 @@ public record XuiClientSnapshot(
         long downloadBytes,
         Instant expiryTime,
         int ipLimit,
-        String subscriptionId
+        String subscriptionId,
+        String flow
 ) {
 }

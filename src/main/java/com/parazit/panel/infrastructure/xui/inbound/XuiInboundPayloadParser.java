@@ -67,7 +67,8 @@ public class XuiInboundPayloadParser {
                     nonNegativeLong(client, "client.downloadBytes", "down", "download"),
                     toInstant(longAt(client, "expiryTime")),
                     nonNegativeInt(client, "client.ipLimit", 0, "limitIp", "ipLimit"),
-                    textAt(client, "subId", "subscriptionId")
+                    textAt(client, "subId", "subscriptionId"),
+                    textAt(client, "flow")
             ));
         }
         return List.copyOf(snapshots);
