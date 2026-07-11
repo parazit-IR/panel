@@ -118,7 +118,7 @@ class CreateVpnClientServiceTest {
         when(statusTransaction.markUnknown(PROVISION_ID, "XuiClientCreateTimeoutException", "timeout"))
                 .thenReturn(unknown);
         when(inboundClient.findClient(7, CLIENT_ID, "vpn_user_provision"))
-                .thenReturn(Optional.of(new XuiClientSnapshot(CLIENT_ID, "vpn_user_provision", true, 0, 0, 0, null, 0, "sub123", "xtls-rprx-vision")));
+                .thenReturn(Optional.of(new XuiClientSnapshot(CLIENT_ID, "vpn_user_provision", true, 0, 0, 0, null, 0, "sub123", "xtls-rprx-vision", "", "", 0)));
         when(statusTransaction.markActive(PROVISION_ID, NOW)).thenReturn(active);
 
         CreateVpnClientResult result = service.create(new CreateVpnClientCommand(123L, SELECTION_ID, 7L));

@@ -12,6 +12,13 @@ public record XuiClientSnapshot(
         Instant expiryTime,
         int ipLimit,
         String subscriptionId,
-        String flow
+        String flow,
+        String telegramId,
+        String comment,
+        int reset
 ) {
+
+    public long totalConsumedBytes() {
+        return Math.addExact(uploadBytes, downloadBytes);
+    }
 }

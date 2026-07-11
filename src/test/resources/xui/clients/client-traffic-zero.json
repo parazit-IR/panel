@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "msg": "ok",
+  "obj": {
+    "email": "vpn_abc_def",
+    "up": 0,
+    "down": 0,
+    "total": 1073741824,
+    "expiryTime": 1893456000000,
+    "enable": true
+  }
+}

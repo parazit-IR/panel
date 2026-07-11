@@ -24,9 +24,20 @@ import com.parazit.panel.application.xui.client.XuiClientDeleteNotAllowedExcepti
 import com.parazit.panel.application.xui.client.XuiClientDisableFailedException;
 import com.parazit.panel.application.xui.client.XuiClientDisableNotAllowedException;
 import com.parazit.panel.application.xui.client.XuiClientOperationUnknownException;
+import com.parazit.panel.application.xui.client.XuiClientOperationInProgressException;
+import com.parazit.panel.application.xui.client.XuiClientOperationNotAllowedException;
+import com.parazit.panel.application.xui.client.XuiClientOperationNotFoundException;
 import com.parazit.panel.application.xui.client.XuiInboundNotEligibleException;
+import com.parazit.panel.application.xui.client.XuiOperationIdConflictException;
 import com.parazit.panel.application.xui.client.XuiProvisionOwnershipException;
 import com.parazit.panel.application.xui.client.XuiRemoteClientIdentityMismatchException;
+import com.parazit.panel.application.xui.client.XuiRemoteClientMissingException;
+import com.parazit.panel.application.xui.client.XuiRemoteStateConflictException;
+import com.parazit.panel.application.xui.client.XuiTrafficOverflowException;
+import com.parazit.panel.application.xui.client.XuiClientTrafficResetFailedException;
+import com.parazit.panel.application.xui.client.XuiClientTrafficResetUnknownException;
+import com.parazit.panel.application.xui.client.XuiClientUpdateFailedException;
+import com.parazit.panel.application.xui.client.XuiClientUpdateUnknownException;
 import com.parazit.panel.infrastructure.xui.exception.XuiAuthenticationException;
 import com.parazit.panel.infrastructure.xui.exception.XuiClientException;
 import com.parazit.panel.infrastructure.xui.exception.XuiConnectionException;
@@ -198,6 +209,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiInboundNotFoundException.class,
             XuiEligibleInboundNotFoundException.class,
             XuiClientProvisionNotFoundException.class,
+            XuiClientOperationNotFoundException.class,
             XuiProvisionOwnershipException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
@@ -224,7 +236,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiInboundAmbiguousException.class,
             XuiClientDisableNotAllowedException.class,
             XuiClientDeleteNotAllowedException.class,
-            XuiRemoteClientIdentityMismatchException.class
+            XuiRemoteClientIdentityMismatchException.class,
+            XuiOperationIdConflictException.class,
+            XuiClientOperationInProgressException.class,
+            XuiClientOperationNotAllowedException.class,
+            XuiRemoteClientMissingException.class,
+            XuiRemoteStateConflictException.class,
+            XuiTrafficOverflowException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,
@@ -254,7 +272,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler({
             XuiClientDisableFailedException.class,
-            XuiClientDeleteFailedException.class
+            XuiClientDeleteFailedException.class,
+            XuiClientUpdateFailedException.class,
+            XuiClientTrafficResetFailedException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiLifecycleFailed(
             RuntimeException exception,
@@ -271,9 +291,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
-    @ExceptionHandler(XuiClientOperationUnknownException.class)
+    @ExceptionHandler({
+            XuiClientOperationUnknownException.class,
+            XuiClientUpdateUnknownException.class,
+            XuiClientTrafficResetUnknownException.class
+    })
     public ResponseEntity<ApiErrorResponse> handleXuiLifecycleUnknown(
-            XuiClientOperationUnknownException exception,
+            RuntimeException exception,
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);

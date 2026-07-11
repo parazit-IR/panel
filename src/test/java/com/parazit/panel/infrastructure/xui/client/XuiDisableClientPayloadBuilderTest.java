@@ -23,7 +23,10 @@ class XuiDisableClientPayloadBuilderTest {
                 Instant.ofEpochMilli(1893456000000L),
                 2,
                 "sub123",
-                "xtls-rprx-vision"
+                "xtls-rprx-vision",
+                "",
+                "",
+                0
         );
 
         XuiUpdateClientRemoteRequest payload = builder.build(

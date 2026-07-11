@@ -170,4 +170,4 @@ Task 25 adds safe disable and permanent-delete operations for existing provision
 
 ## Deferred Work
 
-Task 26 and later may add client re-enable/update/renewal, subscription URI generation, QR codes, payment/order integration, Telegram delivery, traffic synchronization, and lifecycle automation.
+Task 26 adds client re-enable, renewal, traffic-limit updates, traffic reset, and synchronization. Subscription URI generation, QR codes, payment/order integration, Telegram delivery, and lifecycle automation remain deferred.

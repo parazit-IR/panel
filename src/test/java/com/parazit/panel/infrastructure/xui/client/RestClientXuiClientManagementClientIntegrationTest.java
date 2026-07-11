@@ -10,6 +10,8 @@ import com.parazit.panel.application.xui.client.XuiClientCreateTimeoutException;
 import com.parazit.panel.application.xui.client.model.DeleteXuiClientRequest;
 import com.parazit.panel.application.xui.client.model.DisableXuiClientRequest;
 import com.parazit.panel.application.xui.client.model.CreateXuiClientRequest;
+import com.parazit.panel.application.xui.client.model.ResetXuiClientTrafficRequest;
+import com.parazit.panel.application.xui.client.model.UpdateXuiClientRequest;
 import com.parazit.panel.application.xui.model.XuiClientSnapshot;
 import com.parazit.panel.application.xui.model.XuiInboundSnapshot;
 import com.parazit.panel.infrastructure.xui.XuiRequestExecutor;
@@ -133,6 +135,53 @@ class RestClientXuiClientManagementClientIntegrationTest extends XuiMockServerSu
         assertThat(delete.getHeader("Cookie")).isEqualTo("xui_session=abc");
     }
 
+    @Test
+    void postsAuthenticatedUpdateWithPreservedClientPayload() throws Exception {
+        MutableInboundClient inboundClient = new MutableInboundClient(clientSnapshot(false));
+        server.enqueue(successfulLogin("xui_session=abc; Path=/; HttpOnly"));
+        server.enqueue(jsonResponse(200, fixture("update-client-success.json")));
+
+        assertThat(client(Duration.ofSeconds(2), inboundClient).updateClient(new UpdateXuiClientRequest(
+                7,
+                "11111111-1111-1111-1111-111111111111",
+                "vpn_abc_def",
+                true,
+                Instant.ofEpochMilli(1896048000000L),
+                2048L,
+                3,
+                null
+        )).updated()).isTrue();
+
+        server.takeRequest(1, TimeUnit.SECONDS);
+        RecordedRequest update = server.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(update.getMethod()).isEqualTo("POST");
+        assertThat(update.getPath()).isEqualTo("/panel/api/inbounds/updateClient/11111111-1111-1111-1111-111111111111");
+        String body = update.getBody().readUtf8();
+        assertThat(body).contains("\"enable\":true");
+        assertThat(body).contains("\"totalGB\":2048");
+        assertThat(body).contains("\"limitIp\":3");
+        assertThat(body).contains("\"subId\":\"sub123\"");
+    }
+
+    @Test
+    void postsAuthenticatedResetTrafficByEmail() throws Exception {
+        MutableInboundClient inboundClient = new MutableInboundClient(clientSnapshot(true));
+        server.enqueue(successfulLogin("xui_session=abc; Path=/; HttpOnly"));
+        server.enqueue(jsonResponse(200, fixture("reset-traffic-success.json")));
+
+        assertThat(client(Duration.ofSeconds(2), inboundClient).resetTraffic(new ResetXuiClientTrafficRequest(
+                7,
+                "11111111-1111-1111-1111-111111111111",
+                "vpn_abc_def"
+        )).reset()).isTrue();
+
+        server.takeRequest(1, TimeUnit.SECONDS);
+        RecordedRequest reset = server.takeRequest(1, TimeUnit.SECONDS);
+        assertThat(reset.getMethod()).isEqualTo("POST");
+        assertThat(reset.getPath()).isEqualTo("/panel/api/clients/resetTraffic/vpn_abc_def");
+        assertThat(reset.getHeader("Cookie")).isEqualTo("xui_session=abc");
+    }
+
     private RestClientXuiClientManagementClient client(Duration readTimeout) {
         return client(readTimeout, new EmptyInboundClient());
     }
@@ -176,10 +225,11 @@ class RestClientXuiClientManagementClientIntegrationTest extends XuiMockServerSu
             return new RestClientXuiClientManagementClient(
                     new AuthenticatedRequestExecutor(authenticationManager, requestExecutor, properties),
                     properties,
-                    new XuiClientLifecycleProperties(null, null),
+                    new XuiClientLifecycleProperties(null, null, null, null, null),
                     inboundClient,
                     new XuiCreateClientPayloadBuilder(),
-                    new XuiDisableClientPayloadBuilder()
+                    new XuiDisableClientPayloadBuilder(),
+                    new XuiUpdateClientPayloadBuilder()
             );
         } catch (Exception exception) {
             throw new IllegalStateException("Could not create management client", exception);
@@ -197,7 +247,10 @@ class RestClientXuiClientManagementClientIntegrationTest extends XuiMockServerSu
                 Instant.ofEpochMilli(1893456000000L),
                 2,
                 "sub123",
-                "xtls-rprx-vision"
+                "xtls-rprx-vision",
+                "tg",
+                "comment",
+                1
         );
     }
 

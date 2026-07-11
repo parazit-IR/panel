@@ -1,0 +1,34 @@
+# Phase 4 XUI Acceptance
+
+- [x] Client foundation complete
+- [x] Authentication complete
+- [x] Session reuse complete
+- [x] Automatic re-login complete
+- [x] Inbound discovery complete
+- [x] Eligible inbound selection complete
+- [x] Client creation complete
+- [x] Provisioning idempotent
+- [x] Uncertain create reconciled
+- [x] Client disable complete
+- [x] Client deletion complete
+- [x] Local history retained
+- [x] Renewal complete
+- [x] Traffic replacement complete
+- [x] Traffic addition complete
+- [x] Enable complete
+- [x] IP-limit update complete
+- [x] Traffic reset complete
+- [x] Synchronization complete
+- [x] Operation idempotency complete
+- [x] Concurrent operation safety implemented with database constraint
+- [x] No blind destructive retry
+- [x] No credentials logged by implementation
+- [x] Mock integration tests pass for existing XUI HTTP paths
+- [x] PostgreSQL integration tests pass for provision and operation persistence
+- [x] Flyway passes
+- [x] Hibernate validation passes
+- [ ] Full dedicated concurrency integration tests for every Task 26 operation
+- [ ] Full end-to-end update operation integration tests for every endpoint
+- [x] No payment implemented
+- [x] No Telegram handler implemented
+- [x] No subscription/QR generation implemented

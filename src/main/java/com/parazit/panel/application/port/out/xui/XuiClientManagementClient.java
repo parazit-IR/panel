@@ -6,6 +6,10 @@ import com.parazit.panel.application.xui.client.model.DeleteXuiClientRequest;
 import com.parazit.panel.application.xui.client.model.DeleteXuiClientResponse;
 import com.parazit.panel.application.xui.client.model.DisableXuiClientRequest;
 import com.parazit.panel.application.xui.client.model.DisableXuiClientResponse;
+import com.parazit.panel.application.xui.client.model.ResetXuiClientTrafficRequest;
+import com.parazit.panel.application.xui.client.model.ResetXuiClientTrafficResponse;
+import com.parazit.panel.application.xui.client.model.UpdateXuiClientRequest;
+import com.parazit.panel.application.xui.client.model.UpdateXuiClientResponse;
 
 public interface XuiClientManagementClient {
 
@@ -14,4 +18,8 @@ public interface XuiClientManagementClient {
     DisableXuiClientResponse disableClient(DisableXuiClientRequest request);
 
     DeleteXuiClientResponse deleteClient(DeleteXuiClientRequest request);
+
+    UpdateXuiClientResponse updateClient(UpdateXuiClientRequest request);
+
+    ResetXuiClientTrafficResponse resetTraffic(ResetXuiClientTrafficRequest request);
 }

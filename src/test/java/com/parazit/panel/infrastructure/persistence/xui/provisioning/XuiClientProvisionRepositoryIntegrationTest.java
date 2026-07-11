@@ -123,6 +123,8 @@ class XuiClientProvisionRepositoryIntegrationTest extends PostgreSqlContainerSup
                 .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("7"));
         assertThat(Arrays.stream(flyway.info().applied()))
                 .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("8"));
+        assertThat(Arrays.stream(flyway.info().applied()))
+                .anySatisfy(info -> assertThat(info.getVersion().getVersion()).isEqualTo("9"));
     }
 
     private PlanSelection selection(Long telegramUserId, String planCode) {

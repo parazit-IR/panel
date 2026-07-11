@@ -15,6 +15,10 @@ import com.parazit.panel.application.xui.client.model.DeleteXuiClientRequest;
 import com.parazit.panel.application.xui.client.model.DeleteXuiClientResponse;
 import com.parazit.panel.application.xui.client.model.DisableXuiClientRequest;
 import com.parazit.panel.application.xui.client.model.DisableXuiClientResponse;
+import com.parazit.panel.application.xui.client.model.ResetXuiClientTrafficRequest;
+import com.parazit.panel.application.xui.client.model.ResetXuiClientTrafficResponse;
+import com.parazit.panel.application.xui.client.model.UpdateXuiClientRequest;
+import com.parazit.panel.application.xui.client.model.UpdateXuiClientResponse;
 import com.parazit.panel.application.xui.model.XuiClientSnapshot;
 import com.parazit.panel.infrastructure.xui.authentication.AuthenticatedRequestExecutor;
 import com.parazit.panel.infrastructure.xui.config.XuiClientLifecycleProperties;
@@ -39,6 +43,7 @@ public class RestClientXuiClientManagementClient implements XuiClientManagementC
     private final XuiInboundClient inboundClient;
     private final XuiCreateClientPayloadBuilder createPayloadBuilder;
     private final XuiDisableClientPayloadBuilder disablePayloadBuilder;
+    private final XuiUpdateClientPayloadBuilder updatePayloadBuilder;
 
     public RestClientXuiClientManagementClient(
             AuthenticatedRequestExecutor requestExecutor,
@@ -46,7 +51,8 @@ public class RestClientXuiClientManagementClient implements XuiClientManagementC
             XuiClientLifecycleProperties lifecycleProperties,
             XuiInboundClient inboundClient,
             XuiCreateClientPayloadBuilder createPayloadBuilder,
-            XuiDisableClientPayloadBuilder disablePayloadBuilder
+            XuiDisableClientPayloadBuilder disablePayloadBuilder,
+            XuiUpdateClientPayloadBuilder updatePayloadBuilder
     ) {
         this.requestExecutor = Objects.requireNonNull(requestExecutor, "requestExecutor must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
@@ -54,6 +60,7 @@ public class RestClientXuiClientManagementClient implements XuiClientManagementC
         this.inboundClient = Objects.requireNonNull(inboundClient, "inboundClient must not be null");
         this.createPayloadBuilder = Objects.requireNonNull(createPayloadBuilder, "createPayloadBuilder must not be null");
         this.disablePayloadBuilder = Objects.requireNonNull(disablePayloadBuilder, "disablePayloadBuilder must not be null");
+        this.updatePayloadBuilder = Objects.requireNonNull(updatePayloadBuilder, "updatePayloadBuilder must not be null");
     }
 
     @Override
@@ -99,7 +106,7 @@ public class RestClientXuiClientManagementClient implements XuiClientManagementC
         }
         try {
             XuiUpdateClientRemoteResponse response = requestExecutor.postEntityOnce(
-                    expand(lifecycleProperties.clientUpdatePathTemplate(), request.inboundId(), request.clientId()),
+                    expand(lifecycleProperties.clientUpdatePathTemplate(), request.inboundId(), request.clientId(), request.email()),
                     disablePayloadBuilder.build(request, remoteClient),
                     XuiUpdateClientRemoteResponse.class
             ).getBody();
@@ -162,6 +169,83 @@ public class RestClientXuiClientManagementClient implements XuiClientManagementC
         }
     }
 
+    @Override
+    public UpdateXuiClientResponse updateClient(UpdateXuiClientRequest request) {
+        Objects.requireNonNull(request, "request must not be null");
+        XuiClientSnapshot remoteClient = inboundClient.findClient(request.inboundId(), request.clientId(), request.expectedEmail())
+                .orElseThrow(() -> new XuiClientRemoteOperationRejectedException("Remote Xui client was not found", null));
+        verifyIdentity(request.clientId(), request.expectedEmail(), remoteClient);
+        try {
+            XuiUpdateClientRemoteResponse response = requestExecutor.postEntityOnce(
+                    expand(lifecycleProperties.clientUpdatePathTemplate(), request.inboundId(), request.clientId(), request.expectedEmail()),
+                    updatePayloadBuilder.build(request, remoteClient),
+                    XuiUpdateClientRemoteResponse.class
+            ).getBody();
+            if (response == null) {
+                throw new XuiInvalidResponseException("Xui update-client response is empty");
+            }
+            if (!Boolean.TRUE.equals(response.success())) {
+                throw new XuiInvalidResponseException(safeMessage(response.msg()));
+            }
+            String email = request.newEmail() == null || request.newEmail().isBlank()
+                    ? remoteClient.email()
+                    : request.newEmail().trim();
+            return new UpdateXuiClientResponse(
+                    request.inboundId(),
+                    request.clientId(),
+                    email,
+                    request.enabled() == null ? remoteClient.enabled() : request.enabled(),
+                    request.expiryTime() == null ? remoteClient.expiryTime() : request.expiryTime(),
+                    request.totalTrafficLimitBytes() == null
+                            ? remoteClient.totalTrafficLimitBytes()
+                            : request.totalTrafficLimitBytes(),
+                    request.ipLimit() == null ? remoteClient.ipLimit() : request.ipLimit(),
+                    true,
+                    safeMessage(response.msg())
+            );
+        } catch (XuiTimeoutException exception) {
+            throw new XuiClientRemoteOperationTimeoutException("Xui update-client request timed out", exception);
+        } catch (XuiConnectionException exception) {
+            throw new XuiClientRemoteOperationConnectionException("Xui update-client request could not connect", exception);
+        } catch (XuiInvalidResponseException exception) {
+            throw new XuiClientRemoteOperationRejectedException(exception.getMessage(), exception);
+        }
+    }
+
+    @Override
+    public ResetXuiClientTrafficResponse resetTraffic(ResetXuiClientTrafficRequest request) {
+        Objects.requireNonNull(request, "request must not be null");
+        inboundClient.findClient(request.inboundId(), request.clientId(), request.email())
+                .ifPresent(remote -> verifyIdentity(request.clientId(), request.email(), remote));
+        try {
+            XuiDeleteClientRemoteResponse response = requestExecutor.postEntityOnce(
+                    expand(lifecycleProperties.clientResetTrafficPathTemplate(), request.inboundId(), request.clientId(), request.email()),
+                    java.util.Map.of(),
+                    XuiDeleteClientRemoteResponse.class
+            ).getBody();
+            if (response == null) {
+                throw new XuiInvalidResponseException("Xui reset-traffic response is empty");
+            }
+            if (!Boolean.TRUE.equals(response.success())) {
+                throw new XuiInvalidResponseException(safeMessage(response.msg()));
+            }
+            return new ResetXuiClientTrafficResponse(
+                    request.inboundId(),
+                    request.clientId(),
+                    request.email(),
+                    true,
+                    false,
+                    safeMessage(response.msg())
+            );
+        } catch (XuiTimeoutException exception) {
+            throw new XuiClientRemoteOperationTimeoutException("Xui reset-traffic request timed out", exception);
+        } catch (XuiConnectionException exception) {
+            throw new XuiClientRemoteOperationConnectionException("Xui reset-traffic request could not connect", exception);
+        } catch (XuiInvalidResponseException exception) {
+            throw new XuiClientRemoteOperationRejectedException(exception.getMessage(), exception);
+        }
+    }
+
     private static void verifyIdentity(String expectedClientId, String expectedEmail, XuiClientSnapshot remoteClient) {
         if (remoteClient.clientId() == null || !remoteClient.clientId().equalsIgnoreCase(expectedClientId)) {
             throw new XuiRemoteClientIdentityMismatchException();
@@ -177,6 +261,11 @@ public class RestClientXuiClientManagementClient implements XuiClientManagementC
         return template
                 .replace("{inboundId}", Long.toString(inboundId))
                 .replace("{clientId}", encode(clientId));
+    }
+
+    private static String expand(String template, long inboundId, String clientId, String email) {
+        return expand(template, inboundId, clientId)
+                .replace("{email}", encode(email));
     }
 
     private static String encode(String value) {

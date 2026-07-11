@@ -132,7 +132,10 @@ class DeleteVpnClientServiceTest {
                 NOW.plusSeconds(86_400),
                 2,
                 "sub123",
-                "xtls-rprx-vision"
+                "xtls-rprx-vision",
+                "",
+                "",
+                0
         );
     }
 }

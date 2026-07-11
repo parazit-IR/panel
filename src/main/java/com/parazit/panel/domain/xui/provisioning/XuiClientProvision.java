@@ -64,13 +64,13 @@ public class XuiClientProvision extends BaseEntity {
     @Column(name = "status", nullable = false, length = 32)
     private XuiProvisionStatus status;
 
-    @Column(name = "traffic_limit_bytes", nullable = false, updatable = false)
+    @Column(name = "traffic_limit_bytes", nullable = false)
     private long trafficLimitBytes;
 
-    @Column(name = "expires_at", nullable = false, updatable = false)
+    @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
-    @Column(name = "ip_limit", nullable = false, updatable = false)
+    @Column(name = "ip_limit", nullable = false)
     private int ipLimit;
 
     @Column(name = "provisioned_at")
@@ -84,6 +84,15 @@ public class XuiClientProvision extends BaseEntity {
 
     @Column(name = "last_synchronized_at")
     private Instant lastSynchronizedAt;
+
+    @Column(name = "last_known_upload_bytes", nullable = false)
+    private long lastKnownUploadBytes;
+
+    @Column(name = "last_known_download_bytes", nullable = false)
+    private long lastKnownDownloadBytes;
+
+    @Column(name = "last_known_total_bytes", nullable = false)
+    private long lastKnownTotalBytes;
 
     @Column(name = "failure_code", length = FAILURE_CODE_MAX_LENGTH)
     private String failureCode;
@@ -254,6 +263,30 @@ public class XuiClientProvision extends BaseEntity {
         clearFailure();
     }
 
+    public void markEnabling() {
+        if (status == XuiProvisionStatus.ENABLING || status == XuiProvisionStatus.ACTIVE) {
+            return;
+        }
+        if (status != XuiProvisionStatus.DISABLED && status != XuiProvisionStatus.UNKNOWN) {
+            throw new IllegalStateException("cannot mark enabling from status " + status);
+        }
+        status = XuiProvisionStatus.ENABLING;
+        clearFailure();
+    }
+
+    public void markReactivated(Instant provisionedAt) {
+        Instant requiredProvisionedAt = Objects.requireNonNull(provisionedAt, "provisionedAt must not be null");
+        if (status == XuiProvisionStatus.ACTIVE) {
+            return;
+        }
+        if (status != XuiProvisionStatus.ENABLING && status != XuiProvisionStatus.UNKNOWN) {
+            throw new IllegalStateException("cannot reactivate from status " + status);
+        }
+        status = XuiProvisionStatus.ACTIVE;
+        this.provisionedAt = requiredProvisionedAt;
+        clearFailure();
+    }
+
     public void markOperationUnknown(String failureCode, String safeMessage) {
         if (status == XuiProvisionStatus.DELETED) {
             return;
@@ -274,6 +307,59 @@ public class XuiClientProvision extends BaseEntity {
 
     public void markSynchronized(Instant synchronizedAt) {
         this.lastSynchronizedAt = Objects.requireNonNull(synchronizedAt, "synchronizedAt must not be null");
+    }
+
+    public void updateExpectedConfiguration(long trafficLimitBytes, Instant expiresAt, int ipLimit) {
+        this.trafficLimitBytes = requireNonNegative(trafficLimitBytes, "trafficLimitBytes");
+        this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt must not be null");
+        this.ipLimit = requireNonNegativeInt(ipLimit, "ipLimit");
+    }
+
+    public void updateTrafficLimit(long trafficLimitBytes) {
+        this.trafficLimitBytes = requireNonNegative(trafficLimitBytes, "trafficLimitBytes");
+    }
+
+    public void updateExpiresAt(Instant expiresAt) {
+        this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt must not be null");
+    }
+
+    public void updateIpLimit(int ipLimit) {
+        this.ipLimit = requireNonNegativeInt(ipLimit, "ipLimit");
+    }
+
+    public void updateKnownTraffic(long uploadBytes, long downloadBytes, Instant synchronizedAt) {
+        this.lastKnownUploadBytes = requireNonNegative(uploadBytes, "uploadBytes");
+        this.lastKnownDownloadBytes = requireNonNegative(downloadBytes, "downloadBytes");
+        this.lastKnownTotalBytes = Math.addExact(this.lastKnownUploadBytes, this.lastKnownDownloadBytes);
+        markSynchronized(synchronizedAt);
+    }
+
+    public void synchronizeRemoteState(
+            boolean enabled,
+            long trafficLimitBytes,
+            Instant expiresAt,
+            int ipLimit,
+            long uploadBytes,
+            long downloadBytes,
+            Instant synchronizedAt
+    ) {
+        if (status == XuiProvisionStatus.DELETED || status == XuiProvisionStatus.DELETING) {
+            throw new IllegalStateException("cannot synchronize deleted provision");
+        }
+        if (status == XuiProvisionStatus.PENDING || status == XuiProvisionStatus.PROVISIONING) {
+            throw new IllegalStateException("cannot synchronize unprovisioned client");
+        }
+        updateExpectedConfiguration(trafficLimitBytes, expiresAt, ipLimit);
+        updateKnownTraffic(uploadBytes, downloadBytes, synchronizedAt);
+        if (enabled) {
+            status = XuiProvisionStatus.ACTIVE;
+        } else {
+            status = XuiProvisionStatus.DISABLED;
+            if (disabledAt == null) {
+                disabledAt = synchronizedAt;
+            }
+        }
+        clearFailure();
     }
 
     public UUID getUserId() {
@@ -334,6 +420,18 @@ public class XuiClientProvision extends BaseEntity {
 
     public Instant getLastSynchronizedAt() {
         return lastSynchronizedAt;
+    }
+
+    public long getLastKnownUploadBytes() {
+        return lastKnownUploadBytes;
+    }
+
+    public long getLastKnownDownloadBytes() {
+        return lastKnownDownloadBytes;
+    }
+
+    public long getLastKnownTotalBytes() {
+        return lastKnownTotalBytes;
     }
 
     public String getFailureCode() {

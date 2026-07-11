@@ -8,6 +8,7 @@ public enum XuiProvisionStatus {
     UNKNOWN,
     DISABLING,
     DISABLED,
+    ENABLING,
     DELETING,
     DELETED
 }

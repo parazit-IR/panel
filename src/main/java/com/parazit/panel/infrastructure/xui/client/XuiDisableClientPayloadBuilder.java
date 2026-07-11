@@ -23,10 +23,10 @@ public class XuiDisableClientPayloadBuilder {
                 remoteClient.totalTrafficLimitBytes(),
                 remoteClient.expiryTime() == null ? 0 : remoteClient.expiryTime().toEpochMilli(),
                 false,
-                "",
+                remoteClient.telegramId() == null ? "" : remoteClient.telegramId(),
                 remoteClient.subscriptionId(),
-                "",
-                0
+                remoteClient.comment() == null ? "" : remoteClient.comment(),
+                remoteClient.reset()
         );
         return new XuiUpdateClientRemoteRequest(
                 request.inboundId(),

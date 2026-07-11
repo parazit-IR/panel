@@ -68,7 +68,10 @@ public class XuiInboundPayloadParser {
                     toInstant(longAt(client, "expiryTime")),
                     nonNegativeInt(client, "client.ipLimit", 0, "limitIp", "ipLimit"),
                     textAt(client, "subId", "subscriptionId"),
-                    textAt(client, "flow")
+                    textAt(client, "flow"),
+                    textAt(client, "tgId", "telegramId"),
+                    textAt(client, "comment"),
+                    nonNegativeInt(client, "client.reset", 0, "reset")
             ));
         }
         return List.copyOf(snapshots);
