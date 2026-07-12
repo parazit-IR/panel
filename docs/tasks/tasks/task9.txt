@@ -1,0 +1,599 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 9 – User Model
+
+Goal:
+
+Design and implement the User domain model and its persistence foundation without implementing registration, profile management, Telegram handlers, referral logic, or authentication flows yet.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code and conventions from Tasks 1–8.
+* Reuse BaseEntity, repository abstractions, Flyway, validation, logging, exception handling, and dependency injection patterns already implemented.
+* Do not add unnecessary dependencies.
+* Do not expose JPA entities directly from controllers.
+* Do not implement Telegram update handling in this task.
+* Do not implement user registration in this task.
+* Do not implement security authentication or authorization.
+* Do not implement referral processing.
+* Do not implement plan, payment, order, subscription, or 3x-ui logic.
+* Use Java 21.
+* Use PostgreSQL.
+* Use Flyway for all schema changes.
+* Use constructor injection.
+* Do not use Lombok @Data.
+* Stop after completing Task 9.
+* Do not begin Task 10.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* current package structure;
+* BaseEntity design;
+* UUID strategy;
+* JPA auditing setup;
+* repository abstraction;
+* exception handling conventions;
+* test infrastructure;
+* Flyway migration history;
+* naming conventions;
+* any architecture concerns relevant to the User aggregate.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture decisions
+
+5. Risks or conflicts
+
+6. User aggregate design
+
+Create the User aggregate in the domain layer.
+
+Suggested package:
+
+com.parazit.panel.domain.user
+
+Create:
+
+User
+
+The User entity must extend BaseEntity.
+
+Required fields:
+
+UUID id inherited from BaseEntity
+
+Long telegramUserId
+
+String username
+
+String firstName
+
+String lastName
+
+UserLanguage language
+
+UserStatus status
+
+Boolean blocked
+
+Instant lastInteractionAt
+
+Instant createdAt inherited from BaseEntity
+
+Instant updatedAt inherited from BaseEntity
+
+Design rules:
+
+* telegramUserId is the external identity from Telegram.
+* telegramUserId must be unique and required.
+* username is optional because Telegram users may not have a username.
+* firstName is required.
+* lastName is optional.
+* language is required.
+* status is required.
+* blocked must not be null.
+* lastInteractionAt is optional initially.
+* Strings must be normalized.
+* Empty optional strings should be stored as null where practical.
+* Do not store Telegram access tokens or secrets on the user.
+* Do not add password fields.
+* Do not add email or phone unless already required by the current project.
+* Do not add payment or subscription fields directly to User.
+* Do not add bidirectional relationships.
+* Keep the aggregate small.
+
+3. User enums
+
+Create:
+
+UserLanguage
+
+Initial values:
+
+FA
+EN
+
+Create:
+
+UserStatus
+
+Initial values:
+
+ACTIVE
+INACTIVE
+SUSPENDED
+
+Rules:
+
+* Persist enums as strings.
+* Do not use ordinal persistence.
+* Add behavior only when it is meaningful.
+* Avoid enum values that are not currently needed.
+
+4. Entity construction and mutation
+
+Do not expose unrestricted public setters for every field.
+
+Provide a controlled creation path, such as:
+
+User.create(
+Long telegramUserId,
+String username,
+String firstName,
+String lastName,
+UserLanguage language,
+Instant currentTime
+)
+
+Or a constructor/factory matching existing project style.
+
+Initial values:
+
+status = ACTIVE
+blocked = false
+lastInteractionAt = currentTime
+
+Provide focused mutation methods:
+
+updateTelegramProfile(
+String username,
+String firstName,
+String lastName,
+Instant interactionTime
+)
+
+changeLanguage(UserLanguage language)
+
+activate()
+
+deactivate()
+
+suspend()
+
+block()
+
+unblock()
+
+recordInteraction(Instant interactionTime)
+
+Rules:
+
+* Validate required inputs.
+* Prevent invalid null state.
+* Do not place Spring annotations on pure domain behavior unless required for JPA.
+* Protect invariants.
+* Do not allow telegramUserId to change after creation.
+* Mutation methods must be explicit.
+* Do not create generic update(Map) methods.
+* Do not accept DTOs inside the entity.
+
+5. Validation and normalization
+
+Implement basic domain validation.
+
+Requirements:
+
+* telegramUserId must be positive.
+* firstName must not be blank.
+* language must not be null.
+* currentTime and interactionTime must not be null where required.
+* username should be trimmed.
+* Remove a leading @ from username if present.
+* Store blank username as null.
+* Trim firstName and lastName.
+* Store blank optional lastName as null.
+* Define sensible maximum lengths.
+
+Suggested limits:
+
+username: 64
+firstName: 128
+lastName: 128
+
+Use database constraints as a second line of defense.
+
+Do not expose raw IllegalArgumentException messages to API users without using the existing exception handling conventions.
+
+6. JPA mapping
+
+Map User as a PostgreSQL-backed JPA entity.
+
+Suggested table:
+
+users
+
+Requirements:
+
+* Use @Entity.
+* Use @Table.
+* Add a unique constraint for telegram_user_id.
+* Add indexes for:
+
+telegram_user_id
+status
+created_at
+
+* Map enums using EnumType.STRING.
+* Use snake_case column names.
+* Respect BaseEntity mapping.
+* Do not use EAGER relationships.
+* Do not create relationships in this task.
+* Use column lengths matching domain limits.
+* blocked must be not null.
+* status must be not null.
+* language must be not null.
+* first_name must be not null.
+* telegram_user_id must be not null.
+* telegram_user_id must be immutable after insertion if supported by the mapping.
+* Do not use database-generated numeric IDs.
+
+7. Flyway migration
+
+Create the next migration based on the current migration version.
+
+Suggested name:
+
+V2__create_users_table.sql
+
+Adjust the version if the repository already contains later migrations.
+
+The migration must:
+
+* create users table;
+* define UUID primary key;
+* define telegram_user_id as BIGINT;
+* add unique constraint;
+* define username;
+* define first_name;
+* define last_name;
+* define language;
+* define status;
+* define blocked;
+* define last_interaction_at;
+* define created_at;
+* define updated_at;
+* add required indexes;
+* add check constraints where useful;
+* use TIMESTAMPTZ for Instant fields;
+* use VARCHAR for enum values;
+* remain compatible with Hibernate validation.
+
+Add comments only where they provide real value.
+
+Do not use Hibernate ddl-auto to create the table.
+
+8. Domain repository
+
+Create:
+
+UserRepository
+
+Suggested package:
+
+com.parazit.panel.domain.user.repository
+
+Requirements:
+
+* Extend UuidRepository<User>.
+* Add:
+
+Optional<User> findByTelegramUserId(Long telegramUserId)
+
+boolean existsByTelegramUserId(Long telegramUserId)
+
+* Keep it independent from Spring Data.
+* Do not add query methods for future features.
+* Do not expose Page, Pageable, Specification, or JpaRepository.
+
+9. Spring Data repository
+
+Create:
+
+SpringDataUserRepository
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.user
+
+Requirements:
+
+* Extend SpringDataUuidRepository<User>.
+* Add Spring Data derived query methods for:
+
+findByTelegramUserId
+existsByTelegramUserId
+
+* Keep it inside infrastructure.
+
+10. Repository adapter
+
+Create:
+
+UserRepositoryAdapter
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.user
+
+Requirements:
+
+* Extend JpaRepositoryAdapter<User, UUID>.
+* Implement UserRepository.
+* Delegate user-specific methods to SpringDataUserRepository.
+* Use constructor injection.
+* Annotate the concrete adapter appropriately.
+* Do not catch and rethrow Spring persistence exceptions without adding value.
+* Do not add business logic to the adapter.
+
+11. Domain exception
+
+Create a domain exception only if consistent with the current exception architecture.
+
+Suggested exceptions:
+
+InvalidUserStateException
+
+or:
+
+InvalidUserDataException
+
+Requirements:
+
+* Keep exceptions focused.
+* Do not create many exception types without need.
+* Do not expose SQL details.
+* Do not create UserNotFoundException yet unless it is genuinely needed in this task.
+* Integrate with existing exception handling only when required.
+
+12. Unit tests for User
+
+Create pure unit tests without Spring context.
+
+Test at least:
+
+* successful creation;
+* default ACTIVE status;
+* default blocked=false;
+* lastInteractionAt initialization;
+* username normalization;
+* leading @ removal;
+* blank optional username becomes null;
+* blank optional lastName becomes null;
+* firstName trimming;
+* invalid telegramUserId rejected;
+* blank firstName rejected;
+* null language rejected;
+* language change;
+* activation;
+* deactivation;
+* suspension;
+* block;
+* unblock;
+* interaction timestamp update;
+* Telegram profile update;
+* telegramUserId cannot be changed.
+
+Use a fixed Instant.
+
+Do not use Testcontainers for domain unit tests.
+
+13. Repository integration tests
+
+Create PostgreSQL Testcontainers integration tests.
+
+Test:
+
+* save User;
+* generated UUID;
+* createdAt populated;
+* updatedAt populated;
+* findByTelegramUserId;
+* existsByTelegramUserId;
+* unique telegramUserId constraint;
+* enum persistence;
+* blocked persistence;
+* lastInteractionAt persistence;
+* update profile;
+* update language;
+* status update;
+* audit updatedAt change;
+* Hibernate schema validation;
+* Flyway migration success.
+
+Requirements:
+
+* Use real PostgreSQL.
+* Do not rely on local PostgreSQL.
+* Reuse existing Testcontainers infrastructure.
+* Clean test data reliably.
+* Avoid test order dependency.
+
+14. Constraint violation behavior
+
+Verify duplicate telegramUserId behavior.
+
+Requirements:
+
+* The database must reject duplicates.
+* The test must flush the persistence context to trigger the constraint.
+* Do not rely only on exists checks for uniqueness.
+* Do not yet implement registration-level duplicate handling; that belongs to Task 10.
+
+15. API and DTO restrictions
+
+Do not create public user endpoints yet.
+
+Do not create:
+
+POST /users
+GET /users
+registration endpoint
+profile endpoint
+
+Do not create API request or response DTOs unless a small internal test fixture requires them.
+
+Task 9 is domain and persistence only.
+
+16. Architecture rules
+
+Verify:
+
+* User domain repository does not import Spring Data.
+* Application package does not depend on infrastructure.
+* Infrastructure implements domain repository interfaces.
+* User entity does not depend on API DTOs.
+* No controller accesses SpringDataUserRepository.
+* No service locator exists.
+* No field injection exists.
+* No payment, plan, Telegram bot, 3x-ui, or subscription dependency is added.
+
+17. Documentation
+
+Create:
+
+docs/domain/user-model.md
+
+Document:
+
+* purpose of User aggregate;
+* why Telegram user ID is the external identity;
+* field definitions;
+* required and optional fields;
+* normalization rules;
+* state transitions;
+* language support;
+* blocked versus status semantics;
+* repository responsibilities;
+* database constraints;
+* why subscription and payment data are not stored in User;
+* future work deferred to Task 10 and later tasks.
+
+Clarify semantics:
+
+blocked:
+The bot or system must not serve the user.
+
+status:
+Business lifecycle state such as active, inactive, or suspended.
+
+18. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/user/
+User.java
+UserLanguage.java
+UserStatus.java
+
+src/main/java/com/parazit/panel/domain/user/repository/
+UserRepository.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/user/
+SpringDataUserRepository.java
+UserRepositoryAdapter.java
+
+src/main/resources/db/migration/
+V2__create_users_table.sql
+
+src/test/java/com/parazit/panel/domain/user/
+UserTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/user/
+UserRepositoryAdapterIntegrationTest.java
+
+docs/domain/
+user-model.md
+
+Adapt names only when required by existing project conventions.
+
+19. Verification commands
+
+Run commands appropriate to the build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also verify application startup with the local profile and PostgreSQL running.
+
+Confirm:
+
+* Flyway migration succeeds;
+* Hibernate validation succeeds;
+* User unit tests pass;
+* repository integration tests pass;
+* duplicate Telegram ID is rejected;
+* all earlier tests still pass;
+* application starts;
+* no credentials are committed;
+* no business endpoint was added;
+* no registration logic was implemented.
+
+20. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Architecture decisions
+3. Planned files to create
+4. Planned files to modify
+5. Risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Domain invariants
+6. Test results
+7. Build result
+8. Commands executed
+9. Remaining issues
+10. Suggested commit message
+
+Use this commit message unless the repository convention requires another format:
+
+feat(user): add user domain model and persistence
+
+Stop after completing Task 9.
+
+Do not start Task 10.
+

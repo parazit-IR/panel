@@ -1,0 +1,2544 @@
+You are a senior Java 21, Spring Boot, payment-workflow, transactional-outbox, and distributed-systems engineer.
+
+Continue implementing the existing project.
+
+# Task 31 — Manual Payment Review, Order Finalization, and Provisioning Trigger
+
+## Goal
+
+Implement the final payment-approval workflow shared by:
+
+* Zarinpal payments already verified in Task 28;
+* manual card-to-card payments reviewed by an operator.
+
+After this task, the application must be able to:
+
+* let an operator claim a manual receipt for review;
+* approve or reject the receipt;
+* preserve complete review and audit history;
+* approve the related Payment safely;
+* finalize the related Order as paid;
+* ensure only one approved Payment exists for an Order;
+* create a reliable provisioning command through a transactional outbox;
+* execute VPN provisioning only after the payment transaction commits;
+* reuse the idempotent 3x-ui provisioning flow from Task 24;
+* handle provisioning retries without charging or approving twice;
+* prevent duplicate VPN clients;
+* preserve failed and uncertain provisioning state;
+* support both new purchases and future renewal-oriented order types cleanly.
+
+Do not implement:
+
+* Telegram Bot handlers;
+* user-facing subscription links;
+* QR Code generation;
+* automated receipt OCR;
+* automatic bank-account matching;
+* refund processing;
+* chargeback handling;
+* scheduled reminder jobs;
+* full admin dashboard UI;
+* deployment.
+
+Stop after completing Task 31.
+
+Do not begin Task 32.
+
+---
+
+# 1. Important rules
+
+* Inspect the complete repository before making changes.
+* Preserve all working behavior from Tasks 1–30.
+* Reuse Payment, Order, ManualPaymentReceipt, ManualCardPaymentInstruction, XuiClientProvision, PlanSelection, repositories, BaseEntity, SystemClockPort, exception handling, traceId, logging, transaction conventions, and Testcontainers support.
+* Use Java 21 and the existing Spring Boot version.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities through APIs.
+* Do not inject Spring Data repositories into controllers or application services.
+* Do not approve a Payment outside a database transaction.
+* Do not call 3x-ui inside the same database transaction that approves Payment.
+* Do not publish an in-memory event as the only provisioning guarantee.
+* Do not create a VPN client before Payment is committed as APPROVED.
+* Do not approve the same Payment twice.
+* Do not create more than one approved Payment for an Order.
+* Do not create more than one VPN provision for the same paid Order or PlanSelection.
+* Do not trust operator request data for amounts, User ownership, remote IDs, or plan details.
+* Do not modify receipt files during review.
+* Do not delete rejected receipts.
+* Do not physically delete audit history.
+* Do not log receipt contents, bank-card details, cookies, private keys, or raw 3x-ui responses.
+* Do not call a real 3x-ui server during automated tests.
+* Do not begin Task 32.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* Payment aggregate and all statuses;
+* Payment methods;
+* Zarinpal approval flow;
+* manual Payment and receipt flow;
+* ManualPaymentReceipt statuses;
+* ManualCardPaymentInstruction statuses;
+* Order aggregate and statuses;
+* PlanSelection lifecycle;
+* XuiClientProvision idempotency;
+* CreateVpnClientUseCase;
+* PaymentProcessor abstractions;
+* existing domain-event conventions;
+* existing outbox infrastructure if any;
+* transaction management;
+* scheduling support;
+* migration history;
+* exception mappings;
+* current operator/admin endpoints;
+* test support;
+* any existing provisioning trigger.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Payment approval unification decision
+3. Order lifecycle decision
+4. Manual review lifecycle decision
+5. Review-claim strategy
+6. Outbox design
+7. Provisioning idempotency key
+8. Transaction-boundary design
+9. Retry and failure strategy
+10. Planned files to create
+11. Planned files to modify
+12. Migration and concurrency risks
+
+---
+
+# 3. Shared payment approval principle
+
+Create one centralized application capability for final Payment approval.
+
+Create:
+
+ApprovePaymentUseCase
+
+or an internal application service:
+
+PaymentApprovalService
+
+Responsibilities:
+
+* validate Payment;
+* validate related Order;
+* ensure only one approved Payment per Order;
+* mark Payment APPROVED;
+* mark Order PAID;
+* create provisioning outbox record when required;
+* perform all local state transitions in one database transaction.
+
+This service must be reusable by:
+
+* successful Zarinpal verification;
+* approved manual receipt.
+
+Task 28 may currently mark Payment APPROVED directly.
+
+Refactor minimally so that successful Zarinpal verification delegates final approval to the shared approval service.
+
+Do not duplicate approval logic in:
+
+* Zarinpal verification service;
+* operator review service;
+* controllers.
+
+---
+
+# 4. Order aggregate and lifecycle
+
+Inspect whether Order was implemented correctly in Task 27.
+
+If missing or incomplete, create/refine:
+
+Order
+
+Suggested package:
+
+com.parazit.panel.domain.order
+
+Recommended fields:
+
+UUID id inherited
+
+UUID userId
+
+UUID planId
+
+UUID planSelectionId
+
+OrderType type
+
+OrderStatus status
+
+long baseAmount
+
+long finalAmount
+
+CurrencyCode currency
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Instant paidAt
+
+Instant cancelledAt
+
+Instant completedAt
+
+String failureCode
+
+String failureMessage
+
+Recommended OrderType values:
+
+NEW_SUBSCRIPTION
+
+RENEWAL
+
+TRAFFIC_ADDON
+
+Recommended Task 31 primary support:
+
+NEW_SUBSCRIPTION
+
+Future-compatible support:
+
+RENEWAL
+TRAFFIC_ADDON
+
+Recommended OrderStatus values:
+
+CREATED
+
+PAYMENT_PENDING
+
+PAID
+
+PROVISIONING
+
+COMPLETED
+
+PROVISIONING_FAILED
+
+CANCELLED
+
+EXPIRED
+
+Rules:
+
+* CREATED -> PAYMENT_PENDING
+* PAYMENT_PENDING -> PAID
+* PAID -> PROVISIONING
+* PROVISIONING -> COMPLETED
+* PROVISIONING -> PROVISIONING_FAILED
+* PROVISIONING_FAILED -> PROVISIONING for retry
+* PAID must never return to PAYMENT_PENDING
+* COMPLETED is terminal
+* CANCELLED and EXPIRED cannot become PAID unless explicitly supported by a recovery policy
+* No generic status setter
+* Payment approval marks Order PAID
+* Outbox processing later marks PROVISIONING
+* Provisioning success marks COMPLETED
+* Provisioning failure marks PROVISIONING_FAILED
+
+Do not mark Order COMPLETED merely because Payment is approved.
+
+---
+
+# 5. Order repository
+
+Ensure:
+
+OrderRepository
+
+supports:
+
+Optional<Order> findById(UUID orderId)
+
+Optional<Order> findByPlanSelectionId(UUID planSelectionId)
+
+List<Order> findAllByUserId(UUID userId)
+
+boolean existsPaidOrCompletedByPlanSelectionId(UUID planSelectionId)
+
+Optional<Order> findByApprovedPaymentId if stored, or avoid this relationship if unnecessary.
+
+Keep repository independent from Spring Data.
+
+Add infrastructure adapter methods only when needed.
+
+---
+
+# 6. Manual review aggregate
+
+Create:
+
+ManualPaymentReview
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual.review
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited
+
+UUID receiptId
+
+UUID paymentId
+
+UUID orderId
+
+ManualPaymentReviewStatus status
+
+String reviewerId
+
+Instant claimedAt
+
+Instant reviewStartedAt
+
+Instant decidedAt
+
+String decisionReason
+
+String operatorNote
+
+long expectedAmount
+
+long claimedAmount
+
+boolean amountMatched
+
+boolean duplicateHashDetected
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Design rules:
+
+* Each receipt may have at most one review record.
+* reviewerId is the operator identity string.
+* Do not infer operator identity from a display name.
+* Keep operator identity stable and auditable.
+* Do not store authentication credentials.
+* expectedAmount comes from persisted manual instruction.
+* claimedAmount comes from persisted receipt.
+* amountMatched is captured at decision time.
+* duplicateHashDetected is captured for audit.
+* decisionReason required for rejection.
+* operatorNote optional but bounded.
+* Receipt file content remains immutable.
+
+---
+
+# 7. Review status
+
+Create:
+
+ManualPaymentReviewStatus
+
+Values:
+
+PENDING
+
+CLAIMED
+
+APPROVED
+
+REJECTED
+
+RELEASED
+
+Rules:
+
+* PENDING -> CLAIMED
+* CLAIMED -> APPROVED
+* CLAIMED -> REJECTED
+* CLAIMED -> RELEASED
+* RELEASED -> CLAIMED
+* APPROVED and REJECTED are terminal
+* Only the claiming operator may approve, reject, or release
+* Review claim must expire or be releasable if operator abandons it
+* No generic setter
+* Same-state behavior deterministic
+
+---
+
+# 8. Review claim timeout
+
+Create configuration:
+
+ManualPaymentReviewProperties
+
+Prefix:
+
+app.payment.manual-review
+
+Fields:
+
+Duration claimTtl
+
+int queuePageSize
+
+int maxQueuePageSize
+
+boolean requireTrackingNumber
+
+boolean requireSenderCardLastFour
+
+boolean requireOperatorNoteOnApproval
+
+Requirements:
+
+* claim TTL positive;
+* safe defaults;
+* no sensitive data;
+* update `.env.example`.
+
+Example:
+
+MANUAL_PAYMENT_REVIEW_CLAIM_TTL=PT15M
+
+MANUAL_PAYMENT_REVIEW_QUEUE_PAGE_SIZE=50
+
+MANUAL_PAYMENT_REVIEW_MAX_QUEUE_PAGE_SIZE=200
+
+MANUAL_PAYMENT_REVIEW_REQUIRE_TRACKING_NUMBER=false
+
+MANUAL_PAYMENT_REVIEW_REQUIRE_SENDER_CARD_LAST_FOUR=false
+
+MANUAL_PAYMENT_REVIEW_REQUIRE_OPERATOR_NOTE_ON_APPROVAL=false
+
+---
+
+# 9. Review database migration
+
+Create the next migration.
+
+Suggested:
+
+V13__create_manual_payment_reviews_and_payment_outbox.sql
+
+Adjust version based on actual migration history.
+
+Create table:
+
+manual_payment_reviews
+
+Columns:
+
+id UUID primary key
+
+receipt_id UUID not null
+
+payment_id UUID not null
+
+order_id UUID not null
+
+status VARCHAR(32) not null
+
+reviewer_id VARCHAR(128) null
+
+claimed_at TIMESTAMPTZ null
+
+review_started_at TIMESTAMPTZ null
+
+decided_at TIMESTAMPTZ null
+
+decision_reason VARCHAR(500) null
+
+operator_note VARCHAR(1000) null
+
+expected_amount BIGINT not null
+
+claimed_amount BIGINT not null
+
+amount_matched BOOLEAN not null
+
+duplicate_hash_detected BOOLEAN not null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique receipt_id;
+* foreign keys to receipt, payment, and order;
+* expected_amount > 0;
+* claimed_amount > 0;
+* valid status;
+* CLAIMED requires reviewer_id and claimed_at;
+* APPROVED/REJECTED require reviewer_id and decided_at;
+* REJECTED requires decision_reason.
+
+Indexes:
+
+payment_id
+order_id
+status
+reviewer_id
+claimed_at
+decided_at
+
+Use RESTRICT or NO ACTION deletion.
+
+Do not edit old migrations.
+
+---
+
+# 10. Review repository
+
+Create:
+
+ManualPaymentReviewRepository
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual.review.repository
+
+Extend:
+
+UuidRepository<ManualPaymentReview>
+
+Add:
+
+Optional<ManualPaymentReview> findByReceiptId(UUID receiptId)
+
+Optional<ManualPaymentReview> findClaimedByReceiptId(UUID receiptId)
+
+List<ManualPaymentReview> findAllByReviewerIdOrderByClaimedAtDesc(
+String reviewerId
+)
+
+boolean existsByReceiptId(UUID receiptId)
+
+Create Spring Data repository and adapter.
+
+No Spring Pageable leakage.
+
+---
+
+# 11. Operator identity abstraction
+
+Create:
+
+CurrentOperatorProvider
+
+Suggested package:
+
+com.parazit.panel.application.port.out.security
+
+Method:
+
+String currentOperatorId()
+
+Because Spring Security is not yet implemented, provide a temporary internal adapter:
+
+HeaderBasedCurrentOperatorProvider
+
+or explicit operatorId command field.
+
+Preferred Task 31 implementation:
+
+Internal API requires header:
+
+X-OPERATOR-ID
+
+Controller passes no raw header into domain.
+
+CurrentOperatorProvider resolves and validates it.
+
+Requirements:
+
+* Nonblank.
+* Bounded length.
+* Safe character set.
+* Do not use operator display name as identity.
+* Document this as temporary.
+* Future Spring Security must replace it.
+
+Do not trust operator ID from request JSON if a provider abstraction is used.
+
+---
+
+# 12. Claim review use case
+
+Create:
+
+ClaimManualPaymentReviewUseCase
+
+Command:
+
+UUID receiptId
+
+Result:
+
+ManualPaymentReviewResult
+
+Behavior:
+
+1. Resolve operator ID.
+2. Load queued receipt.
+3. Validate receipt status QUEUED_FOR_REVIEW.
+4. Validate Payment WAITING_FOR_REVIEW.
+5. Validate instruction RECEIPT_PENDING.
+6. Load or create review.
+7. If unclaimed:
+
+   * claim for current operator.
+8. If claimed by same operator:
+
+   * return idempotently.
+9. If claimed by another operator and claim not expired:
+
+   * return conflict.
+10. If claim expired:
+
+* release and allow current operator to claim.
+
+11. Do not alter Payment status.
+
+Use a short transaction.
+
+Concurrency-safe claim is required.
+
+Use row locking or conditional update.
+
+Do not rely on JVM locks.
+
+---
+
+# 13. Release review use case
+
+Create:
+
+ReleaseManualPaymentReviewUseCase
+
+Behavior:
+
+* Only claiming operator may release.
+* CLAIMED -> RELEASED.
+* Receipt remains QUEUED_FOR_REVIEW.
+* Payment remains WAITING_FOR_REVIEW.
+* Another operator may claim afterward.
+* Repeated release behavior documented.
+* APPROVED/REJECTED reviews cannot be released.
+
+---
+
+# 14. Approve review use case
+
+Create:
+
+ApproveManualPaymentReviewUseCase
+
+Command fields:
+
+UUID receiptId
+
+String operatorNote
+
+Optional:
+
+String bankReferenceNumberConfirmed
+
+Requirements:
+
+* Operator identity comes from CurrentOperatorProvider.
+* Do not accept Payment ID, Order ID, amount, User ID, or reviewer ID from caller.
+* Load trusted data through receipt.
+
+Validation:
+
+* Review exists and is CLAIMED.
+* Current operator owns claim.
+* Claim has not expired.
+* Receipt is QUEUED_FOR_REVIEW.
+* Payment is WAITING_FOR_REVIEW.
+* Payment method is CARD_TO_CARD.
+* Instruction is RECEIPT_PENDING.
+* Expected payable amount matches claimed receipt amount.
+* Payment amount and Order amount are consistent.
+* Payment is not already APPROVED by another method.
+* Order is not already paid by another Payment.
+* Receipt is not withdrawn.
+* Required tracking/card metadata exists according to properties.
+* Duplicate hash flag does not automatically reject, but operator note may be required by policy.
+
+Approval transaction must:
+
+1. Mark review APPROVED.
+2. Mark receipt APPROVED.
+3. Mark instruction COMPLETED.
+4. Delegate to shared PaymentApprovalService.
+5. Payment becomes APPROVED.
+6. Order becomes PAID.
+7. Create provisioning outbox record.
+8. Commit atomically.
+
+Do not call 3x-ui in this transaction.
+
+---
+
+# 15. Reject review use case
+
+Create:
+
+RejectManualPaymentReviewUseCase
+
+Command fields:
+
+UUID receiptId
+
+ManualPaymentRejectionReason reason
+
+String operatorNote
+
+Create enum:
+
+ManualPaymentRejectionReason
+
+Suggested values:
+
+AMOUNT_MISMATCH
+
+INVALID_RECEIPT
+
+DUPLICATE_RECEIPT
+
+UNREADABLE_RECEIPT
+
+WRONG_DESTINATION
+
+TRANSACTION_NOT_FOUND
+
+EXPIRED_INSTRUCTION
+
+OTHER
+
+Behavior:
+
+1. Validate claim ownership and expiry.
+2. Mark review REJECTED.
+3. Mark receipt REJECTED.
+4. Decide Payment state.
+5. Decide instruction state.
+
+Recommended retry-friendly policy:
+
+* Payment returns to WAITING_FOR_PAYMENT.
+* Instruction:
+
+  * returns to ACTIVE if still valid;
+  * becomes EXPIRED if past expiry.
+* Unique payable amount remains reserved if instruction returns ACTIVE.
+* User may submit a new receipt against the same valid instruction.
+* Rejected receipt remains immutable and historical.
+
+Alternative:
+
+Mark Payment REJECTED and require new Payment.
+
+Preferred:
+
+Allow retry for manual transfer mistakes where safe.
+
+Document chosen policy.
+
+Do not create provisioning outbox.
+
+---
+
+# 16. Receipt retry after rejection
+
+Update Task 30 rules.
+
+After a receipt is REJECTED:
+
+* active-receipt partial uniqueness must permit a new receipt;
+* previous receipt remains stored;
+* new receiptRequestId required;
+* receipt hash duplication policy still applies;
+* instruction must be ACTIVE and unexpired;
+* Payment must be WAITING_FOR_PAYMENT.
+
+Ensure database partial indexes include only active review statuses and exclude REJECTED.
+
+Use corrective migration if needed.
+
+---
+
+# 17. Shared PaymentApprovalService
+
+Create:
+
+PaymentApprovalService
+
+Suggested package:
+
+com.parazit.panel.application.payment
+
+Input model:
+
+ApprovePaymentCommand
+
+Fields:
+
+UUID paymentId
+
+PaymentApprovalSource source
+
+String providerReference
+
+Instant approvedAt
+
+Create:
+
+PaymentApprovalSource
+
+Values:
+
+ZARINPAL_VERIFICATION
+
+MANUAL_OPERATOR_REVIEW
+
+Responsibilities inside one transaction:
+
+1. Load and lock Payment.
+2. Load and lock Order.
+3. If Payment already APPROVED:
+
+   * return idempotently if same approval source/reference;
+   * conflict if inconsistent.
+4. Verify Payment belongs to Order.
+5. Verify no other approved Payment exists for Order.
+6. Mark Payment APPROVED.
+7. Mark paidAt/approvedAt.
+8. Mark Order PAID.
+9. Create provisioning outbox record if Order requires provisioning.
+10. Return approval result.
+
+Do not call any payment provider or 3x-ui.
+
+Do not send Telegram message.
+
+---
+
+# 18. Zarinpal refactor
+
+Update Task 28 verification completion.
+
+On successful Verify:
+
+* mark Zarinpal attempt VERIFIED;
+* then invoke shared PaymentApprovalService within the correct transaction design.
+
+Avoid nested conflicting transactions.
+
+Preferred:
+
+CompleteZarinpalVerificationTransaction performs:
+
+* attempt VERIFIED;
+* shared approval state changes;
+* outbox creation;
+* one atomic local transaction.
+
+If calling a service, ensure propagation and transaction composition are correct.
+
+Do not create duplicate outbox records on callback replay.
+
+---
+
+# 19. Provisioning outbox aggregate
+
+Create:
+
+ProvisioningOutbox
+
+Suggested package:
+
+com.parazit.panel.domain.provisioning.outbox
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited
+
+UUID eventId
+
+UUID orderId
+
+UUID paymentId
+
+UUID userId
+
+UUID planId
+
+UUID planSelectionId
+
+ProvisioningOutboxType type
+
+ProvisioningOutboxStatus status
+
+String payloadVersion
+
+String payload
+
+int attemptCount
+
+Instant availableAt
+
+Instant processingStartedAt
+
+Instant processedAt
+
+Instant lastFailedAt
+
+String failureCode
+
+String failureMessage
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Recommended types:
+
+CREATE_VPN_CLIENT
+
+RENEW_VPN_CLIENT
+
+ADD_VPN_TRAFFIC
+
+Task 31 primary type:
+
+CREATE_VPN_CLIENT
+
+Recommended statuses:
+
+PENDING
+
+PROCESSING
+
+PROCESSED
+
+FAILED
+
+UNKNOWN
+
+DEAD
+
+Rules:
+
+* eventId globally unique.
+* One provisioning event per Order/type.
+* Payload immutable.
+* Payload contains only trusted IDs and versioned data.
+* No passwords.
+* No cookies.
+* No raw Payment provider data.
+* No full user profile.
+* PENDING -> PROCESSING -> PROCESSED
+* PROCESSING -> FAILED or UNKNOWN
+* FAILED -> PENDING for bounded retry
+* Excessive failures -> DEAD
+* PROCESSED terminal
+* No generic status setter.
+
+---
+
+# 20. Outbox payload
+
+Create versioned payload:
+
+CreateVpnProvisioningPayloadV1
+
+Fields:
+
+UUID orderId
+
+UUID paymentId
+
+UUID userId
+
+Long telegramUserId
+
+UUID planId
+
+UUID planSelectionId
+
+Long preferredInboundId
+
+Requirements:
+
+* preferredInboundId optional.
+* No traffic/expiry values from caller.
+* Provisioning service should still use trusted PlanSelection snapshot.
+* JSON serialization deterministic.
+* payloadVersion:
+
+"create-vpn-client.v1"
+
+Create:
+
+ProvisioningOutboxPayloadSerializer
+
+Use Jackson internally.
+
+Do not expose JsonNode outside infrastructure/application serializer.
+
+---
+
+# 21. Outbox migration
+
+In the same or separate next Flyway migration, create:
+
+provisioning_outbox
+
+Columns:
+
+id UUID primary key
+
+event_id UUID not null
+
+order_id UUID not null
+
+payment_id UUID not null
+
+user_id UUID not null
+
+plan_id UUID not null
+
+plan_selection_id UUID not null
+
+type VARCHAR(40) not null
+
+status VARCHAR(32) not null
+
+payload_version VARCHAR(64) not null
+
+payload JSONB not null
+
+attempt_count INTEGER not null
+
+available_at TIMESTAMPTZ not null
+
+processing_started_at TIMESTAMPTZ null
+
+processed_at TIMESTAMPTZ null
+
+last_failed_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique event_id;
+* unique order_id and type;
+* foreign keys to Order, Payment, User, Plan, and PlanSelection;
+* attempt_count >= 0;
+* valid type/status;
+* PROCESSED requires processed_at;
+* PROCESSING requires processing_started_at.
+
+Indexes:
+
+status, available_at
+
+order_id
+
+payment_id
+
+user_id
+
+plan_selection_id
+
+Use RESTRICT/NO ACTION deletion.
+
+---
+
+# 22. Outbox repository
+
+Create:
+
+ProvisioningOutboxRepository
+
+Methods:
+
+Optional<ProvisioningOutbox> findByEventId(UUID eventId)
+
+Optional<ProvisioningOutbox> findByOrderIdAndType(
+UUID orderId,
+ProvisioningOutboxType type
+)
+
+List<ProvisioningOutbox> findAvailableForProcessing(
+Instant now,
+int limit
+)
+
+boolean existsByOrderIdAndType(
+UUID orderId,
+ProvisioningOutboxType type
+)
+
+Create Spring Data adapter.
+
+For claiming rows, use a technically correct PostgreSQL strategy.
+
+Preferred:
+
+SELECT ... FOR UPDATE SKIP LOCKED
+
+or atomic update claim.
+
+Do not let multiple workers process the same outbox row.
+
+---
+
+# 23. Outbox configuration
+
+Create:
+
+ProvisioningOutboxProperties
+
+Prefix:
+
+app.provisioning.outbox
+
+Fields:
+
+boolean enabled
+
+Duration pollInterval
+
+int batchSize
+
+int maxAttempts
+
+Duration initialRetryDelay
+
+Duration maxRetryDelay
+
+double retryMultiplier
+
+Duration processingTimeout
+
+Requirements:
+
+* safe defaults;
+* validate values;
+* disabled mode supported for tests/application startup;
+* update `.env.example`.
+
+Example:
+
+PROVISIONING_OUTBOX_ENABLED=true
+
+PROVISIONING_OUTBOX_POLL_INTERVAL=PT5S
+
+PROVISIONING_OUTBOX_BATCH_SIZE=20
+
+PROVISIONING_OUTBOX_MAX_ATTEMPTS=10
+
+PROVISIONING_OUTBOX_INITIAL_RETRY_DELAY=PT10S
+
+PROVISIONING_OUTBOX_MAX_RETRY_DELAY=PT15M
+
+PROVISIONING_OUTBOX_RETRY_MULTIPLIER=2.0
+
+PROVISIONING_OUTBOX_PROCESSING_TIMEOUT=PT5M
+
+---
+
+# 24. Outbox creation
+
+PaymentApprovalService must create the outbox record in the same transaction as:
+
+* Payment APPROVED;
+* Order PAID.
+
+Requirements:
+
+* If transaction rolls back, no outbox exists.
+* If transaction commits, outbox exists.
+* Repeated approval creates no duplicate outbox.
+* Database unique constraint is final authority.
+* Outbox status starts PENDING.
+* availableAt = approvedAt or current time.
+* attemptCount = 0.
+
+This guarantees eventual provisioning.
+
+---
+
+# 25. Outbox processor
+
+Create:
+
+ProvisioningOutboxProcessor
+
+Suggested package:
+
+com.parazit.panel.application.provisioning.outbox
+
+Responsibilities:
+
+1. Claim available outbox records.
+2. Mark PROCESSING in short transaction.
+3. Deserialize payload.
+4. Execute corresponding provisioning use case.
+5. Complete in short transaction:
+
+   * PROCESSED on success;
+   * FAILED/UNKNOWN on failure.
+6. Update Order status.
+7. Schedule retry when appropriate.
+
+Do not keep DB transaction open during 3x-ui call.
+
+Create focused transaction components:
+
+ClaimProvisioningOutboxTransaction
+
+CompleteProvisioningOutboxTransaction
+
+FailProvisioningOutboxTransaction
+
+---
+
+# 26. CREATE_VPN_CLIENT handler
+
+Create:
+
+CreateVpnClientOutboxHandler
+
+Dependencies:
+
+CreateVpnClientUseCase
+
+Behavior:
+
+* Build CreateVpnClientCommand from trusted payload.
+* Use deterministic idempotency:
+
+  * `planSelectionId` remains the Task 24 provisioning key.
+* Call CreateVpnClientUseCase.
+* On ACTIVE result:
+
+  * success.
+* On idempotent existing ACTIVE:
+
+  * success.
+* On UNKNOWN:
+
+  * mark outbox UNKNOWN or FAILED with retry policy.
+* On permanent invalid state:
+
+  * mark DEAD or non-retryable FAILED.
+* Do not generate new remote client identifiers outside Task 24.
+
+---
+
+# 27. Order status during provisioning
+
+When outbox record is claimed:
+
+Order:
+
+PAID -> PROVISIONING
+
+On successful provisioning:
+
+PROVISIONING -> COMPLETED
+
+On retryable failure:
+
+PROVISIONING -> PROVISIONING_FAILED
+
+On later retry claim:
+
+PROVISIONING_FAILED -> PROVISIONING
+
+On permanent failure/dead outbox:
+
+Order remains PROVISIONING_FAILED.
+
+Do not revert Payment approval because provisioning failed.
+
+Payment and provisioning are separate concerns.
+
+Do not automatically refund.
+
+---
+
+# 28. Retry classification
+
+Create:
+
+ProvisioningFailureClassifier
+
+Classify exceptions:
+
+Retryable:
+
+* 3x-ui unavailable;
+* timeout;
+* authentication temporary failure;
+* uncertain remote result;
+* transient database issue;
+* remote 502/503/504.
+
+Non-retryable:
+
+* missing User;
+* missing Order;
+* missing PlanSelection;
+* ownership mismatch;
+* invalid PlanSelection state;
+* invalid payload;
+* deleted/ineligible permanent state;
+* unsupported operation type.
+
+Requirements:
+
+* Exponential backoff.
+* Bounded attempts.
+* After max attempts:
+
+  * status DEAD;
+  * Order PROVISIONING_FAILED.
+* Preserve safe failure code.
+* Do not store stack traces in database.
+* Server logs may contain stack trace.
+
+---
+
+# 29. Stuck PROCESSING recovery
+
+Create recovery behavior for outbox rows stuck in PROCESSING beyond `processingTimeout`.
+
+On poll:
+
+* detect stale PROCESSING;
+* mark FAILED or PENDING with incremented attempt;
+* schedule retry;
+* log warning.
+
+Do not assume the remote call definitely failed.
+
+Because Task 24 is idempotent by PlanSelection, retry is safe after reconciliation.
+
+Do not create duplicate clients.
+
+---
+
+# 30. Outbox scheduling
+
+Use:
+
+@Scheduled
+
+only for polling the outbox.
+
+Requirements:
+
+* Scheduler enabled conditionally.
+* No business logic inside scheduler method.
+* Scheduler calls processor.
+* Prevent overlapping runs on one instance.
+* Database row claiming protects multi-instance execution.
+* Do not add external distributed-lock dependency unless already present.
+* Keep batch bounded.
+
+Task 38 may generalize Cron Jobs later.
+
+Task 31 is allowed to include this focused outbox poller because provisioning must be reliable.
+
+---
+
+# 31. Manual review API ports
+
+Create:
+
+ClaimManualPaymentReviewUseCase
+
+ReleaseManualPaymentReviewUseCase
+
+ApproveManualPaymentReviewUseCase
+
+RejectManualPaymentReviewUseCase
+
+GetManualPaymentReviewUseCase
+
+ListManualPaymentReviewsUseCase
+
+Application results must not expose entities.
+
+---
+
+# 32. Review result model
+
+Create:
+
+ManualPaymentReviewResult
+
+Fields:
+
+UUID reviewId
+
+UUID receiptId
+
+UUID paymentId
+
+UUID orderId
+
+ManualPaymentReviewStatus status
+
+String reviewerId
+
+Instant claimedAt
+
+Instant decidedAt
+
+ManualPaymentRejectionReason rejectionReason
+
+String operatorNote
+
+long expectedAmount
+
+long claimedAmount
+
+boolean amountMatched
+
+boolean duplicateHashDetected
+
+PaymentStatus paymentStatus
+
+OrderStatus orderStatus
+
+ManualPaymentReceiptStatus receiptStatus
+
+ManualPaymentInstructionStatus instructionStatus
+
+boolean changed
+
+Requirements:
+
+* Safe.
+* No storage key.
+* No receipt file bytes.
+* No full card numbers.
+* No user secrets.
+
+---
+
+# 33. Operator APIs
+
+Create:
+
+ManualPaymentReviewController
+
+Suggested package:
+
+com.parazit.panel.api.internal.payment.manual.review
+
+Base path:
+
+/internal/admin/manual-payments/reviews
+
+Endpoints:
+
+POST /{receiptId}/claim
+
+POST /{receiptId}/release
+
+POST /{receiptId}/approve
+
+POST /{receiptId}/reject
+
+GET /{receiptId}
+
+GET /
+
+Approve request:
+
+{
+"operatorNote": "Transaction confirmed"
+}
+
+Reject request:
+
+{
+"reason": "TRANSACTION_NOT_FOUND",
+"operatorNote": "No matching transaction found"
+}
+
+Requirements:
+
+* Operator identity resolved through CurrentOperatorProvider.
+* Do not accept reviewerId in JSON.
+* Controller depends on use cases.
+* No repository injection.
+* Existing receipt-content endpoint from Task 30 remains separate.
+* No Spring Security implementation yet.
+* Clearly document that production security is mandatory.
+
+HTTP behavior:
+
+claim success -> 200
+
+same-operator claim replay -> 200 changed=false
+
+claimed by another operator -> 409
+
+release -> 200
+
+approve -> 200
+
+reject -> 200
+
+missing receipt/review -> 404
+
+invalid state -> 409
+
+expired claim -> 409 or automatic reclaim according to design
+
+---
+
+# 34. Provisioning operational APIs
+
+Create internal read-only endpoints:
+
+GET /internal/admin/provisioning/outbox
+
+GET /internal/admin/provisioning/outbox/{eventId}
+
+POST /internal/admin/provisioning/outbox/{eventId}/retry
+
+Requirements:
+
+* Retry only FAILED, UNKNOWN, or DEAD according to policy.
+* Do not retry PROCESSED.
+* Manual retry increments or resets status safely.
+* Do not create another outbox row.
+* Controller depends on use cases.
+* No direct repository injection.
+* No payload secrets in response.
+* Payload may be summarized, not returned raw.
+
+Optional but recommended for operations.
+
+---
+
+# 35. Approval concurrency
+
+Handle:
+
+* two operators approving the same receipt;
+* one approving while another rejects;
+* claim expiry and re-claim;
+* Zarinpal approval racing with a manual Payment for the same Order;
+* duplicate callback after manual approval;
+* repeated manual approval request.
+
+Requirements:
+
+* exactly one Payment approval;
+* exactly one Order paid transition;
+* exactly one provisioning outbox record;
+* one review terminal decision;
+* losing concurrent action receives idempotent success or conflict;
+* APPROVED Payment cannot become REJECTED;
+* database constraints are final authority;
+* no JVM-only locking.
+
+Use short pessimistic or optimistic locks.
+
+Do not lock during file access or 3x-ui calls.
+
+---
+
+# 36. Unique approved Payment constraint
+
+Ensure database enforces one approved Payment per Order.
+
+Preferred PostgreSQL partial unique index:
+
+UNIQUE (order_id)
+WHERE status = 'APPROVED'
+
+If this already exists, verify it.
+
+If missing or incorrect, add a corrective migration.
+
+Do not rely only on application checks.
+
+---
+
+# 37. Provisioning idempotency
+
+Use:
+
+Order ID + provisioning type
+
+for outbox uniqueness.
+
+Use:
+
+PlanSelection ID
+
+for Task 24 remote provisioning idempotency.
+
+This creates two layers:
+
+* one provisioning event per paid Order;
+* one remote provision per PlanSelection.
+
+Repeated outbox execution must return the same existing provision.
+
+Do not generate another PlanSelection.
+
+Do not generate another remote client ID.
+
+---
+
+# 38. Payment approval result
+
+Create:
+
+PaymentApprovalResult
+
+Fields:
+
+UUID paymentId
+
+UUID orderId
+
+PaymentStatus paymentStatus
+
+OrderStatus orderStatus
+
+UUID provisioningEventId
+
+boolean newlyApproved
+
+boolean provisioningRequired
+
+Requirements:
+
+* Immutable.
+* No provider secrets.
+* `newlyApproved=false` on idempotent replay.
+* provisioningEventId may be null for Order types that do not require provisioning.
+* Task 31 NEW_SUBSCRIPTION requires provisioning.
+
+---
+
+# 39. PaymentApproved domain/application event
+
+Optionally create:
+
+PaymentApprovedEvent
+
+Fields:
+
+paymentId
+
+orderId
+
+userId
+
+approvedAt
+
+source
+
+Requirements:
+
+* Do not rely on this event alone for provisioning.
+* Outbox is the durable mechanism.
+* Event may be used for internal logging or future Telegram notification.
+* Publish after commit if used.
+* No Kafka required.
+
+Preferred:
+
+Create outbox directly and keep event optional.
+
+---
+
+# 40. Logging
+
+INFO:
+
+* receipt review claimed;
+* review released;
+* manual Payment approved;
+* manual Payment rejected;
+* Zarinpal Payment finalized through shared approval;
+* provisioning outbox created;
+* outbox processing started;
+* VPN provisioning completed;
+* Order completed;
+* retry scheduled.
+
+DEBUG:
+
+* idempotent approval replay;
+* outbox claim;
+* failure classification;
+* backoff calculation;
+* stale processing recovery.
+
+WARN:
+
+* claim conflict;
+* duplicate approval attempt;
+* operator decision race;
+* retryable provisioning failure;
+* stuck outbox;
+* dead outbox;
+* mismatched amount or ownership.
+
+ERROR:
+
+* permanent provisioning failure;
+* outbox payload corruption;
+* approval transaction failure.
+
+Include:
+
+reviewId
+
+receiptId
+
+paymentId
+
+orderId
+
+eventId
+
+provisionId
+
+operatorId
+
+paymentMethod
+
+oldStatus
+
+newStatus
+
+attemptCount
+
+traceId
+
+Never log:
+
+receipt content
+
+full card number
+
+merchant ID
+
+authority
+
+cookies
+
+subscription ID
+
+raw outbox payload if it contains internal identifiers beyond policy
+
+private keys
+
+---
+
+# 41. Domain unit tests
+
+ManualPaymentReview tests:
+
+* create PENDING review;
+* claim;
+* same-operator idempotency;
+* another-operator conflict;
+* release;
+* re-claim;
+* approve;
+* reject;
+* rejection reason required;
+* claim expiry;
+* terminal behavior;
+* amount-match snapshot;
+* duplicate flag snapshot.
+
+Order tests:
+
+* PAYMENT_PENDING -> PAID;
+* PAID -> PROVISIONING;
+* PROVISIONING -> COMPLETED;
+* failure and retry transitions;
+* terminal behavior;
+* paidAt/completedAt requirements.
+
+ProvisioningOutbox tests:
+
+* creation;
+* PENDING;
+* claim PROCESSING;
+* processed;
+* failed;
+* unknown;
+* retry scheduling;
+* max attempts/dead;
+* payload immutability;
+* failure-message sanitization.
+
+---
+
+# 42. Shared approval service unit tests
+
+Test:
+
+* successful manual approval;
+* successful Zarinpal approval;
+* Payment approved;
+* Order paid;
+* outbox created;
+* idempotent replay;
+* another approved Payment conflict;
+* missing Payment;
+* missing Order;
+* ownership mismatch;
+* invalid Payment status;
+* cancelled/expired Payment;
+* outbox uniqueness conflict recovered;
+* no 3x-ui call;
+* transaction rollback prevents approval and outbox.
+
+---
+
+# 43. Manual review service unit tests
+
+Claim:
+
+* unclaimed receipt;
+* same operator replay;
+* another operator conflict;
+* expired claim takeover;
+* invalid receipt state;
+* invalid Payment state.
+
+Approve:
+
+* success;
+* amount match;
+* ownership and linkage;
+* claim owner;
+* claim expired;
+* duplicate hash allowed with note;
+* Payment already approved replay;
+* conflict with another Payment;
+* all state transitions;
+* outbox created;
+* no direct provisioning call.
+
+Reject:
+
+* success;
+* reason required;
+* receipt rejected;
+* instruction reactivated if valid;
+* instruction expired when needed;
+* Payment WAITING_FOR_PAYMENT;
+* new receipt allowed;
+* no outbox.
+
+---
+
+# 44. Outbox processor unit tests
+
+Test:
+
+* claims PENDING item;
+* invokes correct handler;
+* marks Order PROVISIONING;
+* successful handler -> PROCESSED and Order COMPLETED;
+* idempotent existing provision -> success;
+* retryable failure -> FAILED with availableAt;
+* unknown failure;
+* non-retryable failure -> DEAD;
+* max attempts -> DEAD;
+* malformed payload -> DEAD;
+* stale PROCESSING recovery;
+* no transaction held during handler call;
+* batch limit respected.
+
+Use fixed clock.
+
+---
+
+# 45. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+Manual reviews:
+
+* save;
+* unique receipt;
+* claim fields;
+* terminal constraints;
+* foreign keys;
+* history.
+
+Outbox:
+
+* unique eventId;
+* unique order/type;
+* status persistence;
+* JSONB payload;
+* available query;
+* SKIP LOCKED or claim behavior;
+* attempt constraints;
+* foreign keys;
+* processed timestamp constraints.
+
+Payment:
+
+* one APPROVED per Order partial unique index.
+
+Order:
+
+* status/timestamp mapping.
+
+Flyway and Hibernate validation must pass.
+
+---
+
+# 46. Full manual approval integration test
+
+Use real PostgreSQL and temporary receipt storage.
+
+Scenario:
+
+1. Create User.
+2. Create Plan and PlanSelection.
+3. Create Order.
+4. Create manual Payment.
+5. Create instruction.
+6. Upload receipt.
+7. Claim review as operator A.
+8. Approve.
+9. Verify atomically:
+
+   * review APPROVED;
+   * receipt APPROVED;
+   * instruction COMPLETED;
+   * Payment APPROVED;
+   * Order PAID;
+   * one outbox row PENDING.
+10. Verify no XUI provision exists before outbox processing.
+11. Run outbox processor with mock 3x-ui.
+12. Verify:
+
+* one XUI provision ACTIVE;
+* outbox PROCESSED;
+* Order COMPLETED.
+
+13. Process outbox again.
+14. Verify no duplicate remote client.
+
+---
+
+# 47. Manual rejection integration test
+
+Scenario:
+
+1. Upload receipt.
+2. Claim.
+3. Reject with TRANSACTION_NOT_FOUND.
+4. Verify:
+
+   * review REJECTED;
+   * receipt REJECTED;
+   * Payment WAITING_FOR_PAYMENT;
+   * instruction ACTIVE if unexpired;
+   * no outbox;
+   * no XUI provision.
+5. Submit a new receipt.
+6. Verify it can enter review queue.
+
+Test expired instruction rejection behavior separately.
+
+---
+
+# 48. Zarinpal shared-approval integration test
+
+Update Zarinpal successful flow:
+
+1. Verify gateway response.
+2. Shared PaymentApprovalService runs.
+3. Payment APPROVED.
+4. Order PAID.
+5. Outbox PENDING.
+6. No direct 3x-ui call inside verify transaction.
+7. Outbox processor provisions later.
+8. Duplicate callback creates no duplicate outbox/client.
+
+---
+
+# 49. Transaction rollback integration test
+
+Force outbox persistence failure or approval validation failure.
+
+Verify:
+
+* Payment not APPROVED;
+* Order not PAID;
+* manual review not APPROVED;
+* receipt not APPROVED;
+* no partial outbox;
+* no 3x-ui call.
+
+The local approval transaction must be atomic.
+
+---
+
+# 50. Outbox retry integration tests
+
+Using mock 3x-ui:
+
+Transient failure:
+
+* first attempt unavailable;
+* outbox FAILED;
+* Order PROVISIONING_FAILED;
+* availableAt scheduled;
+* next attempt succeeds;
+* outbox PROCESSED;
+* Order COMPLETED;
+* one remote client.
+
+Uncertain provisioning result:
+
+* Task 24 reconciliation finds remote client;
+* outbox becomes PROCESSED.
+
+Permanent invalid payload:
+
+* outbox DEAD;
+* Order PROVISIONING_FAILED;
+* no infinite retry.
+
+Stale PROCESSING:
+
+* recovery schedules retry;
+* no duplicate client due to Task 24 idempotency.
+
+---
+
+# 51. Concurrency integration tests
+
+Scenario A: two operators claim same receipt
+
+* one claim succeeds;
+* other gets conflict.
+
+Scenario B: same operator double approval
+
+* one local approval/outbox;
+* idempotent result.
+
+Scenario C: approve and reject race
+
+* exactly one terminal review state;
+* Payment consistent;
+* if approval wins, outbox exists;
+* if rejection wins, no outbox.
+
+Scenario D: Zarinpal and manual Payments for same Order race
+
+* only one Payment APPROVED;
+* one outbox;
+* losing approval conflict;
+* no duplicate VPN.
+
+Scenario E: multiple outbox workers
+
+* one claims row;
+* one 3x-ui provisioning flow;
+* stable final result.
+
+Requirements:
+
+* real PostgreSQL;
+* mock server;
+* separate transactions;
+* deterministic synchronization;
+* no Thread.sleep;
+* ExecutorService shutdown;
+* timeouts.
+
+---
+
+# 52. Controller tests
+
+Review APIs:
+
+* claim success;
+* claim replay;
+* claim conflict;
+* release;
+* approve;
+* reject;
+* missing receipt;
+* invalid state;
+* missing operator header;
+* invalid operator ID;
+* claim expiry;
+* approval conflict;
+* safe response fields.
+
+Outbox APIs if implemented:
+
+* list;
+* get;
+* retry failed;
+* reject retry of processed;
+* missing event.
+
+Verify standard errors:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No:
+
+receipt bytes
+
+storage key
+
+full card number
+
+merchant ID
+
+gateway authority
+
+raw outbox payload
+
+stack trace
+
+SQL details
+
+---
+
+# 53. Architecture verification
+
+Verify:
+
+* review domain does not depend on API/infrastructure;
+* outbox domain does not depend on 3x-ui adapter;
+* shared approval service is the only final Payment approval orchestration;
+* Zarinpal and manual approval reuse shared service;
+* no controller injects repository;
+* no 3x-ui call inside approval transaction;
+* outbox created in same transaction as Payment approval;
+* outbox worker calls CreateVpnClientUseCase;
+* Task 24 idempotency reused;
+* no duplicate provisioning logic;
+* receipt files remain immutable;
+* no Telegram/subscription/QR logic;
+* no field injection;
+* no service locator;
+* no in-memory event as sole guarantee.
+
+Extend architecture tests.
+
+---
+
+# 54. Documentation
+
+Create:
+
+docs/payment/manual-payment-review.md
+
+Document:
+
+* review queue;
+* operator claim;
+* claim expiry;
+* approval;
+* rejection;
+* retry after rejection;
+* operator identity;
+* audit data;
+* concurrency;
+* API contracts;
+* security requirement for future Spring Security.
+
+Create:
+
+docs/payment/payment-approval.md
+
+Document:
+
+* shared Payment approval;
+* Zarinpal and manual convergence;
+* one approved Payment per Order;
+* Order status transitions;
+* transaction atomicity;
+* no direct provisioning.
+
+Create:
+
+docs/provisioning/payment-provisioning-outbox.md
+
+Document:
+
+* outbox purpose;
+* schema;
+* payload versioning;
+* transactional creation;
+* polling;
+* claiming;
+* retries;
+* exponential backoff;
+* stale recovery;
+* dead-letter state;
+* Task 24 idempotency;
+* Order state;
+* failure semantics.
+
+Include Mermaid diagrams for:
+
+* manual approval;
+* manual rejection;
+* Zarinpal approval convergence;
+* transaction commit and outbox;
+* successful provisioning;
+* retry;
+* concurrent workers;
+* approval race.
+
+Update prior payment documentation where required.
+
+---
+
+# 55. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/payment/manual/review/
+ManualPaymentReview.java
+ManualPaymentReviewStatus.java
+ManualPaymentRejectionReason.java
+
+src/main/java/com/parazit/panel/domain/payment/manual/review/repository/
+ManualPaymentReviewRepository.java
+
+src/main/java/com/parazit/panel/domain/provisioning/outbox/
+ProvisioningOutbox.java
+ProvisioningOutboxType.java
+ProvisioningOutboxStatus.java
+
+src/main/java/com/parazit/panel/domain/provisioning/outbox/repository/
+ProvisioningOutboxRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/security/
+CurrentOperatorProvider.java
+
+src/main/java/com/parazit/panel/application/port/in/payment/manual/review/
+ClaimManualPaymentReviewUseCase.java
+ReleaseManualPaymentReviewUseCase.java
+ApproveManualPaymentReviewUseCase.java
+RejectManualPaymentReviewUseCase.java
+GetManualPaymentReviewUseCase.java
+ListManualPaymentReviewsUseCase.java
+
+src/main/java/com/parazit/panel/application/payment/manual/review/command/
+ClaimManualPaymentReviewCommand.java
+ReleaseManualPaymentReviewCommand.java
+ApproveManualPaymentReviewCommand.java
+RejectManualPaymentReviewCommand.java
+
+src/main/java/com/parazit/panel/application/payment/manual/review/result/
+ManualPaymentReviewResult.java
+
+src/main/java/com/parazit/panel/application/payment/manual/review/
+ClaimManualPaymentReviewService.java
+ReleaseManualPaymentReviewService.java
+ApproveManualPaymentReviewService.java
+RejectManualPaymentReviewService.java
+GetManualPaymentReviewService.java
+ListManualPaymentReviewsService.java
+ManualPaymentReviewResultMapper.java
+
+src/main/java/com/parazit/panel/application/payment/
+PaymentApprovalService.java
+ApprovePaymentCommand.java
+PaymentApprovalResult.java
+PaymentApprovalSource.java
+
+src/main/java/com/parazit/panel/application/provisioning/outbox/
+ProvisioningOutboxProcessor.java
+ProvisioningFailureClassifier.java
+CreateVpnClientOutboxHandler.java
+ProvisioningOutboxPayloadSerializer.java
+CreateVpnProvisioningPayloadV1.java
+ClaimProvisioningOutboxTransaction.java
+CompleteProvisioningOutboxTransaction.java
+FailProvisioningOutboxTransaction.java
+
+src/main/java/com/parazit/panel/infrastructure/security/
+HeaderBasedCurrentOperatorProvider.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/payment/manual/review/
+SpringDataManualPaymentReviewRepository.java
+ManualPaymentReviewRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/provisioning/outbox/
+SpringDataProvisioningOutboxRepository.java
+ProvisioningOutboxRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/infrastructure/scheduling/
+ProvisioningOutboxScheduler.java
+
+src/main/java/com/parazit/panel/api/internal/payment/manual/review/
+ManualPaymentReviewController.java
+ApproveManualPaymentReviewRequest.java
+RejectManualPaymentReviewRequest.java
+ManualPaymentReviewResponse.java
+ManualPaymentReviewApiMapper.java
+
+src/main/java/com/parazit/panel/api/internal/provisioning/
+ProvisioningOutboxController.java
+ProvisioningOutboxResponse.java
+
+src/main/java/com/parazit/panel/config/properties/
+ManualPaymentReviewProperties.java
+ProvisioningOutboxProperties.java
+
+src/main/resources/db/migration/
+V13__create_manual_payment_reviews_and_payment_outbox.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/payment/manual/review/
+ManualPaymentReviewTest.java
+
+src/test/java/com/parazit/panel/domain/provisioning/outbox/
+ProvisioningOutboxTest.java
+
+src/test/java/com/parazit/panel/application/payment/
+PaymentApprovalServiceTest.java
+
+src/test/java/com/parazit/panel/application/payment/manual/review/
+ClaimManualPaymentReviewServiceTest.java
+ReleaseManualPaymentReviewServiceTest.java
+ApproveManualPaymentReviewServiceTest.java
+RejectManualPaymentReviewServiceTest.java
+
+src/test/java/com/parazit/panel/application/provisioning/outbox/
+ProvisioningOutboxProcessorTest.java
+ProvisioningFailureClassifierTest.java
+CreateVpnClientOutboxHandlerTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/payment/manual/review/
+ManualPaymentReviewRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/provisioning/outbox/
+ProvisioningOutboxRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/payment/manual/review/
+ManualPaymentApprovalIntegrationTest.java
+ManualPaymentRejectionIntegrationTest.java
+ConcurrentManualPaymentReviewIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/payment/
+SharedPaymentApprovalIntegrationTest.java
+PaymentApprovalRollbackIntegrationTest.java
+ConcurrentPaymentApprovalIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/provisioning/outbox/
+PaymentProvisioningOutboxIntegrationTest.java
+ProvisioningOutboxRetryIntegrationTest.java
+ConcurrentProvisioningOutboxWorkerIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/payment/manual/review/
+ManualPaymentReviewControllerTest.java
+
+docs/payment/
+manual-payment-review.md
+payment-approval.md
+
+docs/provisioning/
+payment-provisioning-outbox.md
+
+Adapt packages and migration versions to the current project conventions.
+
+---
+
+# 56. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* review-domain tests pass;
+* shared approval tests pass;
+* manual approval tests pass;
+* rejection tests pass;
+* Zarinpal shared approval tests pass;
+* outbox tests pass;
+* retry tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts;
+* Payment approval and outbox creation are atomic;
+* no 3x-ui call occurs inside approval transaction;
+* repeated approval creates one outbox;
+* outbox retries do not create duplicate VPN clients;
+* rejection creates no outbox;
+* one approved Payment exists per Order;
+* receipt history remains;
+* no Telegram/subscription/QR implementation was added;
+* no production data or secrets were committed;
+* no tests were disabled.
+
+---
+
+# 57. Optional manual verification
+
+Do not run automatically.
+
+Use only test data and a dedicated test inbound.
+
+Manual flow:
+
+1. Create a manual Payment.
+2. Initialize unique card amount.
+3. Upload a synthetic receipt.
+4. Open operator review queue.
+5. Claim receipt.
+6. Reject it.
+7. Verify user may upload a replacement.
+8. Upload another receipt.
+9. Claim and approve.
+10. Verify:
+
+    * Payment APPROVED;
+    * Order PAID;
+    * outbox PENDING;
+    * no VPN yet before processor.
+11. Run outbox processor.
+12. Verify:
+
+    * VPN client created;
+    * outbox PROCESSED;
+    * Order COMPLETED.
+13. Repeat approval.
+14. Repeat outbox processing.
+15. Confirm no duplicate client.
+16. Test a Zarinpal verified Payment and confirm it uses the same outbox path.
+
+Do not use real bank receipts or production clients.
+
+---
+
+# 58. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Shared approval design
+3. Order lifecycle design
+4. Review aggregate and claim design
+5. Rejection/retry policy
+6. Operator identity design
+7. Outbox aggregate and payload design
+8. Atomic transaction design
+9. Outbox claiming and polling strategy
+10. Retry and dead-letter strategy
+11. Provisioning idempotency strategy
+12. Concurrency strategy
+13. Planned files to create
+14. Planned files to modify
+15. Migration and operational risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Manual review behavior
+6. Approval behavior
+7. Rejection and resubmission behavior
+8. Zarinpal approval refactor
+9. Shared Payment approval behavior
+10. Order lifecycle behavior
+11. Outbox creation and payload
+12. Outbox processor behavior
+13. Retry and stale-recovery behavior
+14. Provisioning behavior
+15. Idempotency behavior
+16. Transaction boundaries
+17. Concurrency handling
+18. Internal API contracts
+19. Unit-test results
+20. Integration-test results
+21. Outbox-test results
+22. Concurrency-test results
+23. Flyway and Hibernate results
+24. Build result
+25. Commands executed
+26. Remaining issues
+27. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(payment): add manual review shared approval and provisioning outbox
+
+Stop after completing Task 31.
+
+Do not begin Task 32.
+

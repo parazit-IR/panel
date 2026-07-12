@@ -1,0 +1,2036 @@
+You are a senior Java 21, Spring Boot, Xray, and 3x-ui integration engineer.
+
+Continue implementing the existing project.
+
+# Task 24 — Create 3x-ui Client
+
+## Goal
+
+Implement the complete use case for creating a VPN client inside an existing 3x-ui inbound.
+
+This task builds on:
+
+* Task 21: 3x-ui HTTP client foundation
+* Task 22: authentication and session management
+* Task 23: inbound discovery and eligibility
+
+After this task, the application must be able to:
+
+* validate a client-creation request;
+* select or accept an eligible inbound;
+* generate secure client identifiers;
+* create the client through the 3x-ui API;
+* persist a local provisioning record;
+* recover idempotently from repeated requests;
+* handle network, authentication, duplicate, timeout, and uncertain-result scenarios safely.
+
+Do not implement:
+
+* payment processing;
+* order creation;
+* subscription URI generation;
+* QR Code generation;
+* Telegram Bot handlers;
+* client renewal;
+* client deletion;
+* client update;
+* traffic synchronization;
+* reminder jobs;
+* admin dashboard.
+
+Stop after completing Task 24.
+
+Do not begin Task 25.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire existing repository before changing anything.
+* Preserve all working behavior from Tasks 1–23.
+* Use Java 21.
+* Use Spring Boot 3.x.
+* Use the existing RestClient-based 3x-ui infrastructure.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Do not expose 3x-ui infrastructure DTOs outside infrastructure.
+* Do not expose JPA entities through controllers.
+* Do not place business logic inside controllers.
+* Do not inject Spring Data repositories into application services.
+* Do not use RestTemplate, OpenFeign, or WebClient unless the project has already intentionally standardized on them.
+* Do not call a real 3x-ui panel during automated tests.
+* Do not log credentials, cookies, session IDs, UUID secrets, subscription IDs, or raw 3x-ui request bodies.
+* Do not add unrelated dependencies.
+* Do not implement future tasks.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* XuiClient and focused outbound ports;
+* RestClient adapter;
+* authentication manager;
+* authenticated request executor;
+* retry policy;
+* XuiSessionStore;
+* inbound discovery models;
+* eligible inbound policy;
+* current User model;
+* Plan and PlanSelection models;
+* repository abstractions;
+* BaseEntity and auditing;
+* current Flyway migration versions;
+* exception mapping;
+* Testcontainers support;
+* current test fixtures;
+* current 3x-ui endpoint configuration;
+* any client-creation code already present.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified 3x-ui create-client API contract
+3. Provisioning model decision
+4. Idempotency strategy
+5. Uncertain-result recovery strategy
+6. Client identifier strategy
+7. Planned files to create
+8. Planned files to modify
+9. Risks and version-compatibility concerns
+
+---
+
+# 3. Verify the actual 3x-ui API contract
+
+Do not guess the endpoint or payload.
+
+Inspect the target 3x-ui version or existing sanitized fixtures and confirm:
+
+* endpoint path;
+* HTTP method;
+* request envelope;
+* inbound ID representation;
+* `settings` encoding requirements;
+* required client fields;
+* response envelope;
+* duplicate-client behavior;
+* success/failure message format;
+* expiry-time unit;
+* total-traffic unit;
+* IP-limit behavior;
+* subscription ID behavior.
+
+A common API pattern may resemble:
+
+POST /panel/api/inbounds/addClient
+
+with a payload conceptually similar to:
+
+{
+"id": 1,
+"settings": "{"clients":[{...}]}"
+}
+
+But implementation must follow the actual verified contract.
+
+Requirements:
+
+* Endpoint path must be configurable.
+* Do not hardcode the full URL.
+* Document the supported 3x-ui version and response assumptions.
+* Use sanitized test fixtures.
+* No real credentials or keys in repository.
+
+Update configuration with a property such as:
+
+app.xui.client-create-path=/panel/api/inbounds/addClient
+
+Environment variable:
+
+XUI_CLIENT_CREATE_PATH=/panel/api/inbounds/addClient
+
+Use the verified path.
+
+---
+
+# 4. Scope of supported client type
+
+Task 24 must support:
+
+* Protocol: VLESS
+* Security: REALITY
+* Authentication ID: UUID
+* Flow: configurable, default appropriate to the existing inbound
+* Email/label: locally generated stable identifier
+* Expiry time
+* Total traffic limit
+* IP limit
+* Enable state
+* Subscription identifier when supported by the panel
+
+Do not implement:
+
+* VMESS client creation;
+* Trojan client creation;
+* Shadowsocks client creation;
+* client URI generation;
+* subscription delivery;
+* multi-protocol provisioning.
+
+Unsupported inbound protocols must fail safely.
+
+---
+
+# 5. Local provisioning aggregate
+
+Create a local persistence model representing the relationship between the application user and the remote 3x-ui client.
+
+Create:
+
+XuiClientProvision
+
+Suggested package:
+
+com.parazit.panel.domain.xui.provisioning
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited from BaseEntity
+
+UUID userId
+
+UUID planId
+
+UUID planSelectionId
+
+long inboundId
+
+String remoteClientId
+
+String remoteEmail
+
+String remoteSubscriptionId
+
+XuiProvisionStatus status
+
+long trafficLimitBytes
+
+Instant expiresAt
+
+int ipLimit
+
+Instant provisionedAt
+
+Instant lastSynchronizedAt
+
+String failureCode
+
+String failureMessage
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Design rules:
+
+* `remoteClientId` is the UUID used by Xray/3x-ui.
+* `remoteEmail` is a stable unique remote label.
+* `remoteSubscriptionId` is optional if the panel generates or supports it.
+* Store scalar IDs, not JPA relationships.
+* Do not store panel password or cookies.
+* Do not store raw request or response JSON.
+* Do not store private keys.
+* Do not store VPN URI yet.
+* Do not store QR Code.
+* One PlanSelection should produce at most one successfully provisioned remote client.
+* Keep failure data sanitized and bounded.
+* Provisioning history must not be silently deleted.
+
+---
+
+# 6. Provision status
+
+Create:
+
+XuiProvisionStatus
+
+Values:
+
+PENDING
+PROVISIONING
+ACTIVE
+FAILED
+UNKNOWN
+
+Persist using EnumType.STRING.
+
+Semantics:
+
+PENDING:
+A local provisioning record exists, but no remote request is in progress.
+
+PROVISIONING:
+A remote create request is currently being attempted.
+
+ACTIVE:
+The remote client is confirmed to exist.
+
+FAILED:
+The remote operation definitely failed.
+
+UNKNOWN:
+The request outcome is uncertain, for example timeout after the remote server may have processed the request.
+
+Rules:
+
+* Do not mark FAILED when the result may be uncertain.
+* ACTIVE is terminal for Task 24.
+* Task 25 and Task 26 may introduce further lifecycle behavior.
+* Repeated requests for an ACTIVE provision must be idempotent.
+* Do not expose a public generic status setter.
+
+---
+
+# 7. Controlled provisioning creation
+
+Create a factory:
+
+XuiClientProvision.createPending(
+UUID userId,
+UUID planId,
+UUID planSelectionId,
+long inboundId,
+String remoteClientId,
+String remoteEmail,
+String remoteSubscriptionId,
+long trafficLimitBytes,
+Instant expiresAt,
+int ipLimit,
+Instant now
+)
+
+Validate:
+
+* all required UUIDs;
+* inboundId positive;
+* valid remote client UUID string;
+* nonblank remote email;
+* traffic limit semantics;
+* expiry in the future;
+* ipLimit zero or positive according to panel semantics;
+* provisionedAt remains null until ACTIVE;
+* status starts PENDING.
+
+Create focused state methods:
+
+markProvisioning()
+
+markActive(Instant provisionedAt)
+
+markFailed(String failureCode, String safeMessage)
+
+markUnknown(String failureCode, String safeMessage)
+
+markSynchronized(Instant synchronizedAt)
+
+Rules:
+
+* Preserve state invariants.
+* Bound failure message length.
+* Never store stack traces.
+* Never store raw remote JSON.
+* Prevent invalid transitions.
+* Define same-state idempotency explicitly.
+
+---
+
+# 8. Database migration
+
+Create the next Flyway migration.
+
+Suggested name:
+
+V7__create_xui_client_provisions_table.sql
+
+Adjust the version based on actual migration history.
+
+Table:
+
+xui_client_provisions
+
+Columns:
+
+id UUID primary key
+
+user_id UUID not null
+
+plan_id UUID not null
+
+plan_selection_id UUID not null
+
+inbound_id BIGINT not null
+
+remote_client_id VARCHAR(64) not null
+
+remote_email VARCHAR(128) not null
+
+remote_subscription_id VARCHAR(128) null
+
+status VARCHAR(32) not null
+
+traffic_limit_bytes BIGINT not null
+
+expires_at TIMESTAMPTZ not null
+
+ip_limit INTEGER not null
+
+provisioned_at TIMESTAMPTZ null
+
+last_synchronized_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique plan_selection_id;
+* unique remote_client_id;
+* unique remote_email;
+* inbound_id > 0;
+* traffic_limit_bytes >= 0;
+* ip_limit >= 0;
+* valid status;
+* ACTIVE requires provisioned_at not null;
+* non-ACTIVE may have provisioned_at null;
+* failure message length enforced by column.
+
+Foreign keys:
+
+user_id -> users(id)
+
+plan_id -> plans(id)
+
+plan_selection_id -> plan_selections(id)
+
+Delete behavior:
+
+Prefer RESTRICT or NO ACTION.
+
+Do not cascade-delete provisioning history.
+
+Indexes:
+
+user_id
+plan_id
+plan_selection_id
+inbound_id
+status
+expires_at
+remote_client_id
+remote_email
+
+Ensure Hibernate validation succeeds.
+
+---
+
+# 9. Provision repository
+
+Create:
+
+XuiClientProvisionRepository
+
+Suggested package:
+
+com.parazit.panel.domain.xui.provisioning.repository
+
+Extend:
+
+UuidRepository<XuiClientProvision>
+
+Add:
+
+Optional<XuiClientProvision> findByPlanSelectionId(UUID planSelectionId)
+
+Optional<XuiClientProvision> findByRemoteClientId(String remoteClientId)
+
+Optional<XuiClientProvision> findByRemoteEmail(String remoteEmail)
+
+List<XuiClientProvision> findAllByUserId(UUID userId)
+
+boolean existsByPlanSelectionId(UUID planSelectionId)
+
+Requirements:
+
+* Independent from Spring Data.
+* No Pageable.
+* No infrastructure DTOs.
+* No remote HTTP behavior.
+
+Create infrastructure implementations:
+
+SpringDataXuiClientProvisionRepository
+
+XuiClientProvisionRepositoryAdapter
+
+Follow existing repository patterns.
+
+---
+
+# 10. Client identifier generation
+
+Create focused outbound ports:
+
+XuiClientIdGenerator
+
+Method:
+
+String generateClientId()
+
+XuiRemoteEmailGenerator
+
+Method:
+
+String generate(UUID userId, UUID provisionId)
+
+XuiSubscriptionIdGenerator
+
+Method:
+
+String generate()
+
+Suggested package:
+
+com.parazit.panel.application.port.out.xui
+
+Requirements:
+
+* Keep interfaces infrastructure-independent.
+* Do not use Telegram username as the unique remote email.
+* Do not expose raw Telegram ID in the remote email unless explicitly justified.
+* Do not use sequential predictable identifiers.
+
+Infrastructure implementations:
+
+SecureXuiClientIdGenerator
+
+* Use UUID.randomUUID() or a cryptographically appropriate UUID strategy.
+* Return canonical UUID format.
+
+SecureXuiSubscriptionIdGenerator
+
+* Use SecureRandom.
+* Generate URL-safe random identifier.
+* Configurable length.
+* Avoid ambiguous or unsafe characters.
+
+DefaultXuiRemoteEmailGenerator
+
+Recommended stable format:
+
+vpn_<short-user-hash>_<short-provision-id>
+
+Requirements:
+
+* Valid for 3x-ui email/label field.
+* Lowercase ASCII.
+* Maximum 128 characters.
+* No spaces.
+* No personal names.
+* Avoid exposing full user UUID.
+* Deterministic for a given provision record if possible.
+
+Document the strategy.
+
+---
+
+# 11. Client creation command model for remote port
+
+Create:
+
+CreateXuiClientRequest
+
+Suggested package:
+
+com.parazit.panel.application.xui.client.model
+
+Prefer immutable Java record.
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+String subscriptionId
+
+boolean enabled
+
+long totalTrafficLimitBytes
+
+Instant expiryTime
+
+int ipLimit
+
+String flow
+
+Requirements:
+
+* Infrastructure-independent.
+* No Jackson annotations.
+* No API annotations.
+* No raw JSON.
+* Preserve bytes and Instant as canonical application types.
+
+Create:
+
+CreateXuiClientResponse
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+String subscriptionId
+
+boolean created
+
+String remoteMessage
+
+Requirements:
+
+* `remoteMessage` must be sanitized.
+* Do not expose raw panel response.
+* `created=true` only when confirmed.
+* Keep immutable.
+
+---
+
+# 12. Outbound remote client port
+
+Create:
+
+XuiClientManagementClient
+
+Suggested package:
+
+com.parazit.panel.application.port.out.xui
+
+Method:
+
+CreateXuiClientResponse createClient(CreateXuiClientRequest request)
+
+Requirements:
+
+* No RestClient types.
+* No infrastructure DTOs.
+* No raw JSON.
+* No session/cookie details.
+* Task 25 and 26 may later extend this focused interface or introduce separate interfaces.
+
+Do not overload the generic XuiClient with unrelated methods if focused ports are already used.
+
+---
+
+# 13. Infrastructure remote DTO
+
+Create infrastructure-only DTOs matching verified 3x-ui payload.
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.dto.client
+
+Possible records/classes:
+
+XuiCreateClientRemoteRequest
+
+XuiClientSettingsRemoteDto
+
+XuiClientRemotePayload
+
+XuiCreateClientRemoteResponse
+
+Requirements:
+
+* Match actual API.
+* Handle the nested `settings` JSON string correctly.
+* Do not leak DTOs outside infrastructure.
+* Do not use JPA annotations.
+* Unknown response fields tolerated.
+* Never serialize null fields that the panel rejects, if verified.
+
+---
+
+# 14. Payload builder
+
+Create:
+
+XuiCreateClientPayloadBuilder
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.client
+
+Responsibilities:
+
+* Convert CreateXuiClientRequest into the verified 3x-ui request format.
+* Serialize nested client settings exactly once.
+* Convert Instant to epoch milliseconds.
+* Convert no-expiry only if supported; Task 24 requires a finite expiry by default.
+* Preserve traffic bytes exactly.
+* Set enable flag.
+* Set IP limit.
+* Set flow.
+* Set email.
+* Set subscription ID only if supported.
+* Include only required protocol-specific fields.
+* Avoid raw string concatenation.
+
+Use ObjectMapper for nested JSON.
+
+Do not log payload bodies.
+
+---
+
+# 15. Remote client adapter
+
+Create:
+
+RestClientXuiClientManagementClient
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.client
+
+Requirements:
+
+* Implement XuiClientManagementClient.
+* Use AuthenticatedRequestExecutor.
+* POST to configured create-client endpoint.
+* Deserialize verified response envelope.
+* Validate `success`.
+* Sanitize remote message.
+* Return CreateXuiClientResponse.
+* Do not contain application provisioning workflow.
+* Do not persist local data.
+* Do not select inbound.
+* Do not retry non-transient validation failures.
+
+Authentication behavior:
+
+* reuse current session;
+* 401/403 triggers at most one re-login and replay;
+* no login storm.
+
+Transient retry behavior:
+
+* connection failures;
+* timeouts;
+* 502;
+* 503;
+* 504.
+
+Important:
+
+A timeout after request submission may have an uncertain result.
+
+Do not blindly send multiple create requests without idempotency recovery.
+
+---
+
+# 16. Uncertain-result handling
+
+This is critical.
+
+A remote create request may time out after 3x-ui has already created the client.
+
+Implement a safe recovery strategy.
+
+Preferred strategy:
+
+1. Create local provision record with stable:
+
+   * remoteClientId
+   * remoteEmail
+   * subscriptionId
+2. Mark PROVISIONING.
+3. Send create request.
+4. On confirmed success:
+
+   * mark ACTIVE.
+5. On confirmed remote rejection:
+
+   * mark FAILED.
+6. On timeout or connection interruption after request may have been transmitted:
+
+   * mark UNKNOWN.
+7. Attempt to verify remote existence using inbound discovery/client lookup.
+8. If client exists with matching clientId or email:
+
+   * mark ACTIVE.
+9. If confirmed absent:
+
+   * retry creation in a new bounded attempt.
+10. If still uncertain:
+
+* return a safe provisioning-pending/unknown error.
+
+To support verification, extend the remote read capability carefully:
+
+Add to XuiInboundClient or a focused client:
+
+Optional<XuiClientSnapshot> findClient(
+long inboundId,
+String clientId,
+String email
+)
+
+Implementation may retrieve the inbound list and search its client snapshots.
+
+Do not create a second duplicate remote client.
+
+Do not blindly retry POST after timeout without checking existence.
+
+---
+
+# 17. Local application use case
+
+Create input port:
+
+CreateVpnClientUseCase
+
+Suggested package:
+
+com.parazit.panel.application.port.in.xui.client
+
+Method:
+
+CreateVpnClientResult create(CreateVpnClientCommand command)
+
+Create command:
+
+CreateVpnClientCommand
+
+Fields:
+
+Long telegramUserId
+
+UUID planSelectionId
+
+Long inboundId
+
+Requirements:
+
+* telegramUserId required and positive;
+* planSelectionId required;
+* inboundId optional if automatic eligible-inbound selection is allowed.
+
+Preferred design:
+
+Allow inboundId to be optional.
+
+If null:
+
+* use FindEligibleXuiInboundUseCase or the underlying service/policy to select one deterministically.
+
+If provided:
+
+* validate that the inbound exists and is eligible.
+
+Do not accept remote client ID, email, expiry, or traffic from external caller.
+
+These must derive from trusted local data.
+
+---
+
+# 18. Result model
+
+Create:
+
+CreateVpnClientResult
+
+Suggested package:
+
+com.parazit.panel.application.xui.client.result
+
+Fields:
+
+UUID provisionId
+
+UUID userId
+
+UUID planId
+
+UUID planSelectionId
+
+long inboundId
+
+String remoteClientId
+
+String remoteEmail
+
+XuiProvisionStatus status
+
+long trafficLimitBytes
+
+Instant expiresAt
+
+int ipLimit
+
+Instant provisionedAt
+
+boolean newlyCreated
+
+Requirements:
+
+* Immutable.
+* Do not expose panel cookies.
+* Do not expose subscription ID unless it is intentionally required for a later task.
+* Preferred: keep subscription ID internal until Task 33.
+* Do not expose raw remote message.
+* `newlyCreated=false` for idempotent replay of an existing ACTIVE provision.
+
+---
+
+# 19. Source of trusted provisioning values
+
+Derive all provisioning limits from PlanSelection snapshot.
+
+Use:
+
+* selected plan ID;
+* trafficLimitBytesSnapshot;
+* durationDaysSnapshot;
+* maxDevicesSnapshot;
+* selectedAt or current provisioning time.
+
+Expiry decision:
+
+Preferred:
+
+expiresAt = provisioning current time + durationDays
+
+Alternative:
+
+expiresAt = selectedAt + durationDays
+
+Choose one and document it.
+
+Recommended:
+
+Use provisioning time plus duration, because paid service normally starts at provisioning.
+
+For Task 24 there is no Payment yet, so treat this as technical provisioning test behavior. Make the rule explicit and easy to change in Task 31/33.
+
+Traffic decision:
+
+* TRAFFIC_LIMITED → use snapshot traffic limit.
+* UNLIMITED → remote total traffic limit should use 0 only if verified as the 3x-ui unlimited convention.
+* Do not guess. Confirm panel semantics and document.
+
+IP limit decision:
+
+* maxDevicesSnapshot may not equal 3x-ui `limitIp`.
+* Preferred initial mapping:
+
+  * null maxDevices -> 0
+  * configured maxDevices -> use as ipLimit only if this is intentionally accepted.
+* Document that device count and simultaneous IP count are not always equivalent.
+
+---
+
+# 20. User and selection validation
+
+CreateVpnClientService must validate:
+
+* User exists.
+* User ID matches the PlanSelection owner.
+* User is ACTIVE.
+* User is not blocked.
+* PlanSelection exists.
+* PlanSelection status is ACTIVE.
+* PlanSelection is not expired.
+* PlanSelection has not already been consumed.
+* No other provision exists for the same planSelectionId unless idempotent replay.
+* Selected Plan ID matches snapshot.
+* Chosen inbound is eligible.
+
+Missing or invalid state must fail before remote request.
+
+Do not mutate unrelated User fields.
+
+---
+
+# 21. PlanSelection lifecycle integration
+
+Task 19 introduced CONSUMED for future use.
+
+For Task 24, choose one approach:
+
+Preferred:
+
+Do not mark PlanSelection CONSUMED merely because remote creation succeeded, because Order/Payment does not yet exist.
+
+Alternative:
+
+Mark CONSUMED when successful provisioning is confirmed.
+
+Recommended for this roadmap:
+
+Mark PlanSelection CONSUMED only after successful ACTIVE provisioning, and document that Task 31 may later move this transition into the Order workflow.
+
+Requirements:
+
+* Never consume before confirmed remote success.
+* UNKNOWN result must not consume selection.
+* FAILED result must not consume selection.
+* ACTIVE result consumes exactly once.
+* Idempotent replay must not fail because selection is already consumed if the provision linked to it is ACTIVE.
+
+---
+
+# 22. CreateVpnClientService
+
+Create:
+
+CreateVpnClientService
+
+Suggested package:
+
+com.parazit.panel.application.xui.client
+
+Dependencies:
+
+UserRepository
+
+PlanSelectionRepository
+
+XuiClientProvisionRepository
+
+XuiClientManagementClient
+
+XuiInboundClient
+
+XuiInboundEligibilityPolicy
+
+FindEligibleXuiInboundUseCase or equivalent focused service
+
+XuiClientIdGenerator
+
+XuiRemoteEmailGenerator
+
+XuiSubscriptionIdGenerator
+
+SystemClockPort
+
+Configuration properties for:
+
+* default flow;
+* retry/reconciliation attempts;
+* default IP-limit mapping if needed.
+
+Use constructor injection.
+
+Transaction design is critical.
+
+Do not keep a database transaction open while waiting on a remote network request if avoidable.
+
+Preferred orchestration:
+
+Phase A — local transaction:
+
+* validate user and selection;
+* return existing ACTIVE provision if present;
+* create stable PENDING provision if absent;
+* commit.
+
+Phase B — remote call without long database transaction:
+
+* mark PROVISIONING in a short transaction;
+* call remote API;
+* reconcile outcome.
+
+Phase C — local result transaction:
+
+* mark ACTIVE/FAILED/UNKNOWN;
+* consume selection only after ACTIVE.
+
+Create focused transactional components if needed:
+
+PrepareXuiProvisionTransaction
+
+UpdateXuiProvisionStatusTransaction
+
+Do not rely on self-invocation of @Transactional methods.
+
+Do not annotate one large method and keep the DB transaction open during HTTP calls.
+
+Explain transaction boundaries before implementation.
+
+---
+
+# 23. Idempotency
+
+The operation must be idempotent by:
+
+planSelectionId
+
+Behavior:
+
+No provision exists:
+
+* create and attempt remote provisioning;
+* newlyCreated=true.
+
+ACTIVE provision exists:
+
+* return existing result;
+* no remote POST;
+* newlyCreated=false.
+
+PENDING or PROVISIONING provision exists:
+
+* attempt safe continuation/reconciliation;
+* do not generate a different remoteClientId.
+
+UNKNOWN provision exists:
+
+* reconcile remote existence before any new POST.
+
+FAILED provision exists:
+
+Choose behavior:
+
+Preferred:
+
+* allow explicit bounded retry using the same stable identifiers;
+* do not create a second local provision;
+* no new remoteClientId.
+
+Do not allow duplicate local rows.
+
+Database unique constraint on planSelectionId is the final authority.
+
+---
+
+# 24. Concurrency safety
+
+Concurrent requests for the same planSelectionId:
+
+* exactly one local provision row;
+* exactly one stable remoteClientId;
+* ideally exactly one remote create POST;
+* other requests return or wait/reconcile;
+* no raw unique-constraint error escapes.
+
+Do not use JVM-only locks as the sole mechanism.
+
+Use database uniqueness plus correct transaction recovery.
+
+A local in-process lock may be an optimization, not the correctness mechanism.
+
+Concurrent requests across multiple application instances must remain safe.
+
+Possible strategy:
+
+* unique planSelectionId;
+* atomic status transition from PENDING to PROVISIONING;
+* only the transaction that successfully claims PROVISIONING sends the POST;
+* others reload and reconcile.
+
+Consider a conditional update or pessimistic locking only if justified.
+
+Do not over-engineer with Kafka or distributed locks.
+
+---
+
+# 25. Provisioning exceptions
+
+Create focused exceptions:
+
+XuiClientProvisionNotAllowedException
+
+XuiClientAlreadyExistsException only if remote conflict cannot be reconciled
+
+XuiClientProvisionFailedException
+
+XuiClientProvisionUnknownException
+
+XuiInboundNotEligibleException
+
+XuiClientIdentifierCollisionException if required
+
+Mappings for internal verification API:
+
+* invalid user/selection state → 409 or 403 depending on semantics;
+* missing user/selection/inbound → 404;
+* ineligible inbound → 409;
+* confirmed remote validation failure → 502 or 422 depending on existing conventions;
+* panel unavailable → 503;
+* timeout → 504;
+* uncertain outcome → 503 with safe retry guidance;
+* duplicate successfully reconciled → no error.
+
+No SQL details.
+No remote raw message.
+No cookies.
+No stack trace in response.
+
+---
+
+# 26. Internal verification API
+
+Create:
+
+XuiClientProvisionController
+
+Suggested package:
+
+com.parazit.panel.api.internal.xui.client
+
+Base path:
+
+/internal/xui/clients
+
+Endpoint:
+
+POST /internal/xui/clients
+
+Request:
+
+{
+"telegramUserId": 123456789,
+"planSelectionId": "uuid",
+"inboundId": 1
+}
+
+`inboundId` may be optional.
+
+Response:
+
+{
+"provisionId": "uuid",
+"planId": "uuid",
+"planSelectionId": "uuid",
+"inboundId": 1,
+"remoteClientId": "uuid",
+"remoteEmail": "vpn_xxx",
+"status": "ACTIVE",
+"trafficLimitBytes": 32212254720,
+"expiresAt": "2026-08-11T12:00:00Z",
+"ipLimit": 1,
+"provisionedAt": "2026-07-11T12:00:00Z",
+"newlyCreated": true
+}
+
+Requirements:
+
+* Internal and temporary.
+* Dedicated request/response DTOs.
+* Controller depends on CreateVpnClientUseCase.
+* No repository injection.
+* No JPA entity exposure.
+* No subscription URL.
+* No QR Code.
+* No payment/order behavior.
+* No authentication implementation in this task.
+
+HTTP behavior:
+
+* confirmed new provisioning → 201;
+* idempotent existing ACTIVE result → 200;
+* missing resource → 404;
+* invalid/ineligible state → 409 or 403;
+* uncertain remote result → 503;
+* panel unavailable → 503;
+* timeout → 504;
+* malformed request → 400.
+
+---
+
+# 27. API DTOs and mapper
+
+Create:
+
+CreateXuiClientRequestDto
+
+Fields:
+
+Long telegramUserId
+
+UUID planSelectionId
+
+Long inboundId
+
+Validation:
+
+telegramUserId:
+@NotNull
+@Positive
+
+planSelectionId:
+@NotNull
+
+inboundId:
+@Positive when present
+
+Create:
+
+XuiClientProvisionResponse
+
+Use only safe result fields.
+
+Create:
+
+XuiClientProvisionApiMapper
+
+Responsibilities:
+
+* request to command;
+* result to response;
+* no entity mapping;
+* no infrastructure DTO dependency;
+* explicit manual mapping.
+
+---
+
+# 28. Logging
+
+INFO:
+
+* provision record prepared;
+* provisioning started;
+* remote creation confirmed;
+* idempotent existing provision returned;
+* selection consumed after success.
+
+DEBUG:
+
+* generated identifiers only in partially redacted form;
+* reconciliation performed;
+* existing remote client found after uncertain request.
+
+WARN:
+
+* uncertain remote outcome;
+* identifier collision;
+* concurrent provisioning contention;
+* remote duplicate reconciled.
+
+ERROR:
+
+* unrecoverable remote or local failure with stack trace in server logs.
+
+Include:
+
+provisionId
+userId
+planId
+planSelectionId
+inboundId
+status
+attempt
+duration
+traceId
+
+Never log:
+
+password
+cookies
+session ID
+full remoteClientId if current privacy policy requires masking
+subscriptionId
+raw request body
+raw response body
+private keys
+full client list
+personal names
+
+---
+
+# 29. Sanitized realistic fixtures
+
+Create:
+
+src/test/resources/xui/clients/
+
+Fixtures such as:
+
+create-client-success.json
+
+create-client-failure.json
+
+create-client-duplicate.json
+
+create-client-malformed.json
+
+inbound-with-created-client.json
+
+Requirements:
+
+* Match verified 3x-ui version.
+* No real server data.
+* No real UUID tied to production.
+* No real subscription IDs.
+* No credentials.
+* No private keys.
+
+---
+
+# 30. Domain unit tests
+
+Test XuiClientProvision:
+
+* pending creation;
+* all required values;
+* invalid inbound ID;
+* invalid UUID string;
+* blank email;
+* invalid traffic;
+* invalid expiry;
+* invalid ipLimit;
+* PENDING -> PROVISIONING;
+* PROVISIONING -> ACTIVE;
+* PROVISIONING -> FAILED;
+* PROVISIONING -> UNKNOWN;
+* ACTIVE requires provisionedAt;
+* invalid transitions;
+* failure message sanitization/length;
+* idempotent state behavior;
+* equality/hashCode consistent with BaseEntity strategy.
+
+No Spring context.
+
+---
+
+# 31. Generator unit tests
+
+XuiClientIdGenerator:
+
+* valid UUID format;
+* successive values differ;
+* no null/blank.
+
+XuiSubscriptionIdGenerator:
+
+* configured length;
+* URL-safe alphabet;
+* no spaces;
+* successive values differ;
+* invalid length rejected.
+
+XuiRemoteEmailGenerator:
+
+* deterministic if designed that way;
+* lowercase;
+* valid allowed characters;
+* no spaces;
+* bounded length;
+* no personal names;
+* does not expose full UUID values;
+* distinct provisions produce distinct labels.
+
+---
+
+# 32. Payload builder tests
+
+Verify:
+
+* exact inbound ID;
+* nested settings encoded exactly once;
+* UUID client ID;
+* email;
+* expiry epoch milliseconds;
+* total traffic bytes;
+* enable=true;
+* IP limit;
+* flow;
+* subscription ID when supported;
+* unlimited traffic remote convention;
+* null/optional fields;
+* no double-escaped JSON;
+* no secrets added;
+* exact verified request fixture.
+
+---
+
+# 33. Remote adapter integration tests
+
+Using WireMock or MockWebServer:
+
+* successful authenticated create;
+* response success=false;
+* malformed response;
+* invalid credentials;
+* 401 then re-login then success;
+* 403 then re-login then success;
+* 502/503/504 bounded retry;
+* timeout uncertain outcome;
+* connection interruption;
+* duplicate remote client response;
+* cookie reuse;
+* request path;
+* HTTP method;
+* body shape;
+* no repeated login unnecessarily.
+
+Verify no blind duplicate POST after uncertain timeout without reconciliation.
+
+---
+
+# 34. Service unit tests
+
+Test CreateVpnClientService:
+
+Validation:
+
+* missing user;
+* blocked user;
+* inactive user;
+* suspended user;
+* missing selection;
+* selection owned by different user;
+* expired selection;
+* cleared selection;
+* hidden/ineligible inbound;
+* invalid command.
+
+First provisioning:
+
+* creates stable local provision;
+* uses selection snapshot;
+* generates identifiers once;
+* uses fixed clock;
+* calculates expiry correctly;
+* maps traffic correctly;
+* calls remote adapter once;
+* marks ACTIVE;
+* consumes selection after success;
+* newlyCreated=true.
+
+Idempotency:
+
+* existing ACTIVE provision returned;
+* no new identifiers;
+* no remote call;
+* newlyCreated=false.
+
+Failure:
+
+* confirmed rejection -> FAILED;
+* timeout -> UNKNOWN;
+* uncertain result reconciled to ACTIVE when remote client is found;
+* uncertain result retries only after confirming absence;
+* bounded retry;
+* no duplicate local provision;
+* no selection consumption on failure or unknown.
+
+Use mocks/fakes consistent with project conventions.
+
+---
+
+# 35. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+* save provisioning record;
+* UUID and auditing;
+* unique planSelectionId;
+* unique remoteClientId;
+* unique remoteEmail;
+* find by planSelectionId;
+* find by remoteClientId;
+* find by remoteEmail;
+* find all by user;
+* status persistence;
+* failure fields;
+* ACTIVE/provisionedAt constraint;
+* foreign keys;
+* delete RESTRICT behavior;
+* exact traffic and expiry;
+* Flyway success;
+* Hibernate validation.
+
+Flush to trigger constraints.
+
+Do not assert full vendor-specific messages.
+
+---
+
+# 36. Full provisioning integration tests
+
+Use:
+
+* real PostgreSQL through Testcontainers;
+* mock 3x-ui server;
+* real application services and adapters where practical.
+
+Scenarios:
+
+1. Register active user.
+2. Create and activate Plan.
+3. Select Plan.
+4. Mock eligible VLESS + REALITY inbound.
+5. Mock successful create-client response.
+6. Execute provisioning.
+7. Verify:
+
+   * one provision row;
+   * ACTIVE status;
+   * stable client ID;
+   * exact remote payload;
+   * selection consumed;
+   * user and plan unchanged.
+
+Idempotent replay:
+
+* call again with same selection;
+* no second remote POST;
+* same provision ID;
+* newlyCreated=false.
+
+Snapshot:
+
+* change Plan after selection;
+* provisioning uses selection snapshot, not updated Plan.
+
+---
+
+# 37. Uncertain-result integration tests
+
+Critical scenarios:
+
+Timeout after remote server receives the request:
+
+* first POST times out;
+* subsequent inbound lookup shows client exists;
+* provision becomes ACTIVE;
+* no second create POST.
+
+Timeout and client absent:
+
+* first result uncertain;
+* lookup confirms absent;
+* one bounded retry may occur;
+* success marks ACTIVE.
+
+Persistent uncertainty:
+
+* lookup cannot confirm;
+* provision remains UNKNOWN;
+* safe exception returned;
+* selection remains unconsumed;
+* no uncontrolled retries.
+
+---
+
+# 38. Concurrency integration tests
+
+Scenario A: same planSelectionId, concurrent requests
+
+Verify:
+
+* one local provision row;
+* one stable remoteClientId;
+* one remote create POST where claim strategy works;
+* both callers receive same ACTIVE provision or documented pending behavior;
+* no raw constraint exception.
+
+Scenario B: two application transaction paths simulate multi-instance contention
+
+Verify:
+
+* database is the correctness authority;
+* one transaction claims PROVISIONING;
+* other does not send a duplicate POST;
+* no two remote client IDs.
+
+Requirements:
+
+* real PostgreSQL;
+* mock server;
+* separate transactions;
+* deterministic synchronization;
+* ExecutorService shutdown;
+* timeout;
+* no Thread.sleep;
+* repeatable.
+
+---
+
+# 39. Controller tests
+
+POST /internal/xui/clients
+
+Test:
+
+* successful new provisioning -> 201;
+* idempotent replay -> 200;
+* auto inbound selection;
+* explicit inbound selection;
+* missing user -> 404;
+* missing selection -> 404;
+* ownership mismatch -> 409 or 403;
+* blocked user -> 403;
+* expired selection -> 409;
+* ineligible inbound -> 409;
+* panel unavailable -> 503;
+* timeout -> 504;
+* uncertain outcome -> 503;
+* invalid request -> 400;
+* malformed JSON -> 400.
+
+Response must not include:
+
+* cookies;
+* session ID;
+* subscription ID if deferred;
+* raw panel message;
+* private keys;
+* stack trace;
+* SQL details.
+
+All errors include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+---
+
+# 40. Architecture verification
+
+Verify:
+
+* XuiClientProvision domain does not depend on API or infrastructure.
+* CreateVpnClientService depends on ports and repositories.
+* Infrastructure DTOs remain infrastructure-only.
+* Controller depends on input port.
+* No controller injects repository or RestClient.
+* No raw JSON leaves infrastructure.
+* No remote secret is persisted.
+* No payment/order/Telegram/subscription/QR code logic exists.
+* No update/delete client logic exists.
+* No field injection.
+* No long database transaction around network call.
+* No blind retry after uncertain POST.
+* No ApplicationContext service locator.
+
+Extend existing architecture tests if present.
+
+---
+
+# 41. Configuration
+
+Add only required configuration.
+
+Possible properties:
+
+app:
+xui:
+client-create-path: /panel/api/inbounds/addClient
+client:
+default-flow: xtls-rprx-vision
+subscription-id-length: 16
+reconciliation-attempts: 2
+reconciliation-delay: PT1S
+
+Environment variables:
+
+XUI_CLIENT_CREATE_PATH
+XUI_CLIENT_DEFAULT_FLOW
+XUI_SUBSCRIPTION_ID_LENGTH
+XUI_CLIENT_RECONCILIATION_ATTEMPTS
+XUI_CLIENT_RECONCILIATION_DELAY
+
+Requirements:
+
+* Safe defaults only when verified.
+* Validate ranges.
+* No credentials in logs.
+* Update `.env.example`.
+
+Do not add excessive configuration.
+
+---
+
+# 42. Documentation
+
+Create:
+
+docs/xui/client-provisioning.md
+
+Document:
+
+* verified 3x-ui version and endpoint;
+* request payload;
+* nested settings encoding;
+* local provisioning aggregate;
+* identifier strategy;
+* remote email strategy;
+* traffic convention;
+* expiry convention;
+* IP-limit mapping;
+* PlanSelection snapshot usage;
+* transaction boundaries;
+* idempotency;
+* concurrency;
+* uncertain-result handling;
+* reconciliation;
+* error mapping;
+* secret redaction;
+* internal verification API;
+* deferred Task 25/26/33 behavior.
+
+Include Mermaid diagrams for:
+
+* successful provisioning;
+* idempotent replay;
+* timeout with remote client found;
+* timeout with retry after confirmed absence;
+* concurrent provisioning claim;
+* local transaction versus remote call boundaries.
+
+Update:
+
+docs/xui/client-architecture.md
+
+docs/xui/authentication.md
+
+docs/xui/inbound-discovery.md
+
+only where needed.
+
+---
+
+# 43. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/xui/provisioning/
+XuiClientProvision.java
+XuiProvisionStatus.java
+
+src/main/java/com/parazit/panel/domain/xui/provisioning/repository/
+XuiClientProvisionRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/xui/
+XuiClientManagementClient.java
+XuiClientIdGenerator.java
+XuiRemoteEmailGenerator.java
+XuiSubscriptionIdGenerator.java
+
+src/main/java/com/parazit/panel/application/port/in/xui/client/
+CreateVpnClientUseCase.java
+
+src/main/java/com/parazit/panel/application/xui/client/model/
+CreateXuiClientRequest.java
+CreateXuiClientResponse.java
+
+src/main/java/com/parazit/panel/application/xui/client/command/
+CreateVpnClientCommand.java
+
+src/main/java/com/parazit/panel/application/xui/client/result/
+CreateVpnClientResult.java
+
+src/main/java/com/parazit/panel/application/xui/client/
+CreateVpnClientService.java
+CreateVpnClientResultMapper.java
+PrepareXuiProvisionTransaction.java
+UpdateXuiProvisionStatusTransaction.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/client/
+RestClientXuiClientManagementClient.java
+XuiCreateClientPayloadBuilder.java
+SecureXuiClientIdGenerator.java
+SecureXuiSubscriptionIdGenerator.java
+DefaultXuiRemoteEmailGenerator.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/dto/client/
+XuiCreateClientRemoteRequest.java
+XuiClientRemotePayload.java
+XuiCreateClientRemoteResponse.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/xui/provisioning/
+SpringDataXuiClientProvisionRepository.java
+XuiClientProvisionRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/internal/xui/client/
+XuiClientProvisionController.java
+CreateXuiClientRequestDto.java
+XuiClientProvisionResponse.java
+XuiClientProvisionApiMapper.java
+
+src/main/resources/db/migration/
+V7__create_xui_client_provisions_table.sql
+
+src/test/resources/xui/clients/
+create-client-success.json
+create-client-failure.json
+create-client-duplicate.json
+create-client-malformed.json
+inbound-with-created-client.json
+
+src/test/java/com/parazit/panel/domain/xui/provisioning/
+XuiClientProvisionTest.java
+
+src/test/java/com/parazit/panel/infrastructure/xui/client/
+XuiCreateClientPayloadBuilderTest.java
+RestClientXuiClientManagementClientIntegrationTest.java
+SecureXuiClientIdGeneratorTest.java
+SecureXuiSubscriptionIdGeneratorTest.java
+DefaultXuiRemoteEmailGeneratorTest.java
+
+src/test/java/com/parazit/panel/application/xui/client/
+CreateVpnClientServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/xui/provisioning/
+XuiClientProvisionRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/xui/client/
+XuiClientProvisioningIntegrationTest.java
+XuiClientProvisioningUncertainResultIntegrationTest.java
+ConcurrentXuiClientProvisioningIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/xui/client/
+XuiClientProvisionControllerTest.java
+
+docs/xui/
+client-provisioning.md
+
+Adapt names and migration versions to existing conventions.
+
+---
+
+# 44. Verification commands
+
+Run the commands supported by the current build.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway migrations pass;
+* Hibernate validation passes;
+* generator tests pass;
+* payload fixture tests pass;
+* mock HTTP integration tests pass;
+* provisioning integration tests pass;
+* uncertain-result tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts;
+* no real panel is called automatically;
+* no duplicate remote POST occurs on idempotent replay;
+* no blind retry after timeout;
+* no payment/order/subscription/Telegram logic was added;
+* no client update/delete logic was added;
+* no credentials or real panel data were committed;
+* no tests were disabled.
+
+---
+
+# 45. Optional manual verification against a real 3x-ui panel
+
+Do not run automatically.
+
+Only when secure environment variables are available and the user explicitly runs it.
+
+Manual flow:
+
+1. Use a dedicated test inbound.
+2. Use a dedicated test user and PlanSelection.
+3. Call internal create-client endpoint.
+4. Verify the client appears in 3x-ui.
+5. Verify:
+
+   * UUID;
+   * email;
+   * expiry;
+   * traffic;
+   * IP limit;
+   * enabled state.
+6. Repeat the same request.
+7. Confirm no duplicate remote client exists.
+8. Remove the test client manually or wait for Task 25.
+
+Do not run against a production inbound without explicit confirmation.
+
+Do not commit screenshots, responses, server URLs, keys, or cookies.
+
+---
+
+# 46. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified 3x-ui API contract
+3. Local provisioning aggregate design
+4. Identifier strategy
+5. PlanSelection consumption decision
+6. Transaction-boundary design
+7. Idempotency strategy
+8. Concurrency strategy
+9. Uncertain-result reconciliation strategy
+10. Planned files to create
+11. Planned files to modify
+12. Risks and compatibility concerns
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Remote payload contract
+6. Identifier behavior
+7. Provisioning flow
+8. Transaction boundaries
+9. Idempotency behavior
+10. Concurrency handling
+11. Uncertain-result handling
+12. Internal API contract
+13. Test results
+14. Integration-test results
+15. Concurrency-test results
+16. Build result
+17. Commands executed
+18. Remaining issues
+19. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(xui): implement idempotent VPN client provisioning
+
+Stop after completing Task 24.
+
+Do not begin Task 25.
+

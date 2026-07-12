@@ -1,0 +1,2514 @@
+You are a senior Java 21, Spring Boot, file-storage, security, and payment-workflow engineer.
+
+Continue implementing the existing project.
+
+# Task 30 — Manual Payment Receipt Upload and Review Queue
+
+## Goal
+
+Implement the complete receipt-submission flow for manual card-to-card payments.
+
+After this task, the application must be able to:
+
+* accept a payment receipt from a registered user;
+* validate the related Payment and manual payment instruction;
+* accept supported receipt images or PDF files safely;
+* store the file outside the relational database;
+* persist receipt metadata;
+* prevent duplicate or reused receipt submissions;
+* record user-declared payment information;
+* move the manual instruction into review-pending state;
+* move the Payment into a waiting-for-review state;
+* expose an internal operator review queue;
+* let authorized future operator workflows retrieve receipt metadata and content safely;
+* preserve immutable audit history;
+* handle repeated submissions idempotently;
+* remain safe under concurrent requests.
+
+Do not implement:
+
+* operator approval;
+* operator rejection;
+* Payment approval;
+* Payment rejection;
+* VPN provisioning;
+* PaymentApproved event;
+* OCR-based automatic approval;
+* bank transaction lookup;
+* Telegram Bot handlers;
+* antivirus cloud integration;
+* automatic receipt recognition;
+* refund;
+* subscription generation;
+* QR Code generation.
+
+Stop after completing Task 30.
+
+Do not begin Task 31.
+
+---
+
+# 1. Important rules
+
+* Inspect the complete repository before making changes.
+* Preserve all working behavior from Tasks 1–29.
+* Reuse Payment, ManualCardPaymentInstruction, User, Order, repositories, BaseEntity, SystemClockPort, exception handling, traceId, logging, transaction conventions, and Testcontainers support.
+* Use Java 21 and the existing Spring Boot version.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not store receipt file bytes inside PostgreSQL.
+* Do not expose arbitrary filesystem paths.
+* Do not trust the original filename.
+* Do not trust only the MIME type supplied by the client.
+* Do not approve Payment after receipt upload.
+* Do not mark a receipt as valid merely because it was uploaded.
+* Do not accept receipts for Zarinpal Payments.
+* Do not accept receipts for expired, cancelled, rejected, failed, or approved Payments.
+* Do not store CVV2, PIN, OTP, passwords, complete card numbers, or banking credentials.
+* Do not log receipt contents.
+* Do not log original receipt images as Base64.
+* Do not expose storage paths in API responses.
+* Do not allow path traversal.
+* Do not allow executable files.
+* Do not call a real object-storage service during automated tests.
+* Do not add OCR unless only an extension port is created for future use.
+* Do not begin operator approval.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* Payment aggregate and statuses;
+* manual payment instruction aggregate and statuses;
+* PaymentMethod naming;
+* current Payment expiration behavior;
+* current instruction expiration behavior;
+* User and Order ownership checks;
+* current file upload support;
+* existing multipart configuration;
+* current storage abstractions;
+* current security filters and size limits;
+* migration history;
+* exception mapping;
+* API conventions;
+* test infrastructure;
+* any existing receipt, attachment, or file entity.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Receipt aggregate design
+3. File-storage abstraction decision
+4. Storage-key strategy
+5. File-validation strategy
+6. Duplicate-detection strategy
+7. Idempotency strategy
+8. Review-queue design
+9. Transaction-boundary design
+10. Planned files to create
+11. Planned files to modify
+12. Migration, security, and privacy risks
+
+---
+
+# 3. Payment status refinement
+
+Review PaymentStatus from Task 27.
+
+The manual receipt workflow requires:
+
+RECEIPT_SUBMITTED
+
+WAITING_FOR_REVIEW
+
+If these statuses do not exist, add them.
+
+Recommended manual flow:
+
+CREATED
+-> WAITING_FOR_PAYMENT
+-> RECEIPT_SUBMITTED
+-> WAITING_FOR_REVIEW
+-> APPROVED or REJECTED in Task 31
+
+Rules:
+
+* Receipt upload does not transition directly to APPROVED.
+* Payment must be manual-card method.
+* APPROVED is terminal.
+* REJECTED behavior will be completed in Task 31.
+* Repeated submission must not create invalid duplicate transitions.
+* No generic status setter.
+* Status changes must happen through explicit domain methods.
+
+Create methods such as:
+
+markReceiptSubmitted(Instant submittedAt)
+
+markWaitingForReview()
+
+Do not implement markApproved in this task beyond existing behavior.
+
+Use a corrective Flyway migration if database status constraints need changes.
+
+---
+
+# 4. Manual instruction status refinement
+
+Use or add:
+
+RECEIPT_PENDING
+
+Recommended behavior:
+
+ACTIVE
+-> RECEIPT_PENDING
+
+Task 31:
+
+RECEIPT_PENDING
+-> COMPLETED or returns to ACTIVE/REJECTED state according to review policy
+
+Rules:
+
+* Expired instruction cannot accept a receipt.
+* Cancelled instruction cannot accept a receipt.
+* Completed instruction cannot accept another receipt.
+* A valid active instruction moves to RECEIPT_PENDING after receipt persistence succeeds.
+* Do not free the reserved unique payable amount after receipt upload.
+* The reservation must remain held during operator review.
+* Do not allow instruction reissue while a receipt is waiting for review.
+
+---
+
+# 5. Receipt aggregate
+
+Create:
+
+ManualPaymentReceipt
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual.receipt
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited
+
+UUID receiptRequestId
+
+UUID paymentId
+
+UUID instructionId
+
+UUID userId
+
+ManualPaymentReceiptStatus status
+
+String storageProvider
+
+String storageKey
+
+String originalFilename
+
+String sanitizedFilename
+
+String detectedContentType
+
+long fileSizeBytes
+
+String fileSha256
+
+String claimedTrackingNumber
+
+String claimedSenderCardLastFour
+
+Instant claimedPaidAt
+
+long claimedAmount
+
+String userNote
+
+Instant submittedAt
+
+Instant reviewQueuedAt
+
+Instant withdrawnAt
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Design rules:
+
+* receiptRequestId is the idempotency key.
+* One instruction may have multiple historical receipts only if a prior receipt is rejected or withdrawn in Task 31.
+* At most one active review-pending receipt per instruction.
+* paymentId, instructionId, and userId must remain scalar UUIDs.
+* Do not use JPA relationships.
+* storageKey is internal and must not be returned directly to normal API clients.
+* original filename is metadata only and must never be used as storage path.
+* fileSha256 supports duplicate detection and integrity.
+* claimedAmount is the amount the user claims was transferred.
+* claimedAmount must normally equal instruction.payableAmount.
+* claimedTrackingNumber is optional.
+* sender-card last four digits are optional.
+* Do not store a full sender card number.
+* userNote is optional and bounded.
+* Do not store OCR output yet.
+* Do not store binary file content.
+* Do not store Base64.
+* Preserve receipt history.
+
+---
+
+# 6. Receipt status
+
+Create:
+
+ManualPaymentReceiptStatus
+
+Values:
+
+UPLOADING
+
+SUBMITTED
+
+QUEUED_FOR_REVIEW
+
+WITHDRAWN
+
+APPROVED
+
+REJECTED
+
+INVALID_FILE
+
+Suggested Task 30 usage:
+
+UPLOADING
+
+SUBMITTED
+
+QUEUED_FOR_REVIEW
+
+WITHDRAWN
+
+INVALID_FILE
+
+Future Task 31:
+
+APPROVED
+
+REJECTED
+
+Rules:
+
+* UPLOADING -> SUBMITTED
+* SUBMITTED -> QUEUED_FOR_REVIEW
+* QUEUED_FOR_REVIEW -> APPROVED or REJECTED in Task 31
+* UPLOADING -> INVALID_FILE
+* SUBMITTED or QUEUED_FOR_REVIEW -> WITHDRAWN only if review has not begun and policy allows it
+* APPROVED and REJECTED are terminal
+* No generic status setter
+* Same-state behavior deterministic
+
+---
+
+# 7. Controlled receipt creation
+
+Create factory:
+
+ManualPaymentReceipt.createUploading(
+UUID receiptRequestId,
+UUID paymentId,
+UUID instructionId,
+UUID userId,
+String originalFilename,
+long claimedAmount,
+String claimedTrackingNumber,
+String claimedSenderCardLastFour,
+Instant claimedPaidAt,
+String userNote,
+Instant submittedAt
+)
+
+Initial status:
+
+UPLOADING
+
+Requirements:
+
+* Validate all UUIDs.
+* Claimed amount positive.
+* Original filename required but bounded.
+* Tracking number normalized.
+* Sender-card last four digits must be exactly four numeric digits when present.
+* claimedPaidAt must not be unreasonably far in the future.
+* userNote bounded.
+* No storage metadata before successful storage.
+* No file hash before successful storage.
+
+Create methods:
+
+markStored(
+String storageProvider,
+String storageKey,
+String sanitizedFilename,
+String detectedContentType,
+long fileSizeBytes,
+String fileSha256
+)
+
+queueForReview(Instant reviewQueuedAt)
+
+markInvalidFile(String safeReason)
+
+withdraw(Instant withdrawnAt)
+
+Future methods may exist but must not be invoked:
+
+approve(...)
+
+reject(...)
+
+Requirements:
+
+* Storage metadata required before SUBMITTED.
+* Queue requires SUBMITTED.
+* Invalid file cannot be queued.
+* Storage key immutable after successful storage.
+* Hash immutable after storage.
+* No public setters.
+
+---
+
+# 8. Database migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V12__create_manual_payment_receipts.sql
+
+Adjust version based on actual migration history.
+
+Table:
+
+manual_payment_receipts
+
+Columns:
+
+id UUID primary key
+
+receipt_request_id UUID not null
+
+payment_id UUID not null
+
+instruction_id UUID not null
+
+user_id UUID not null
+
+status VARCHAR(32) not null
+
+storage_provider VARCHAR(32) null
+
+storage_key VARCHAR(512) null
+
+original_filename VARCHAR(255) not null
+
+sanitized_filename VARCHAR(255) null
+
+detected_content_type VARCHAR(128) null
+
+file_size_bytes BIGINT null
+
+file_sha256 VARCHAR(64) null
+
+claimed_tracking_number VARCHAR(128) null
+
+claimed_sender_card_last_four VARCHAR(4) null
+
+claimed_paid_at TIMESTAMPTZ null
+
+claimed_amount BIGINT not null
+
+user_note VARCHAR(1000) null
+
+submitted_at TIMESTAMPTZ not null
+
+review_queued_at TIMESTAMPTZ null
+
+withdrawn_at TIMESTAMPTZ null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique receipt_request_id;
+* foreign key payment_id -> payments(id);
+* foreign key instruction_id -> manual_card_payment_instructions(id);
+* foreign key user_id -> users(id);
+* claimed_amount > 0;
+* file_size_bytes is null or > 0;
+* file_sha256 format check where practical;
+* sender-card last-four numeric check where practical;
+* valid status;
+* SUBMITTED or QUEUED_FOR_REVIEW requires:
+
+  * storage_provider;
+  * storage_key;
+  * detected_content_type;
+  * file_size_bytes;
+  * file_sha256.
+* QUEUED_FOR_REVIEW requires review_queued_at.
+
+Indexes:
+
+payment_id
+
+instruction_id
+
+user_id
+
+status
+
+submitted_at
+
+review_queued_at
+
+file_sha256
+
+Partial unique index:
+
+instruction_id
+
+for statuses:
+
+UPLOADING
+SUBMITTED
+QUEUED_FOR_REVIEW
+
+This ensures one active receipt workflow per instruction.
+
+Optional duplicate protection:
+
+A partial or normal index on:
+
+user_id, file_sha256
+
+Do not globally forbid the same file hash forever without considering legitimate retry behavior.
+
+Preferred:
+
+Detect duplicate hash in application and reject active reuse.
+
+Use RESTRICT or NO ACTION deletion.
+
+Do not edit previous migrations.
+
+---
+
+# 9. Receipt repository
+
+Create:
+
+ManualPaymentReceiptRepository
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual.receipt.repository
+
+Extend:
+
+UuidRepository<ManualPaymentReceipt>
+
+Add:
+
+Optional<ManualPaymentReceipt> findByReceiptRequestId(
+UUID receiptRequestId
+)
+
+Optional<ManualPaymentReceipt> findActiveByInstructionId(
+UUID instructionId
+)
+
+Optional<ManualPaymentReceipt> findByStorageKey(
+String storageKey
+)
+
+Optional<ManualPaymentReceipt> findActiveByUserIdAndFileSha256(
+UUID userId,
+String fileSha256
+)
+
+List<ManualPaymentReceipt> findAllByPaymentIdOrderBySubmittedAtDesc(
+UUID paymentId
+)
+
+List<ManualPaymentReceipt> findAllQueuedForReviewOrderByReviewQueuedAtAsc()
+
+boolean existsActiveByInstructionId(UUID instructionId)
+
+Requirements:
+
+* Domain repository independent from Spring Data.
+* No storage implementation details beyond storage key metadata.
+* No Pageable unless already standardized.
+* Methods never return null.
+
+Create:
+
+SpringDataManualPaymentReceiptRepository
+
+ManualPaymentReceiptRepositoryAdapter
+
+---
+
+# 10. File-storage port
+
+Create:
+
+PaymentReceiptStorage
+
+Suggested package:
+
+com.parazit.panel.application.port.out.payment.receipt
+
+Methods:
+
+StoredPaymentReceipt store(
+StorePaymentReceiptCommand command
+)
+
+PaymentReceiptContent load(
+String storageKey
+)
+
+void delete(
+String storageKey
+)
+
+boolean exists(
+String storageKey
+)
+
+Requirements:
+
+* Infrastructure-independent.
+* Do not expose Path, File, MultipartFile, S3 SDK types, or servlet types.
+* Store must return immutable metadata.
+* Delete is only for compensation when database persistence fails before workflow completion.
+* Normal business workflows preserve files.
+* Do not allow arbitrary storage keys from external callers.
+
+Create models:
+
+StorePaymentReceiptCommand
+
+Fields:
+
+UUID receiptId
+
+String originalFilename
+
+String detectedContentType
+
+long fileSizeBytes
+
+String fileSha256
+
+InputStreamSupplier or byte-stream abstraction
+
+Create:
+
+StoredPaymentReceipt
+
+Fields:
+
+String storageProvider
+
+String storageKey
+
+String sanitizedFilename
+
+String detectedContentType
+
+long fileSizeBytes
+
+String fileSha256
+
+Create:
+
+PaymentReceiptContent
+
+Fields:
+
+String filename
+
+String contentType
+
+long sizeBytes
+
+InputStream or byte resource abstraction
+
+Avoid loading entire large files into memory where practical.
+
+---
+
+# 11. Local filesystem storage adapter
+
+Implement first provider:
+
+LocalPaymentReceiptStorage
+
+Suggested package:
+
+com.parazit.panel.infrastructure.storage.receipt
+
+Requirements:
+
+* Store under a configured root directory outside the source tree.
+* Generate storage key internally.
+* Never use original filename as path.
+* Suggested storage structure:
+
+manual-receipts/YYYY/MM/<receipt-id>/<random-file-name>
+
+* Normalize and verify target path remains under root.
+* Create directories safely.
+* Write atomically:
+
+  * temporary file;
+  * fsync where practical;
+  * atomic move where supported.
+* Use restrictive file permissions where supported.
+* Do not allow directory listing.
+* Do not expose root path.
+* Do not overwrite existing file.
+* Verify stored size and hash.
+* Delete temporary file on failure.
+* Be thread-safe.
+* Do not follow symlinks.
+* Avoid world-readable permissions.
+
+No S3/MinIO implementation is required in Task 30.
+
+Design the port so object storage can be added later.
+
+---
+
+# 12. Storage configuration
+
+Create:
+
+PaymentReceiptStorageProperties
+
+Suggested package:
+
+com.parazit.panel.config.properties
+
+Prefix:
+
+app.payment.receipt-storage
+
+Fields:
+
+boolean enabled
+
+String provider
+
+Path localRoot
+
+long maxFileSizeBytes
+
+Set<String> allowedContentTypes
+
+Set<String> allowedExtensions
+
+boolean allowPdf
+
+int imageMaxWidth
+
+int imageMaxHeight
+
+Duration uploadTimeout if useful
+
+boolean calculateSha256
+
+Requirements:
+
+* Default provider: local.
+* Root must not be inside `src`, `target`, or `build`.
+* Max size must be positive.
+* Default safe limit, such as 5 MiB, only if consistent with project requirements.
+* Allowed types should initially include:
+
+image/jpeg
+image/png
+application/pdf if enabled
+
+Optional:
+
+image/webp
+
+* Reject SVG.
+* Reject HTML.
+* Reject executable formats.
+* Do not rely only on extensions.
+* Secrets not applicable, but root path must not be exposed through APIs.
+* Update `.env.example`.
+
+Suggested environment variables:
+
+PAYMENT_RECEIPT_STORAGE_ENABLED=true
+
+PAYMENT_RECEIPT_STORAGE_PROVIDER=local
+
+PAYMENT_RECEIPT_LOCAL_ROOT=/var/lib/panel/manual-payment-receipts
+
+PAYMENT_RECEIPT_MAX_FILE_SIZE_BYTES=5242880
+
+PAYMENT_RECEIPT_ALLOW_PDF=true
+
+---
+
+# 13. Multipart configuration
+
+Review Spring multipart configuration.
+
+Set bounded limits:
+
+spring.servlet.multipart.max-file-size
+
+spring.servlet.multipart.max-request-size
+
+Ensure limits are consistent with receipt storage properties.
+
+Requirements:
+
+* Multipart limits must not be unlimited.
+* Large rejected uploads should return safe 413 or 400 according to current exception handling.
+* Do not expose server configuration paths.
+* Document reverse-proxy upload limits for deployment.
+
+---
+
+# 14. File type detection
+
+Create outbound or infrastructure service:
+
+PaymentReceiptFileInspector
+
+Responsibilities:
+
+* detect real content type from file signature;
+* verify declared content type;
+* verify allowed extension;
+* inspect basic image structure;
+* inspect PDF signature;
+* reject polyglot/suspicious files where practical;
+* calculate SHA-256;
+* return sanitized metadata.
+
+Preferred implementation:
+
+Use Apache Tika only if already present or clearly justified.
+
+Alternative:
+
+Implement minimal magic-byte detection for:
+
+JPEG
+
+PNG
+
+PDF
+
+WEBP if supported
+
+Do not add a large dependency without explaining it.
+
+Create:
+
+InspectedPaymentReceiptFile
+
+Fields:
+
+String detectedContentType
+
+String normalizedExtension
+
+long sizeBytes
+
+String sha256
+
+Integer imageWidth
+
+Integer imageHeight
+
+Requirements:
+
+* Do not trust MultipartFile.getContentType().
+* Reject mismatched type/extension when suspicious.
+* Reject empty file.
+* Reject oversized file.
+* Reject corrupted image.
+* Reject encrypted or malformed PDF if detectable.
+* Do not parse embedded scripts.
+* Reject SVG entirely.
+* Do not execute file content.
+
+---
+
+# 15. Image validation
+
+For JPEG/PNG/WebP:
+
+* Decode dimensions safely.
+* Enforce configurable maximum width and height.
+* Reject decompression bombs where practical.
+* Do not re-encode images unless explicitly chosen.
+* Strip metadata only if implemented safely.
+
+Preferred Task 30 behavior:
+
+Validate, store original bytes, and document metadata privacy limitations.
+
+Better optional behavior:
+
+Create a normalized copy that strips EXIF metadata.
+
+Only implement metadata stripping if it can be tested reliably.
+
+Do not silently rotate or change receipt evidence.
+
+---
+
+# 16. Filename sanitization
+
+Create:
+
+PaymentReceiptFilenameSanitizer
+
+Requirements:
+
+* Remove directory components.
+* Normalize Unicode.
+* Replace unsafe characters.
+* Limit length.
+* Preserve only allowed normalized extension.
+* Reject control characters.
+* Do not rely on sanitized filename for uniqueness.
+* Generated storage filename must be random/internal.
+* Safe display filename may retain a normalized form.
+
+Test:
+
+../../secret.jpg
+
+C:\temp\receipt.png
+
+Unicode control characters
+
+very long filenames
+
+double extensions:
+
+receipt.jpg.exe
+
+hidden files
+
+blank filename
+
+---
+
+# 17. Upload command
+
+Create:
+
+SubmitManualPaymentReceiptCommand
+
+Suggested package:
+
+com.parazit.panel.application.payment.manual.receipt.command
+
+Fields:
+
+UUID receiptRequestId
+
+Long telegramUserId
+
+UUID paymentId
+
+String originalFilename
+
+String declaredContentType
+
+long declaredSizeBytes
+
+long claimedAmount
+
+String claimedTrackingNumber
+
+String claimedSenderCardLastFour
+
+Instant claimedPaidAt
+
+String userNote
+
+ReceiptUploadSource uploadSource
+
+`ReceiptUploadSource` must provide a stream without introducing servlet dependencies into the application layer.
+
+Requirements:
+
+* request ID required;
+* Telegram ID positive;
+* Payment ID required;
+* claimedAmount positive;
+* original filename required;
+* declared size positive;
+* tracking number optional;
+* card last four optional;
+* claimedPaidAt optional but recommended;
+* user note bounded;
+* no instruction ID accepted from caller;
+* instruction loaded from Payment;
+* no storage key accepted from caller.
+
+---
+
+# 18. Upload result
+
+Create:
+
+SubmitManualPaymentReceiptResult
+
+Fields:
+
+UUID receiptId
+
+UUID receiptRequestId
+
+UUID paymentId
+
+UUID instructionId
+
+ManualPaymentReceiptStatus receiptStatus
+
+PaymentStatus paymentStatus
+
+ManualPaymentInstructionStatus instructionStatus
+
+String originalFilename
+
+String sanitizedFilename
+
+String detectedContentType
+
+long fileSizeBytes
+
+String fileSha256Prefix
+
+long claimedAmount
+
+Instant submittedAt
+
+Instant reviewQueuedAt
+
+boolean newlySubmitted
+
+Requirements:
+
+* Do not expose storageKey.
+* Do not expose full file hash unless needed internally.
+* Do not expose card number.
+* Do not expose filesystem path.
+* Prefix hash may be useful for support but can be omitted.
+* Immutable.
+
+---
+
+# 19. Receipt submission eligibility
+
+Before accepting a file, validate:
+
+* User exists.
+* Payment exists.
+* Payment belongs to User.
+* Order belongs to User.
+* Payment method is CARD_TO_CARD.
+* Payment is WAITING_FOR_PAYMENT or compatible receipt-retry state.
+* Payment is not APPROVED.
+* Payment is not CANCELLED.
+* Payment is not EXPIRED.
+* Active manual instruction exists.
+* Instruction belongs to Payment.
+* Instruction is ACTIVE.
+* Instruction is not expired.
+* Claimed amount equals instruction.payableAmount.
+
+Preferred amount behavior:
+
+Exact match is mandatory.
+
+Do not accept approximate amount.
+
+If amount differs:
+
+* reject submission;
+* do not store file;
+* safe 400 or 409 response;
+* user may correct the claim.
+
+Do not infer amount from receipt image.
+
+---
+
+# 20. Idempotency
+
+Same receiptRequestId with same semantic metadata:
+
+* Return existing receipt.
+* Do not store file again.
+* newlySubmitted=false.
+
+Same receiptRequestId with different Payment or metadata:
+
+* Return conflict.
+
+Existing active receipt for the instruction with a new request ID:
+
+Recommended:
+
+Return conflict while receipt is queued for review.
+
+Do not create another active receipt.
+
+After future rejection, Task 31 may allow another receipt.
+
+Do not silently replace existing evidence.
+
+---
+
+# 21. Duplicate receipt hash detection
+
+After file inspection and before final queueing:
+
+* Check whether the same user has an active receipt with the same SHA-256.
+* Check whether the same file hash is already active for another Payment where useful.
+
+Recommended policy:
+
+Same user + same hash + another active receipt:
+
+* reject as duplicate conflict.
+
+Same hash submitted by different users:
+
+* flag for operator review rather than automatically rejecting, because screenshots from shared sources may exist.
+* Store a duplicate-risk flag if useful.
+
+Optional fields:
+
+boolean duplicateHashDetected
+
+UUID duplicateReceiptId
+
+Preferred simpler Task 30 approach:
+
+Add:
+
+ReceiptRiskFlag
+
+or:
+
+duplicateHashDetected boolean
+
+Do not create fraud scoring.
+
+Do not automatically approve or reject.
+
+---
+
+# 22. Receipt risk metadata
+
+Optionally add simple fields:
+
+boolean duplicateHashDetected
+
+boolean amountMismatchDetected
+
+boolean suspiciousFilenameDetected
+
+String riskNotes
+
+Preferred:
+
+Do not store `amountMismatchDetected` because mismatched amounts are rejected before storage.
+
+Store only:
+
+boolean duplicateHashDetected
+
+Requirements:
+
+* No fraud score.
+* No automatic decision.
+* Operator sees the flag in Task 31.
+* Add migration fields only if actually used.
+
+---
+
+# 23. Submission transaction boundaries
+
+File storage and database cannot participate in one atomic transaction.
+
+Use a compensation-based workflow.
+
+Preferred flow:
+
+Phase A — prepare database transaction:
+
+* validate User, Payment, instruction;
+* handle request-ID replay;
+* claim one active receipt using status UPLOADING;
+* commit.
+
+Phase B — inspect and store file outside database transaction:
+
+* sanitize filename;
+* inspect content;
+* calculate SHA-256;
+* detect duplicate;
+* store file;
+* receive storage metadata.
+
+Phase C — completion database transaction:
+
+* reload and lock receipt;
+* persist storage metadata;
+* mark SUBMITTED;
+* mark instruction RECEIPT_PENDING;
+* mark Payment RECEIPT_SUBMITTED;
+* queue receipt;
+* mark Payment WAITING_FOR_REVIEW;
+* commit.
+
+On Phase B failure:
+
+* mark receipt INVALID_FILE or FAILED-equivalent;
+* no instruction/Payment transition;
+* remove partial file.
+
+On Phase C database failure after file storage:
+
+* attempt storage compensation delete;
+* if delete fails:
+
+  * log orphan storage key safely;
+  * keep operational recovery record;
+  * do not expose path.
+
+Do not hold a database transaction open during file IO.
+
+Do not rely on self-invoked `@Transactional`.
+
+Create focused transaction components.
+
+---
+
+# 24. Receipt queueing behavior
+
+After successful storage:
+
+1. Receipt becomes SUBMITTED.
+2. Receipt becomes QUEUED_FOR_REVIEW.
+3. Instruction becomes RECEIPT_PENDING.
+4. Payment becomes RECEIPT_SUBMITTED.
+5. Payment becomes WAITING_FOR_REVIEW.
+6. Set reviewQueuedAt.
+
+These transitions should be completed in one short database transaction.
+
+Do not approve or reject.
+
+Do not provision VPN.
+
+Do not publish PaymentApprovedEvent.
+
+A future optional event:
+
+ManualPaymentReceiptSubmittedEvent
+
+may be created only if it is used to notify operators later.
+
+Preferred:
+
+Create a domain/application event and publish after commit only if the project already uses an event pattern.
+
+Do not add Kafka.
+
+---
+
+# 25. Receipt submission use case
+
+Create:
+
+SubmitManualPaymentReceiptUseCase
+
+Method:
+
+SubmitManualPaymentReceiptResult submit(
+SubmitManualPaymentReceiptCommand command
+)
+
+Create:
+
+SubmitManualPaymentReceiptService
+
+Dependencies:
+
+UserRepository
+
+OrderRepository
+
+PaymentRepository
+
+ManualCardPaymentInstructionRepository
+
+ManualPaymentReceiptRepository
+
+PaymentReceiptFileInspector
+
+PaymentReceiptFilenameSanitizer
+
+PaymentReceiptStorage
+
+SystemClockPort
+
+Use focused transaction components.
+
+Responsibilities:
+
+* orchestrate validation;
+* idempotency;
+* file inspection;
+* storage;
+* duplicate-hash detection;
+* state transitions;
+* compensation;
+* safe result mapping.
+
+---
+
+# 26. Receipt retrieval use cases
+
+Create:
+
+GetManualPaymentReceiptUseCase
+
+Methods:
+
+ManualPaymentReceiptResult getById(
+GetManualPaymentReceiptByIdQuery query
+)
+
+ManualPaymentReceiptContentResult getContent(
+GetManualPaymentReceiptContentQuery query
+)
+
+For user-owned receipt metadata:
+
+* User may retrieve own submitted receipt metadata.
+* Full file content retrieval should be restricted to internal operator use.
+
+Because Spring Security is not implemented yet:
+
+Use separate internal endpoints and application-level ownership checks.
+
+Do not expose storage key.
+
+---
+
+# 27. Review queue use case
+
+Create:
+
+ListManualPaymentReviewQueueUseCase
+
+Method:
+
+List<ManualPaymentReviewQueueItemResult> list(
+ListManualPaymentReviewQueueQuery query
+)
+
+Task 30 queue behavior:
+
+* Return receipts with status QUEUED_FOR_REVIEW.
+* Order by reviewQueuedAt ascending.
+* Oldest first.
+* Include safe metadata only.
+* No approval/rejection operations.
+
+Optional filters:
+
+paymentId
+
+telegramUserId
+
+submittedFrom
+
+submittedTo
+
+duplicateHashDetected
+
+Keep filters minimal.
+
+Do not add pagination unless existing project conventions require it.
+
+Recommended:
+
+Add bounded pagination because review queues can grow.
+
+If the project has no pagination abstraction, implement:
+
+limit
+
+offset
+
+with strict maximum limit.
+
+Do not expose Spring Pageable in application ports.
+
+---
+
+# 28. Review queue result
+
+Create:
+
+ManualPaymentReviewQueueItemResult
+
+Fields:
+
+UUID receiptId
+
+UUID paymentId
+
+UUID instructionId
+
+UUID userId
+
+Long telegramUserId
+
+long expectedAmount
+
+long claimedAmount
+
+String currency
+
+String originalFilename
+
+String detectedContentType
+
+long fileSizeBytes
+
+String claimedTrackingNumber
+
+String claimedSenderCardLastFour
+
+Instant claimedPaidAt
+
+Instant submittedAt
+
+Instant reviewQueuedAt
+
+boolean duplicateHashDetected
+
+PaymentStatus paymentStatus
+
+ManualPaymentReceiptStatus receiptStatus
+
+Requirements:
+
+* Do not include storageKey.
+* Do not include full user name unless explicitly required.
+* Do not include destination full card number.
+* Do not include raw file contents in list endpoint.
+* Operator may fetch content through a separate endpoint.
+
+---
+
+# 29. Receipt-content retrieval
+
+Create an internal operator-oriented use case:
+
+GetManualPaymentReceiptContentUseCase
+
+Input:
+
+UUID receiptId
+
+Output:
+
+ManualPaymentReceiptContentResult
+
+Fields:
+
+String filename
+
+String contentType
+
+long sizeBytes
+
+InputStream/resource abstraction
+
+Requirements:
+
+* Load storage metadata from receipt.
+* Verify receipt has stored content.
+* Retrieve using storage key internally.
+* No arbitrary storage-key input.
+* No filesystem path in response headers.
+* Use safe `Content-Disposition`.
+* Prevent header injection.
+* Support inline display for images/PDF if appropriate.
+* Set `X-Content-Type-Options: nosniff`.
+* Set restrictive Content Security Policy for PDF/image route where practical.
+* Do not cache private receipts publicly.
+* Use `Cache-Control: private, no-store`.
+
+---
+
+# 30. Receipt withdrawal
+
+Create:
+
+WithdrawManualPaymentReceiptUseCase
+
+Only if useful before operator review begins.
+
+Command:
+
+UUID receiptId
+
+Long telegramUserId
+
+Behavior:
+
+* User owns receipt.
+* Receipt is QUEUED_FOR_REVIEW.
+* Review has not begun because Task 31 has not claimed it.
+* Mark receipt WITHDRAWN.
+* Return instruction to ACTIVE if still unexpired.
+* Return Payment to WAITING_FOR_PAYMENT.
+* Keep file and history.
+* Do not delete evidence.
+* Allow a new receipt submission afterward.
+* Do not free unique amount if instruction remains active.
+* If instruction expired, mark it expired and Payment remains retryable according to policy.
+
+This capability is recommended but optional.
+
+If implemented, test thoroughly.
+
+---
+
+# 31. Exceptions
+
+Create focused exceptions:
+
+ManualPaymentReceiptSubmissionNotAllowedException
+
+ManualPaymentReceiptNotFoundException
+
+ManualPaymentReceiptRequestIdConflictException
+
+ManualPaymentReceiptAlreadySubmittedException
+
+ManualPaymentReceiptAmountMismatchException
+
+ManualPaymentReceiptFileTooLargeException
+
+ManualPaymentReceiptUnsupportedTypeException
+
+ManualPaymentReceiptInvalidFileException
+
+ManualPaymentReceiptDuplicateException
+
+ManualPaymentReceiptStorageException
+
+ManualPaymentReceiptContentUnavailableException
+
+ManualPaymentReceiptWithdrawalNotAllowedException
+
+Requirements:
+
+* Safe messages.
+* No storage paths.
+* No full hash.
+* No full card details.
+* No file contents.
+* No SQL details.
+* No stack trace in API.
+
+Suggested mappings:
+
+missing Payment/receipt -> 404
+
+ownership mismatch -> 404
+
+invalid lifecycle -> 409
+
+request ID conflict -> 409
+
+amount mismatch -> 400
+
+unsupported/invalid file -> 400 or 415
+
+file too large -> 413
+
+duplicate active receipt -> 409
+
+storage unavailable -> 503
+
+unexpected storage failure -> 500 or 503
+
+---
+
+# 32. Upload API
+
+Create:
+
+ManualPaymentReceiptController
+
+Suggested package:
+
+com.parazit.panel.api.payment.manual.receipt
+
+Endpoint:
+
+POST /internal/payments/{paymentId}/manual-card/receipt
+
+Consumes:
+
+multipart/form-data
+
+Parts:
+
+receiptRequestId
+
+telegramUserId
+
+claimedAmount
+
+claimedTrackingNumber optional
+
+claimedSenderCardLastFour optional
+
+claimedPaidAt optional
+
+userNote optional
+
+file
+
+Requirements:
+
+* Use `@RequestPart`.
+* Do not bind domain or application command directly to MultipartFile.
+* Controller converts MultipartFile into an application upload-source abstraction.
+* Validate request metadata.
+* Limit file size at servlet and application layers.
+* Controller depends on input port.
+* No repository injection.
+* No approval.
+* No operator decision.
+* No Telegram implementation.
+
+HTTP behavior:
+
+new receipt -> 201
+
+idempotent replay -> 200
+
+invalid file -> 400 or 415
+
+too large -> 413
+
+amount mismatch -> 400
+
+missing Payment/instruction -> 404
+
+invalid state -> 409
+
+storage unavailable -> 503
+
+---
+
+# 33. User receipt metadata API
+
+Create:
+
+GET /internal/payments/{paymentId}/manual-card/receipt
+
+Input:
+
+telegramUserId query parameter or request model according to existing conventions.
+
+Response:
+
+ManualPaymentReceiptResponse
+
+Fields:
+
+receiptId
+
+paymentId
+
+instructionId
+
+status
+
+originalFilename
+
+detectedContentType
+
+fileSizeBytes
+
+claimedAmount
+
+claimedTrackingNumber
+
+claimedSenderCardLastFour
+
+claimedPaidAt
+
+submittedAt
+
+reviewQueuedAt
+
+duplicateHashDetected
+
+Do not expose storage key or file hash.
+
+---
+
+# 34. Operator review queue API
+
+Create:
+
+GET /internal/admin/manual-payments/review-queue
+
+Optional query parameters:
+
+limit
+
+offset
+
+duplicateOnly
+
+Response:
+
+array or paged response of queue items.
+
+Requirements:
+
+* Internal administrative endpoint.
+* No Spring Security implementation yet.
+* Clearly document that production access control is mandatory.
+* Controller depends on input port.
+* No repository injection.
+* Do not include file bytes.
+
+Create:
+
+GET /internal/admin/manual-payments/receipts/{receiptId}/content
+
+Behavior:
+
+* streams receipt;
+* sets safe headers;
+* no storage key exposed;
+* no public caching;
+* correct content type;
+* no inline execution.
+
+Do not add approve/reject endpoints.
+
+---
+
+# 35. API DTOs and mapper
+
+Create dedicated DTOs:
+
+SubmitManualPaymentReceiptMetadataRequest
+
+ManualPaymentReceiptResponse
+
+ManualPaymentReviewQueueItemResponse
+
+Create:
+
+ManualPaymentReceiptApiMapper
+
+Requirements:
+
+* Explicit manual mapping.
+* No entity mapping.
+* No storage DTO leakage.
+* No filesystem Path.
+* Safe toString methods.
+* Do not include MultipartFile in application models.
+* Do not log DTO bodies.
+
+---
+
+# 36. Logging
+
+INFO:
+
+* receipt workflow prepared;
+* receipt stored;
+* receipt queued for review;
+* idempotent receipt replay;
+* receipt withdrawn if implemented.
+
+DEBUG:
+
+* file size;
+* detected content type;
+* sanitized extension;
+* hash prefix only;
+* duplicate-hash detection;
+* storage provider;
+* compensation result.
+
+WARN:
+
+* duplicate receipt hash;
+* mismatched declared and detected content type;
+* invalid file;
+* orphaned file compensation failure;
+* suspicious filename.
+
+ERROR:
+
+* storage failure;
+* corrupted file inspection;
+* completion transaction failure.
+
+Include:
+
+receiptId
+
+receiptRequestId
+
+paymentId
+
+instructionId
+
+userId
+
+status
+
+fileSizeBytes
+
+detectedContentType
+
+storageProvider
+
+traceId
+
+Never log:
+
+file bytes
+
+Base64
+
+full SHA-256 if policy avoids it
+
+storage path
+
+full storage key
+
+full card numbers
+
+receipt image text
+
+bank credentials
+
+---
+
+# 37. Domain unit tests
+
+Test ManualPaymentReceipt:
+
+* valid UPLOADING creation;
+* required IDs;
+* claimed amount;
+* filename validation;
+* sender last-four validation;
+* future claimedPaidAt policy;
+* note normalization;
+* mark stored;
+* required metadata;
+* submit transition;
+* queue transition;
+* invalid file transition;
+* withdrawal;
+* terminal behavior;
+* storage metadata immutability;
+* hash validation;
+* no storage key before stored state.
+
+Extend Payment tests:
+
+* mark receipt submitted;
+* mark waiting for review;
+* invalid transitions;
+* approved state preserved.
+
+Extend instruction tests:
+
+* ACTIVE -> RECEIPT_PENDING;
+* expired cannot become pending;
+* cancelled cannot become pending;
+* reservation remains active.
+
+---
+
+# 38. Filename sanitizer tests
+
+Test:
+
+* normal JPEG name;
+* path traversal;
+* Windows path;
+* control characters;
+* Unicode normalization;
+* double extension;
+* extremely long filename;
+* blank filename;
+* forbidden extension;
+* hidden filename;
+* safe output length.
+
+---
+
+# 39. File inspector tests
+
+Use small sanitized fixtures.
+
+Test:
+
+* valid JPEG;
+* valid PNG;
+* valid PDF when enabled;
+* empty file;
+* oversized file;
+* fake JPEG extension with executable content;
+* mismatched MIME type;
+* malformed image;
+* SVG rejection;
+* HTML rejection;
+* double-extension executable;
+* exact SHA-256;
+* dimensions;
+* maximum dimension violation;
+* unknown type;
+* stream can be consumed safely once or reset according to abstraction.
+
+Do not use real receipt images.
+
+---
+
+# 40. Local storage adapter tests
+
+Use a temporary test directory.
+
+Test:
+
+* store valid file;
+* generated key;
+* root confinement;
+* no original filename path usage;
+* atomic write;
+* load;
+* exists;
+* delete compensation;
+* duplicate key prevention;
+* path traversal rejection;
+* symlink safety where testable;
+* file size/hash preservation;
+* restrictive behavior;
+* no root path leaked.
+
+Clean temporary files after tests.
+
+---
+
+# 41. Submission service unit tests
+
+Test:
+
+* successful submission;
+* exact amount;
+* Payment manual method;
+* instruction active;
+* file inspected;
+* file stored;
+* receipt queued;
+* Payment WAITING_FOR_REVIEW;
+* instruction RECEIPT_PENDING;
+* idempotent replay;
+* request ID conflict;
+* existing active receipt conflict;
+* missing User;
+* missing Payment;
+* ownership mismatch;
+* wrong Payment method;
+* approved Payment;
+* cancelled Payment;
+* expired Payment;
+* missing instruction;
+* expired instruction;
+* amount mismatch;
+* unsupported type;
+* oversized file;
+* invalid file;
+* duplicate hash;
+* storage failure;
+* completion DB failure triggers compensation;
+* compensation failure logged but safe;
+* no approval;
+* no provisioning.
+
+Use fixed Instants and fake storage/inspector.
+
+---
+
+# 42. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+* save receipt;
+* auditing;
+* unique receiptRequestId;
+* one active receipt per instruction;
+* find active by instruction;
+* find by request ID;
+* find by storage key;
+* hash lookup;
+* queue ordering;
+* required storage metadata constraints;
+* status/timestamp constraints;
+* foreign keys;
+* claimed amount constraint;
+* historical withdrawn/rejected rows allowed;
+* Flyway success;
+* Hibernate validation.
+
+Flush to trigger constraints.
+
+---
+
+# 43. Full integration tests
+
+Use:
+
+* PostgreSQL Testcontainers;
+* temporary local storage;
+* real service and storage adapter.
+
+Successful flow:
+
+1. Create User, Order, manual Payment, and active instruction.
+2. Upload valid receipt.
+3. Verify file stored.
+4. Verify receipt QUEUED_FOR_REVIEW.
+5. Verify instruction RECEIPT_PENDING.
+6. Verify Payment WAITING_FOR_REVIEW.
+7. Verify no approval.
+8. Verify no VPN provision.
+9. Retrieve metadata.
+10. Stream content and compare hash.
+
+Idempotent flow:
+
+* submit same receiptRequestId again;
+* no second file stored;
+* same receipt returned.
+
+Amount mismatch:
+
+* no file stored;
+* no receipt queued.
+
+Invalid file:
+
+* receipt marked INVALID_FILE or workflow safely aborted according to design;
+* Payment/instruction unchanged.
+
+---
+
+# 44. Duplicate receipt integration tests
+
+Scenario:
+
+* Same user submits identical file for two active manual Payments.
+
+Verify:
+
+* second submission rejected or flagged according to policy.
+* No duplicate active evidence accepted silently.
+
+Different users submit same file:
+
+* receipt stored;
+* duplicate flag set;
+* operator queue exposes warning;
+* no automatic rejection if that is the chosen policy.
+
+Document exact behavior.
+
+---
+
+# 45. Concurrency integration tests
+
+Scenario A:
+
+Same receiptRequestId concurrently:
+
+* one receipt row;
+* one stored file;
+* callers converge;
+* no raw unique error.
+
+Scenario B:
+
+Different request IDs for same instruction concurrently:
+
+* exactly one active receipt;
+* at most one file remains stored;
+* losing path compensates file deletion;
+* one conflict response.
+
+Scenario C:
+
+Receipt submission races with instruction expiration:
+
+* deterministic outcome;
+* either valid queued receipt before expiry claim, or rejected submission;
+* no Payment WAITING_FOR_REVIEW with expired/unlinked receipt.
+
+Scenario D:
+
+Receipt submission races with cancellation:
+
+* consistent final state;
+* no orphan workflow.
+
+Requirements:
+
+* real PostgreSQL;
+* temporary storage;
+* separate transactions;
+* deterministic synchronization;
+* no Thread.sleep;
+* ExecutorService shutdown;
+* timeouts.
+
+---
+
+# 46. Controller tests
+
+Upload:
+
+* valid JPEG -> 201;
+* valid PNG -> 201;
+* valid PDF when allowed -> 201;
+* idempotent replay -> 200;
+* missing file -> 400;
+* empty file -> 400;
+* unsupported type -> 415 or 400;
+* too large -> 413;
+* amount mismatch -> 400;
+* invalid metadata -> 400;
+* missing Payment -> 404;
+* wrong method -> 409;
+* expired instruction -> 409;
+* duplicate active receipt -> 409;
+* storage unavailable -> 503;
+* malformed multipart -> 400.
+
+Metadata GET:
+
+* own receipt -> 200;
+* missing -> 404;
+* ownership mismatch -> 404;
+* no storage key in JSON.
+
+Queue:
+
+* oldest-first ordering;
+* safe fields;
+* duplicate flag;
+* no file content.
+
+Content:
+
+* valid image;
+* valid PDF;
+* Content-Type;
+* Content-Disposition;
+* Cache-Control private/no-store;
+* X-Content-Type-Options nosniff;
+* missing receipt -> 404;
+* content unavailable -> 404 or 503;
+* no storage path in headers.
+
+All error responses include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No stack trace.
+No storage path.
+No card data.
+No file bytes in error.
+
+---
+
+# 47. Architecture verification
+
+Verify:
+
+* receipt domain does not depend on API/infrastructure;
+* storage is an outbound port;
+* application command does not use MultipartFile;
+* controller converts multipart input to application abstraction;
+* no controller injects repository or filesystem service directly;
+* no binary data stored in PostgreSQL;
+* no arbitrary path input;
+* no Payment approval;
+* no operator decision;
+* no provisioning event;
+* no OCR;
+* no Telegram code;
+* no field injection;
+* no service locator;
+* no long database transaction around file IO;
+* compensation exists for file/database split;
+* storage key never exposed to normal APIs.
+
+Extend architecture tests if already present.
+
+---
+
+# 48. Documentation
+
+Create:
+
+docs/payment/manual-payment-receipt.md
+
+Document:
+
+* purpose;
+* receipt lifecycle;
+* why upload is not approval;
+* supported file types;
+* size limits;
+* content detection;
+* filename sanitization;
+* SHA-256;
+* duplicate detection;
+* local storage layout;
+* storage key privacy;
+* transaction and compensation flow;
+* Payment and instruction transitions;
+* review queue;
+* content streaming security;
+* multipart limits;
+* reverse-proxy limits;
+* privacy considerations;
+* operator approval deferred to Task 31;
+* OCR deferred;
+* object storage future support.
+
+Include Mermaid diagrams for:
+
+* successful upload;
+* invalid-file rejection;
+* file stored but DB completion failure and compensation;
+* idempotent replay;
+* concurrent receipt submission;
+* review queue;
+* operator content retrieval.
+
+Update:
+
+docs/payment/manual-card-payment.md
+
+docs/payment/payment-foundation.md
+
+only where Task 30 refines statuses and workflow.
+
+---
+
+# 49. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/payment/manual/receipt/
+ManualPaymentReceipt.java
+ManualPaymentReceiptStatus.java
+
+src/main/java/com/parazit/panel/domain/payment/manual/receipt/repository/
+ManualPaymentReceiptRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/payment/receipt/
+PaymentReceiptStorage.java
+PaymentReceiptFileInspector.java
+
+src/main/java/com/parazit/panel/application/port/in/payment/manual/receipt/
+SubmitManualPaymentReceiptUseCase.java
+GetManualPaymentReceiptUseCase.java
+GetManualPaymentReceiptContentUseCase.java
+ListManualPaymentReviewQueueUseCase.java
+WithdrawManualPaymentReceiptUseCase.java
+
+src/main/java/com/parazit/panel/application/payment/manual/receipt/command/
+SubmitManualPaymentReceiptCommand.java
+WithdrawManualPaymentReceiptCommand.java
+StorePaymentReceiptCommand.java
+
+src/main/java/com/parazit/panel/application/payment/manual/receipt/query/
+GetManualPaymentReceiptByIdQuery.java
+GetManualPaymentReceiptContentQuery.java
+ListManualPaymentReviewQueueQuery.java
+
+src/main/java/com/parazit/panel/application/payment/manual/receipt/result/
+SubmitManualPaymentReceiptResult.java
+ManualPaymentReceiptResult.java
+ManualPaymentReceiptContentResult.java
+ManualPaymentReviewQueueItemResult.java
+StoredPaymentReceipt.java
+InspectedPaymentReceiptFile.java
+
+src/main/java/com/parazit/panel/application/payment/manual/receipt/
+SubmitManualPaymentReceiptService.java
+GetManualPaymentReceiptService.java
+GetManualPaymentReceiptContentService.java
+ListManualPaymentReviewQueueService.java
+WithdrawManualPaymentReceiptService.java
+PrepareManualPaymentReceiptTransaction.java
+CompleteManualPaymentReceiptTransaction.java
+ManualPaymentReceiptResultMapper.java
+PaymentReceiptFilenameSanitizer.java
+
+src/main/java/com/parazit/panel/infrastructure/storage/receipt/
+LocalPaymentReceiptStorage.java
+DefaultPaymentReceiptFileInspector.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/payment/manual/receipt/
+SpringDataManualPaymentReceiptRepository.java
+ManualPaymentReceiptRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/payment/manual/receipt/
+ManualPaymentReceiptController.java
+ManualPaymentReviewQueueController.java
+SubmitManualPaymentReceiptMetadataRequest.java
+ManualPaymentReceiptResponse.java
+ManualPaymentReviewQueueItemResponse.java
+ManualPaymentReceiptApiMapper.java
+
+src/main/java/com/parazit/panel/config/properties/
+PaymentReceiptStorageProperties.java
+
+src/main/resources/db/migration/
+V12__create_manual_payment_receipts.sql
+or the actual next migration
+
+src/test/resources/payment/manual/receipts/
+valid-receipt.jpg
+valid-receipt.png
+valid-receipt.pdf
+invalid-empty.bin
+invalid-html.jpg
+invalid-svg.svg
+invalid-executable.jpg
+
+src/test/java/com/parazit/panel/domain/payment/manual/receipt/
+ManualPaymentReceiptTest.java
+
+src/test/java/com/parazit/panel/application/payment/manual/receipt/
+SubmitManualPaymentReceiptServiceTest.java
+GetManualPaymentReceiptServiceTest.java
+GetManualPaymentReceiptContentServiceTest.java
+ListManualPaymentReviewQueueServiceTest.java
+WithdrawManualPaymentReceiptServiceTest.java
+PaymentReceiptFilenameSanitizerTest.java
+
+src/test/java/com/parazit/panel/infrastructure/storage/receipt/
+LocalPaymentReceiptStorageTest.java
+DefaultPaymentReceiptFileInspectorTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/payment/manual/receipt/
+ManualPaymentReceiptRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/payment/manual/receipt/
+ManualPaymentReceiptFlowIntegrationTest.java
+ManualPaymentReceiptDuplicateIntegrationTest.java
+ConcurrentManualPaymentReceiptSubmissionIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/payment/manual/receipt/
+ManualPaymentReceiptControllerTest.java
+ManualPaymentReviewQueueControllerTest.java
+
+docs/payment/
+manual-payment-receipt.md
+
+Adapt package names and migration version to existing project conventions.
+
+---
+
+# 50. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* receipt-domain tests pass;
+* filename sanitizer tests pass;
+* file-inspection tests pass;
+* local-storage tests pass;
+* service tests pass;
+* repository tests pass;
+* duplicate-detection tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts;
+* multipart limits are active;
+* no binary data is stored in PostgreSQL;
+* no storage path is exposed;
+* receipt upload never approves Payment;
+* receipt upload never provisions VPN;
+* one active receipt exists per instruction;
+* invalid files are rejected;
+* file/DB compensation works;
+* no real receipt or personal bank data is committed;
+* no tests are disabled.
+
+---
+
+# 51. Optional manual verification
+
+Do not execute automatically.
+
+Use only synthetic or redacted test receipts.
+
+Manual flow:
+
+1. Create manual Payment and active instruction.
+2. Upload a small valid JPEG.
+3. Verify:
+
+   * file stored outside database;
+   * receipt queued;
+   * Payment WAITING_FOR_REVIEW;
+   * instruction RECEIPT_PENDING.
+4. Retrieve receipt metadata.
+5. Open content through internal operator endpoint.
+6. Verify safe response headers.
+7. Repeat same request ID.
+8. Confirm no second file.
+9. Upload same file with another request ID.
+10. Confirm duplicate policy.
+11. Test oversized file.
+12. Test fake JPEG containing HTML.
+13. Test expired instruction.
+14. Confirm no Payment approval and no VPN provisioning.
+
+Do not use production receipts.
+
+Do not commit uploaded files or storage directories.
+
+---
+
+# 52. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Payment and instruction status changes
+3. Receipt aggregate design
+4. File-storage abstraction
+5. File-validation strategy
+6. Filename and path security
+7. Duplicate-hash policy
+8. Transaction and compensation design
+9. Idempotency strategy
+10. Review-queue design
+11. Planned files to create
+12. Planned files to modify
+13. Migration, security, and privacy risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Storage configuration
+6. File-validation behavior
+7. Filename/path security
+8. Receipt lifecycle
+9. Payment and instruction transitions
+10. Duplicate-detection behavior
+11. Transaction and compensation behavior
+12. Review-queue contract
+13. Content-download security
+14. Unit-test results
+15. Storage-test results
+16. Integration-test results
+17. Concurrency-test results
+18. Flyway and Hibernate results
+19. Build result
+20. Commands executed
+21. Remaining issues
+22. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(payment): add manual receipt upload and review queue
+
+Stop after completing Task 30.
+
+Do not begin Task 31.
+

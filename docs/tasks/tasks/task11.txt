@@ -1,0 +1,196 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 11 – User Profile
+
+Goal:
+
+Implement the User Profile use case, allowing retrieval and update of a user's profile while preserving the architecture established in previous tasks.
+
+Important rules:
+
+* Inspect the existing project before making changes.
+* Preserve all code and architecture from Tasks 1–10.
+* Reuse User aggregate, UserRepository, RegisterUser flow, logging, exception handling, validation, DI, and persistence.
+* Do not implement Telegram Bot handlers yet.
+* Do not implement authentication or authorization.
+* Do not implement referral, plans, payments, subscriptions, or 3x-ui.
+* Do not expose JPA entities directly.
+* Use constructor injection only.
+* Stop after Task 11.
+
+1. Create application use cases
+
+Create:
+
+* GetUserProfileUseCase
+* UpdateUserProfileUseCase
+
+2. Commands and Results
+
+Create immutable records:
+
+GetUserProfileQuery
+UserProfileResult
+UpdateUserProfileCommand
+UpdateUserProfileResult
+
+3. Supported profile fields
+
+Allow reading:
+
+* telegramUserId
+* username
+* firstName
+* lastName
+* language
+* status
+* blocked
+* createdAt
+* updatedAt
+* lastInteractionAt
+
+Allow updating only:
+
+* firstName
+* lastName
+* language
+
+Requirements:
+
+* telegramUserId cannot change.
+* username cannot be manually changed.
+* blocked cannot be changed here.
+* status cannot be changed here.
+
+4. Domain behavior
+
+Add explicit methods to User:
+
+updateProfile(...)
+changeLanguage(...)
+
+Protect all invariants.
+
+5. Validation
+
+Validate:
+
+* firstName required
+* max lengths
+* language supported
+* trim values
+* blank optional lastName becomes null
+
+6. Application services
+
+Create:
+
+GetUserProfileService
+UpdateUserProfileService
+
+Use constructor injection.
+
+Use @Transactional only where updates occur.
+
+7. API
+
+Create internal endpoints:
+
+GET /internal/users/{telegramUserId}
+
+PUT /internal/users/{telegramUserId}
+
+Create dedicated request/response DTOs.
+
+Do not expose entities.
+
+8. Mapping
+
+Create ProfileApiMapper.
+
+9. Logging
+
+Log:
+
+* profile viewed
+* profile updated
+
+Include:
+
+* traceId
+* telegramUserId
+
+Do not log unnecessary personal information.
+
+10. Unit tests
+
+Test:
+
+* profile retrieval
+* successful update
+* validation failures
+* language update
+* trimming
+* immutable telegramUserId
+* immutable username
+
+11. Integration tests
+
+Use PostgreSQL Testcontainers.
+
+Verify:
+
+* update persists
+* audit timestamps
+* language changes
+* validation
+* retrieval
+
+12. Controller tests
+
+Verify:
+
+GET returns 200
+
+PUT returns 200
+
+invalid input returns 400
+
+standard error response contains traceId
+
+13. Documentation
+
+Create:
+
+docs/use-cases/user-profile.md
+
+Include:
+
+* sequence diagram
+* update flow
+* validation rules
+* immutable fields
+* response contract
+
+14. Verification
+
+Run the project's build and all tests.
+
+Confirm:
+
+* previous tests still pass
+* profile tests pass
+* no Telegram integration added
+* no payment logic added
+* no 3x-ui logic added
+
+15. Suggested commit message
+
+feat(user): implement user profile use case
+
+Stop after Task 11.
+
+Do not start Task 12.
+

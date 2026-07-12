@@ -1,0 +1,1453 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 14 – Referral Skeleton
+
+Goal:
+
+Create the referral foundation for users, including referral codes, referrer relationships, idempotent referral assignment, persistence, repository abstractions, internal verification APIs, and tests.
+
+This task must build only the referral skeleton.
+
+Do not implement referral rewards, commissions, wallet balances, discounts, payouts, payment credits, multi-level referrals, campaigns, or fraud detection yet.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code and conventions from Tasks 1–13.
+* Reuse User, UserRepository, BaseEntity, repository abstractions, Flyway, logging, validation, exception handling, dependency injection, SystemClockPort, and Testcontainers infrastructure.
+* Do not implement Telegram Bot handlers yet.
+* Do not connect to Telegram API.
+* Do not implement Plan, Payment, Order, Subscription, 3x-ui, VPN, Admin Dashboard, or reminder logic.
+* Do not add monetary reward fields.
+* Do not add wallet or balance fields.
+* Do not implement multi-level referral trees.
+* Do not expose JPA entities directly.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Do not add unnecessary dependencies.
+* Use Java 21.
+* Use PostgreSQL and Flyway.
+* Stop after completing Task 14.
+* Do not begin Task 15.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* current User aggregate;
+* user registration flow;
+* UserRepository methods;
+* current Flyway migration versions;
+* BaseEntity and auditing strategy;
+* repository adapter pattern;
+* current exception hierarchy;
+* current API mapper conventions;
+* transaction boundaries;
+* concurrency handling patterns from Task 10 and Task 13;
+* Testcontainers setup;
+* any existing referral-related code or fields.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture decisions
+
+5. Risks and concurrency concerns
+
+6. Migration compatibility concerns
+
+7. Referral model design
+
+Create a dedicated referral aggregate/entity.
+
+Suggested package:
+
+com.parazit.panel.domain.referral
+
+Create:
+
+Referral
+
+The entity must extend BaseEntity.
+
+Required fields:
+
+UUID id inherited from BaseEntity
+
+UUID referrerUserId
+
+UUID referredUserId
+
+String referralCodeUsed
+
+ReferralStatus status
+
+Instant referredAt
+
+Instant createdAt inherited from BaseEntity
+
+Instant updatedAt inherited from BaseEntity
+
+Design rules:
+
+* A referral represents one user being referred by another user.
+* referrerUserId is the user who owns the referral code.
+* referredUserId is the newly referred user.
+* referralCodeUsed stores the normalized code used during assignment.
+* status initially supports only a minimal lifecycle.
+* referredAt is the business timestamp of assignment.
+* One referred user may have at most one referrer.
+* A user cannot refer themselves.
+* Do not create bidirectional JPA relationships.
+* Prefer UUID scalar fields instead of @ManyToOne.
+* Do not store reward amounts.
+* Do not store commission percentage.
+* Do not store payment state.
+* Do not create referral levels.
+* Do not create a tree structure.
+* Do not add campaign identifiers yet.
+
+3. Referral status enum
+
+Create:
+
+ReferralStatus
+
+Initial values:
+
+PENDING
+CONFIRMED
+CANCELLED
+
+Rules:
+
+* Persist as string.
+* Do not use ordinal persistence.
+* A newly assigned referral starts as PENDING.
+* No automatic transition to CONFIRMED is implemented in this task.
+* No reward behavior is attached to any status.
+* CANCELLED is reserved for future administrative or fraud-related flows.
+* Do not implement cancellation API yet unless needed only for domain unit testing.
+
+4. Referral code ownership
+
+Every user must have a stable referral code.
+
+Choose one clean design.
+
+Preferred design:
+
+Add a referralCode field to User.
+
+Requirements:
+
+* String referralCode
+* required
+* unique
+* immutable after assignment
+* normalized uppercase
+* no spaces
+* short enough for Telegram deep links
+* not derived directly from sequential identifiers
+* generated once for each user
+* existing users without a code must receive one safely
+
+Suggested code format:
+
+8 to 12 uppercase alphanumeric characters
+
+Allowed characters should avoid ambiguous characters where practical.
+
+Example allowed alphabet:
+
+ABCDEFGHJKLMNPQRSTUVWXYZ23456789
+
+Do not use:
+
+0
+O
+1
+I
+
+Referral code requirements:
+
+* Must be case-insensitive on input.
+* Must be stored normalized.
+* Must be unique at database level.
+* Must not expose the user's Telegram ID.
+* Must not be manually editable.
+* Must not be regenerated during profile updates or repeated registration.
+* Must remain stable once created.
+
+Alternative design:
+
+Create a dedicated ReferralCode entity.
+
+Only choose this if the existing architecture strongly favors it.
+
+Explain the decision before implementation.
+
+5. Referral code generator
+
+Create an application/domain port:
+
+ReferralCodeGenerator
+
+Suggested package:
+
+com.parazit.panel.application.port.out.referral
+
+Method:
+
+String generate()
+
+Requirements:
+
+* Application/domain code must not depend directly on SecureRandom implementation.
+* Keep the interface small.
+* Do not depend on Spring.
+
+Create infrastructure implementation:
+
+SecureReferralCodeGenerator
+
+Suggested package:
+
+com.parazit.panel.infrastructure.referral
+
+Requirements:
+
+* Use SecureRandom.
+* Use the allowed non-ambiguous alphabet.
+* Default length should be configurable.
+* Generate uppercase codes.
+* Do not log generated codes at INFO.
+* Do not use UUID.toString directly as the visible referral code.
+* Do not use predictable incremental values.
+
+Create configuration:
+
+ReferralConfiguration
+
+Suggested package:
+
+com.parazit.panel.config.referral
+
+Requirements:
+
+* Define ReferralCodeGenerator bean.
+* Define referral code length property.
+* Default length: 10.
+* Validate a sensible range such as 8 to 16.
+* Use explicit @Bean registration.
+* Avoid duplicate beans.
+
+6. Referral properties
+
+Create:
+
+ReferralProperties
+
+Suggested package:
+
+com.parazit.panel.config.properties
+
+Prefix:
+
+app.referral
+
+Fields:
+
+boolean enabled
+
+int codeLength
+
+Requirements:
+
+* Default enabled = true.
+* Default codeLength = 10.
+* Validate codeLength.
+* Bind from environment variables.
+
+Update `.env.example`:
+
+REFERRAL_ENABLED=true
+REFERRAL_CODE_LENGTH=10
+
+Do not add reward or commission properties.
+
+7. User aggregate changes
+
+If referralCode is added to User:
+
+Requirements:
+
+* Add immutable referralCode field.
+* Add getter.
+* Do not expose public setter.
+* Update controlled User creation factory to require or assign referralCode through the application flow.
+* Preserve backward compatibility in tests where possible.
+* Repeated registration must preserve the same referral code.
+* Profile update must not modify referral code.
+* Language update must not modify referral code.
+* Settings update must not modify referral code.
+
+Add focused behavior only if needed:
+
+assignReferralCode(String referralCode)
+
+This method should be usable only when the current value is null, to support migration or lazy backfill.
+
+Rules:
+
+* Reject null or blank code.
+* Normalize uppercase.
+* Reject invalid format.
+* Reject reassignment to a different code.
+* Same-code assignment may be idempotent.
+* Do not generate the code inside the entity.
+
+8. Referral code uniqueness strategy
+
+User registration must assign a unique referral code to newly created users.
+
+Requirements:
+
+* Database unique constraint is the final authority.
+* Do not rely only on exists checks.
+* Generate a code.
+* Attempt persistence.
+* On referral-code collision, retry with a new code.
+* Use a small bounded retry count, for example 5 attempts.
+* Do not retry indefinitely.
+* Do not catch generic Exception.
+* Distinguish telegramUserId uniqueness conflict from referralCode uniqueness conflict where technically possible.
+* Do not expose database constraint names.
+* Keep transaction behavior technically correct.
+
+Consider the existing concurrent registration design from Task 10.
+
+The final registration flow must remain:
+
+* idempotent for telegramUserId;
+* safe under concurrent registration;
+* capable of recovering from rare referral-code collisions;
+* capable of creating exactly one UserSettings record;
+* capable of preserving existing users.
+
+Explain the selected strategy before implementation.
+
+9. Existing-user backfill strategy
+
+Existing users created before Task 14 may not have a referral code.
+
+Choose one of these strategies:
+
+Preferred:
+
+Database migration adds nullable referral_code first.
+Application lazily assigns a referral code when:
+
+* user registers again;
+* referral profile is requested;
+* referral code is needed.
+
+After all existing users are backfilled, a later migration may make the column not null.
+
+Alternative:
+
+Flyway migration backfills codes with a PostgreSQL function or deterministic SQL.
+
+Only choose this if uniqueness, security, and predictability are properly handled.
+
+Do not create insecure sequential referral codes.
+
+For this task, a nullable migration plus lazy backfill is acceptable and safer.
+
+Document the chosen approach.
+
+10. Referral assignment rules
+
+A referral may be assigned when a user provides another user's referral code.
+
+Rules:
+
+* Referred user must exist.
+* Referrer user must exist.
+* A user cannot refer themselves.
+* A referred user may have at most one referral.
+* Repeating assignment with the same referrer must be idempotent.
+* Attempting assignment to a different referrer after one already exists must fail with a conflict.
+* Unknown referral code must return not found or invalid-code behavior.
+* Blocked or suspended users may still own a referral code unless the current business rules say otherwise.
+* Do not create reward records.
+* Do not change user status.
+* Do not change settings.
+* Do not change language.
+* Do not create nested referral relationships.
+
+11. Referral repository
+
+Create:
+
+ReferralRepository
+
+Suggested package:
+
+com.parazit.panel.domain.referral.repository
+
+Requirements:
+
+* Extend UuidRepository<Referral>.
+* Add:
+
+Optional<Referral> findByReferredUserId(UUID referredUserId)
+
+List<Referral> findAllByReferrerUserId(UUID referrerUserId)
+
+boolean existsByReferredUserId(UUID referredUserId)
+
+long countByReferrerUserId(UUID referrerUserId)
+
+* Keep independent from Spring Data.
+* Do not expose Page, Pageable, Specification, or JpaRepository.
+* Do not add reward-related queries.
+* Do not add recursive tree queries.
+
+12. User repository additions
+
+Add methods required for referral-code lookup.
+
+To UserRepository:
+
+Optional<User> findByReferralCode(String referralCode)
+
+boolean existsByReferralCode(String referralCode)
+
+Requirements:
+
+* Keep code normalized before repository use.
+* Keep domain repository independent from Spring Data.
+* Do not expose Spring Data types.
+
+Update:
+
+SpringDataUserRepository
+
+UserRepositoryAdapter
+
+Add matching delegated methods.
+
+13. Spring Data referral repository
+
+Create:
+
+SpringDataReferralRepository
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.referral
+
+Requirements:
+
+* Extend SpringDataUuidRepository<Referral>.
+* Add derived methods matching ReferralRepository.
+* Keep infrastructure-only.
+
+14. Referral repository adapter
+
+Create:
+
+ReferralRepositoryAdapter
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.referral
+
+Requirements:
+
+* Extend JpaRepositoryAdapter<Referral, UUID>.
+* Implement ReferralRepository.
+* Delegate referral-specific methods.
+* Use constructor injection.
+* Do not add business logic.
+* Do not catch generic persistence exceptions.
+
+15. Flyway migration
+
+Create the next migration.
+
+Suggested name:
+
+V4__add_referral_foundation.sql
+
+Adjust version based on current migration history.
+
+Migration requirements:
+
+User table:
+
+* add referral_code VARCHAR with suitable length;
+* initially allow null if using lazy backfill;
+* add unique constraint or unique index;
+* ensure case-insensitive lookup strategy is well-defined.
+
+Referral table:
+
+Create:
+
+referrals
+
+Columns:
+
+id UUID primary key
+
+referrer_user_id UUID not null
+
+referred_user_id UUID not null
+
+referral_code_used VARCHAR not null
+
+status VARCHAR not null
+
+referred_at TIMESTAMPTZ not null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique referred_user_id
+* referrer_user_id <> referred_user_id
+* foreign key referrer_user_id references users(id)
+* foreign key referred_user_id references users(id)
+* status check constraint if consistent with current migration style
+
+Indexes:
+
+* referrer_user_id
+* referred_user_id
+* status
+* referred_at
+
+Delete behavior:
+
+* Prefer RESTRICT or NO ACTION for user deletion because referral history should not silently disappear.
+* Explain the decision.
+* Do not use cascade delete without strong justification.
+
+Referral code input should be normalized by the application.
+
+If PostgreSQL case-insensitive uniqueness is used, explain whether:
+
+* codes are always stored uppercase;
+* or a functional unique index on upper(referral_code) is used.
+
+Prefer storing uppercase and enforcing application normalization.
+
+Ensure Hibernate schema validation succeeds.
+
+16. Referral aggregate behavior
+
+Create a controlled factory:
+
+Referral.create(
+UUID referrerUserId,
+UUID referredUserId,
+String referralCodeUsed,
+Instant referredAt
+)
+
+Initial status:
+
+PENDING
+
+Validation:
+
+* IDs must not be null.
+* IDs must differ.
+* referralCodeUsed must not be blank.
+* referredAt must not be null.
+* Normalize code uppercase.
+* Validate allowed format and length.
+
+Optional focused methods for future use:
+
+confirm()
+
+cancel()
+
+Requirements:
+
+* Keep state transitions explicit.
+* PENDING -> CONFIRMED allowed.
+* PENDING -> CANCELLED allowed.
+* CONFIRMED should not silently return to PENDING.
+* CANCELLED should not silently return to PENDING.
+* Do not add reward side effects.
+* Unit test transitions if implemented.
+* No API for status transition in this task.
+
+17. Application use cases
+
+Create input ports:
+
+GetReferralOverviewUseCase
+
+AssignReferralUseCase
+
+Suggested package:
+
+com.parazit.panel.application.port.in.referral
+
+Methods:
+
+ReferralOverviewResult getOverview(GetReferralOverviewQuery query)
+
+AssignReferralResult assign(AssignReferralCommand command)
+
+18. Application input models
+
+Create:
+
+GetReferralOverviewQuery
+
+Field:
+
+Long telegramUserId
+
+Create:
+
+AssignReferralCommand
+
+Fields:
+
+Long referredTelegramUserId
+
+String referralCode
+
+Suggested packages:
+
+com.parazit.panel.application.referral.query
+
+com.parazit.panel.application.referral.command
+
+Prefer Java records.
+
+Requirements:
+
+* telegram IDs required and positive.
+* referralCode required.
+* Commands must not depend on Telegram SDK.
+* Do not include reward data.
+* Keep business logic out of records.
+
+19. Result models
+
+Create:
+
+ReferralOverviewResult
+
+Fields:
+
+UUID userId
+
+Long telegramUserId
+
+String referralCode
+
+long referralCount
+
+Optional<ReferrerSummary> referrer
+
+List<ReferredUserSummary> referredUsers
+
+Requirements:
+
+* Keep the list intentionally limited or unpaged only because this is an internal skeleton.
+* If returning all referred users is unsafe, return only count in this task.
+* Prefer minimal output.
+* Do not expose JPA entities.
+* Do not expose private profile data unnecessarily.
+
+Recommended minimal overview:
+
+UUID userId
+
+Long telegramUserId
+
+String referralCode
+
+long referralCount
+
+UUID referrerUserId nullable
+
+Long referrerTelegramUserId nullable
+
+Create:
+
+AssignReferralResult
+
+Fields:
+
+UUID referralId
+
+UUID referrerUserId
+
+UUID referredUserId
+
+String referralCodeUsed
+
+ReferralStatus status
+
+Instant referredAt
+
+boolean newlyAssigned
+
+Requirements:
+
+* Immutable.
+* No entity exposure.
+* newlyAssigned=false for idempotent repeated assignment to the same referrer.
+
+20. Referral code service
+
+Create a focused service/component responsible for ensuring a user has a referral code.
+
+Suggested:
+
+EnsureUserReferralCodeService
+
+Suggested package:
+
+com.parazit.panel.application.referral
+
+Dependencies:
+
+UserRepository
+ReferralCodeGenerator
+
+Responsibilities:
+
+* Return existing code when present.
+* Generate and assign a code when absent.
+* Normalize and validate.
+* Handle rare uniqueness collisions with bounded retry.
+* Persist through UserRepository.
+* Keep transaction strategy correct.
+* Reuse in registration and overview flows.
+* Do not expose infrastructure details.
+
+Avoid duplicating code generation inside RegisterUserService.
+
+21. Registration integration
+
+Update RegisterUserService.
+
+For new users:
+
+* assign a referral code during creation if technically clean;
+* or create the user then ensure a referral code in the same use-case flow.
+
+For existing users:
+
+* preserve existing code;
+* lazily backfill missing code.
+
+Requirements:
+
+* registration remains idempotent;
+* no code regeneration;
+* no duplicate users;
+* no duplicate settings;
+* no referral record is created merely by registering;
+* language behavior remains unchanged;
+* profile update behavior remains unchanged.
+
+Update RegisterUserResult only if referralCode is intentionally part of registration output.
+
+Preferred:
+
+Do not add referralCode to registration result unless it is immediately needed.
+
+Keep referral data in the dedicated referral overview use case.
+
+22. Get referral overview service
+
+Create:
+
+GetReferralOverviewService
+
+Suggested package:
+
+com.parazit.panel.application.referral
+
+Requirements:
+
+* Implement GetReferralOverviewUseCase.
+* Depend on:
+
+UserRepository
+ReferralRepository
+EnsureUserReferralCodeService
+
+* Find user by telegramUserId.
+* Throw UserNotFoundException when absent.
+* Ensure the user has a referral code.
+* Count referrals by referrerUserId.
+* Load existing referral by referredUserId to identify referrer if needed.
+* Avoid exposing unnecessary user personal data.
+* Use correct transaction semantics because lazy code backfill may write.
+* Return ReferralOverviewResult.
+
+23. Assign referral service
+
+Create:
+
+AssignReferralService
+
+Suggested package:
+
+com.parazit.panel.application.referral
+
+Requirements:
+
+* Implement AssignReferralUseCase.
+* Depend on:
+
+UserRepository
+ReferralRepository
+SystemClockPort
+
+* Use constructor injection.
+* Use @Transactional.
+* Validate command.
+* Normalize referral code.
+* Load referred user by Telegram ID.
+* Load referrer user by referral code.
+* Reject self-referral.
+* Check existing referral for referred user.
+
+Behavior:
+
+No existing referral:
+
+* create Referral;
+* persist;
+* newlyAssigned=true.
+
+Existing referral with same referrer:
+
+* return existing referral;
+* newlyAssigned=false.
+
+Existing referral with different referrer:
+
+* throw ReferralAlreadyAssignedException mapped to HTTP 409.
+
+Unknown referral code:
+
+* throw ReferralCodeNotFoundException.
+* Map to HTTP 404 or 400 based on existing API semantics.
+* Prefer 404 for an internal verification API.
+
+Do not modify UserSettings.
+Do not modify status.
+Do not modify language.
+Do not create rewards.
+
+24. Concurrency handling
+
+Concurrent assignment for the same referred user must be safe.
+
+Requirements:
+
+* Database unique constraint on referred_user_id is final authority.
+* Do not rely only on pre-check.
+* Concurrent same-referrer assignments should recover idempotently.
+* Concurrent different-referrer assignments must result in exactly one persisted referral and one conflict.
+* Do not use synchronized.
+* Do not use JVM-only locks.
+* Do not catch generic Exception.
+* Keep transaction handling correct after unique-constraint failures.
+
+Reuse or adapt a correct strategy from earlier tasks.
+
+Explain it before implementation.
+
+25. Referral exceptions
+
+Create focused exceptions:
+
+ReferralCodeNotFoundException
+
+SelfReferralNotAllowedException
+
+ReferralAlreadyAssignedException
+
+ReferralAssignmentException only if required
+
+Requirements:
+
+* Safe messages.
+* No SQL details.
+* No constraint names.
+* Mapping:
+
+ReferralCodeNotFoundException -> 404
+
+SelfReferralNotAllowedException -> 400
+
+ReferralAlreadyAssignedException -> 409
+
+Unexpected failure -> 500
+
+Integrate with GlobalExceptionHandler.
+
+Do not create excessive exception types.
+
+26. Internal verification API
+
+Create:
+
+ReferralController
+
+Suggested package:
+
+com.parazit.panel.api.internal.referral
+
+Endpoints:
+
+GET /internal/users/{telegramUserId}/referral
+
+POST /internal/users/{telegramUserId}/referral
+
+POST request:
+
+{
+"referralCode": "ABCD2345EF"
+}
+
+Meaning:
+
+The user identified by the path variable is assigning a referrer by using the provided code.
+
+GET response example:
+
+{
+"userId": "uuid",
+"telegramUserId": 123456789,
+"referralCode": "ABCD2345EF",
+"referralCount": 3,
+"referrerUserId": "uuid-or-null",
+"referrerTelegramUserId": 987654321
+}
+
+POST response example:
+
+{
+"referralId": "uuid",
+"referrerUserId": "uuid",
+"referredUserId": "uuid",
+"referralCodeUsed": "ABCD2345EF",
+"status": "PENDING",
+"referredAt": "2026-07-10T12:00:00Z",
+"newlyAssigned": true
+}
+
+HTTP behavior:
+
+GET success -> 200
+
+POST first assignment -> 201
+
+POST same assignment repeated -> 200
+
+Unknown code -> 404
+
+Self-referral -> 400
+
+Different existing referrer -> 409
+
+Missing user -> 404
+
+Do not add authentication yet.
+
+Mark endpoints internal and temporary.
+
+27. API DTOs
+
+Create:
+
+AssignReferralRequest
+
+Field:
+
+String referralCode
+
+Validation:
+
+@NotBlank
+
+@Size(min = 8, max = 16)
+
+@Pattern matching allowed uppercase/lowercase alphanumeric input
+
+Create:
+
+ReferralOverviewResponse
+
+Create:
+
+AssignReferralResponse
+
+Requirements:
+
+* Dedicated HTTP models.
+* Prefer Java records.
+* Do not expose entities.
+* Normalize code in application logic, not only validation.
+* Do not return private names or usernames.
+* Do not expose repository implementation details.
+
+28. API mapper
+
+Create:
+
+ReferralApiMapper
+
+Requirements:
+
+* Convert path variable and request into AssignReferralCommand.
+* Convert path variable into GetReferralOverviewQuery.
+* Convert results to responses.
+* Use manual explicit mapping.
+* Keep mapping out of controller.
+* Do not add MapStruct unless already used.
+
+29. Logging
+
+Requirements:
+
+* Log referral-code assignment at INFO.
+* Log idempotent repeated assignment at DEBUG.
+* Log code generation collisions at DEBUG or WARN depending on rarity.
+* Log conflicting assignment at WARN without sensitive personal data.
+* Include:
+
+referralId when available
+referrerUserId
+referredUserId
+newlyAssigned
+traceId through MDC
+
+* Do not log full names.
+* Avoid logging raw Telegram IDs at INFO if current privacy conventions discourage it.
+* Do not log request body.
+* Unexpected errors include stack trace in server logs only.
+
+30. Domain unit tests
+
+Create tests for Referral:
+
+* successful creation;
+* default PENDING status;
+* self-referral rejected;
+* null referrer rejected;
+* null referred user rejected;
+* blank code rejected;
+* code normalization;
+* null time rejected;
+* confirm transition if implemented;
+* cancel transition if implemented;
+* invalid state transitions rejected.
+
+Create tests for User referral code behavior:
+
+* valid assignment;
+* normalization;
+* null rejected;
+* blank rejected;
+* invalid character rejected;
+* same-code assignment idempotent;
+* different-code reassignment rejected;
+* referral code remains stable across profile changes.
+
+31. Referral code generator tests
+
+Test:
+
+* generated length matches configuration;
+* only allowed alphabet is used;
+* excluded ambiguous characters never appear;
+* codes are uppercase;
+* successive calls generally differ;
+* invalid configured length rejected.
+
+Do not write probabilistic uniqueness tests requiring massive sample sizes.
+
+32. Application unit tests
+
+EnsureUserReferralCodeService:
+
+* existing code returned without generation;
+* missing code generated and saved;
+* collision triggers bounded retry;
+* retry exhaustion produces safe exception;
+* no infinite retry;
+* repository interactions correct.
+
+GetReferralOverviewService:
+
+* existing user with code;
+* existing user without code gets one;
+* referral count returned;
+* referrer information returned when available;
+* missing user rejected;
+* no unrelated user mutation.
+
+AssignReferralService:
+
+* first assignment succeeds;
+* same assignment idempotent;
+* different assignment conflicts;
+* unknown code rejected;
+* self-referral rejected;
+* missing referred user rejected;
+* uses SystemClockPort;
+* no rewards created;
+* user settings untouched.
+
+Use fixed Instants.
+
+33. Repository integration tests
+
+Use PostgreSQL Testcontainers.
+
+Test User referral code persistence:
+
+* referral code persists;
+* unique constraint enforced;
+* null allowed if lazy migration strategy chosen;
+* normalized value stored;
+* findByReferralCode works;
+* existsByReferralCode works.
+
+Test Referral repository:
+
+* save referral;
+* generated UUID;
+* auditing;
+* findByReferredUserId;
+* findAllByReferrerUserId;
+* countByReferrerUserId;
+* unique referred user constraint;
+* self-referral check constraint;
+* foreign key enforcement;
+* enum persistence;
+* TIMESTAMPTZ persistence;
+* delete restriction behavior;
+* Hibernate validation;
+* Flyway success.
+
+34. Registration integration tests
+
+Update registration tests.
+
+Verify:
+
+* new user receives a referral code;
+* repeated registration preserves the same code;
+* existing user without code receives lazy backfill;
+* concurrent registration results in one user and one stable referral code;
+* settings creation still works;
+* referral code collision handling is tested with a deterministic fake generator where practical;
+* all previous behavior remains unchanged.
+
+35. Referral integration tests
+
+Use real PostgreSQL.
+
+Test:
+
+* overview returns referral code;
+* first assignment creates one row;
+* repeated same assignment returns same referral;
+* different referrer conflicts;
+* self-referral rejected;
+* unknown code rejected;
+* referral count increases correctly;
+* no duplicate referral for same referred user;
+* no reward records exist;
+* user profile remains unchanged;
+* user language remains unchanged;
+* user settings remain unchanged.
+
+36. Concurrency integration tests
+
+Create deterministic concurrency tests.
+
+Scenarios:
+
+Same referred user and same referral code:
+
+* two concurrent requests;
+* exactly one referral row;
+* both operations succeed if recovery strategy supports it;
+* same referral ID returned.
+
+Same referred user and different referral codes:
+
+* two concurrent requests;
+* exactly one referral row;
+* one succeeds;
+* one returns conflict;
+* no duplicate row.
+
+Requirements:
+
+* Use real PostgreSQL.
+* Separate transactions.
+* Use ExecutorService and synchronization primitives.
+* Do not use Thread.sleep.
+* Shut down executor.
+* Avoid flaky timing assumptions.
+
+37. Controller tests
+
+GET tests:
+
+* existing user returns 200;
+* response contains referralCode;
+* response contains referralCount;
+* missing user returns 404;
+* error contains traceId.
+
+POST tests:
+
+* first assignment returns 201;
+* repeated same assignment returns 200;
+* unknown code returns 404;
+* self-referral returns 400;
+* different existing referrer returns 409;
+* blank code returns 400;
+* too-short code returns 400;
+* malformed JSON returns 400;
+* Content-Type is application/json;
+* no entity internals exposed;
+* standard error response used.
+
+38. Architecture rules
+
+Verify:
+
+* Referral domain does not depend on Spring Data.
+* ReferralCodeGenerator port does not depend on infrastructure.
+* Infrastructure implements the generator.
+* API depends on input ports.
+* Application services depend on repository and generator interfaces.
+* No controller injects Spring Data repositories.
+* No Telegram SDK appears.
+* No payment logic appears.
+* No reward or wallet entity exists.
+* No multi-level referral logic exists.
+* No field injection exists.
+* No circular dependency is introduced.
+
+39. Documentation
+
+Create:
+
+docs/use-cases/referral-skeleton.md
+
+Document:
+
+* referral purpose;
+* referral code format;
+* code generation strategy;
+* code stability;
+* existing-user backfill strategy;
+* referral assignment rules;
+* self-referral prevention;
+* one-referrer-per-user rule;
+* idempotency;
+* concurrency strategy;
+* database constraints;
+* API contracts;
+* error codes;
+* status lifecycle;
+* why rewards are deferred;
+* future Telegram deep-link integration;
+* future reward and fraud modules.
+
+Include Mermaid sequence diagrams for:
+
+* new-user referral code creation;
+* referral overview;
+* first referral assignment;
+* idempotent repeated assignment;
+* conflicting assignment.
+
+40. Expected file structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/referral/
+Referral.java
+ReferralStatus.java
+
+src/main/java/com/parazit/panel/domain/referral/repository/
+ReferralRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/referral/
+ReferralCodeGenerator.java
+
+src/main/java/com/parazit/panel/infrastructure/referral/
+SecureReferralCodeGenerator.java
+
+src/main/java/com/parazit/panel/config/referral/
+ReferralConfiguration.java
+
+src/main/java/com/parazit/panel/application/port/in/referral/
+GetReferralOverviewUseCase.java
+AssignReferralUseCase.java
+
+src/main/java/com/parazit/panel/application/referral/query/
+GetReferralOverviewQuery.java
+
+src/main/java/com/parazit/panel/application/referral/command/
+AssignReferralCommand.java
+
+src/main/java/com/parazit/panel/application/referral/result/
+ReferralOverviewResult.java
+AssignReferralResult.java
+
+src/main/java/com/parazit/panel/application/referral/
+EnsureUserReferralCodeService.java
+GetReferralOverviewService.java
+AssignReferralService.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/referral/
+SpringDataReferralRepository.java
+ReferralRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/internal/referral/
+ReferralController.java
+AssignReferralRequest.java
+ReferralOverviewResponse.java
+AssignReferralResponse.java
+ReferralApiMapper.java
+
+src/main/resources/db/migration/
+V4__add_referral_foundation.sql
+
+src/test/java/com/parazit/panel/domain/referral/
+ReferralTest.java
+
+src/test/java/com/parazit/panel/infrastructure/referral/
+SecureReferralCodeGeneratorTest.java
+
+src/test/java/com/parazit/panel/application/referral/
+EnsureUserReferralCodeServiceTest.java
+GetReferralOverviewServiceTest.java
+AssignReferralServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/referral/
+ReferralRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/referral/
+ReferralIntegrationTest.java
+ConcurrentReferralAssignmentIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/referral/
+ReferralControllerTest.java
+
+docs/use-cases/
+referral-skeleton.md
+
+Adapt names only where required by existing project conventions.
+
+41. Verification commands
+
+Run the commands appropriate to the current build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile and PostgreSQL.
+
+Manual verification:
+
+1. Register two users.
+2. Get the first user's referral overview.
+3. Use the first user's referral code for the second user.
+4. Repeat the same assignment.
+5. Try assigning a different referral code to the second user.
+6. Try self-referral.
+
+Confirm:
+
+* all previous tests pass;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* each user has one stable referral code;
+* each referred user has at most one referrer;
+* repeated same assignment is idempotent;
+* conflicting assignment returns 409;
+* no rewards are created;
+* no Telegram integration was added;
+* no credentials were committed.
+
+42. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Referral-code ownership decision
+3. Existing-user backfill strategy
+4. Registration integration strategy
+5. Concurrency strategy
+6. Planned files to create
+7. Planned files to modify
+8. Risks and migration concerns
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Referral-code generation behavior
+6. Registration integration
+7. Referral assignment behavior
+8. Idempotency and concurrency handling
+9. API contract
+10. Test results
+11. Build result
+12. Commands executed
+13. Remaining issues
+14. Suggested commit message
+
+Use this commit message unless the repository uses another convention:
+
+feat(referral): add referral code and assignment foundation
+
+Stop after completing Task 14.
+
+Do not start Task 15.
+

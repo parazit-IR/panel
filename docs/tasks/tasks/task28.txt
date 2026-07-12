@@ -1,0 +1,2229 @@
+You are a senior Java 21, Spring Boot, payment-system, and financial-integration engineer.
+
+Continue implementing the existing project.
+
+# Task 28 — Zarinpal Payment Request, Callback, and Verification
+
+## Goal
+
+Implement the complete Zarinpal online payment flow on top of the multi-provider payment foundation created in Task 27.
+
+After this task, the application must be able to:
+
+* initialize a Zarinpal payment;
+* send the verified request payload to Zarinpal;
+* persist the returned authority;
+* generate the payment redirect URL;
+* receive the user callback;
+* handle cancelled and unsuccessful callbacks safely;
+* verify successful-looking callbacks with Zarinpal server-to-server;
+* approve the local Payment only after successful verification;
+* preserve the gateway reference ID;
+* handle duplicate callbacks and repeated verification idempotently;
+* handle uncertain network outcomes without approving an unverified payment;
+* prevent amount, authority, Payment, Order, or User mismatches.
+
+Do not implement:
+
+* manual card-to-card payment;
+* receipt upload;
+* operator approval;
+* VPN provisioning after payment;
+* PaymentApproved outbox processing;
+* Telegram Bot handlers;
+* subscription generation;
+* QR Code generation;
+* refund;
+* reconciliation cron jobs;
+* settlement reports.
+
+Stop after completing Task 28.
+
+Do not begin Task 29.
+
+---
+
+# 1. Important rules
+
+* Inspect the complete repository before making changes.
+* Preserve all behavior from Tasks 1–27.
+* Use Java 21 and the existing Spring Boot version.
+* Use the Payment aggregate, repository, strategy interfaces, Order validation, BaseEntity, SystemClockPort, logging, exception handling, traceId, transaction conventions, Testcontainers support, and architecture rules from earlier tasks.
+* Use Spring RestClient unless the project already intentionally standardized on another current HTTP client.
+* Do not use RestTemplate.
+* Do not use floating-point values for money.
+* Do not approve a Payment based only on callback query parameters.
+* Do not trust the callback amount, user ID, Order ID, or status without local validation and server-to-server verification.
+* Do not expose the merchant ID.
+* Do not log full authority values, card hash, card PAN, gateway response body, mobile number, email, or credentials.
+* Do not store raw gateway request or response JSON.
+* Do not expose JPA entities through controllers.
+* Do not keep a database transaction open during a remote HTTP request.
+* Do not blindly retry verification requests after an uncertain response without checking local and gateway state.
+* Do not add unrelated dependencies.
+* Do not call the real Zarinpal API from automated tests.
+* Do not begin manual payment implementation.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* Payment aggregate;
+* PaymentStatus and PaymentMethod;
+* PaymentProcessor strategy interface;
+* PaymentService/factory;
+* Payment repository;
+* current Order model and validation;
+* whether `Order` was actually implemented in Task 27;
+* Payment transitions and timestamps;
+* existing gateway authority/reference fields;
+* unique constraints;
+* existing callback conventions;
+* current RestClient infrastructure;
+* transaction boundaries;
+* exception mappings;
+* test support;
+* migration history;
+* any existing Zarinpal code;
+* current official Zarinpal API assumptions.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified official Zarinpal API contract
+3. Currency-unit decision
+4. Payment-state transition decision
+5. Callback design
+6. Verification idempotency strategy
+7. Transaction-boundary strategy
+8. Uncertain-result strategy
+9. Planned files to create
+10. Planned files to modify
+11. Migration risks
+12. Security risks
+
+---
+
+# 3. Verify the current official Zarinpal contract
+
+Do not implement from memory alone.
+
+Verify using current official Zarinpal documentation and official Zarinpal-maintained examples.
+
+At minimum verify:
+
+* production API base URL;
+* request endpoint;
+* verify endpoint;
+* StartPay URL;
+* merchant ID format;
+* currency unit expected by the API;
+* required request fields;
+* optional metadata fields;
+* response envelope;
+* authority format;
+* success codes;
+* already-verified behavior;
+* cancelled callback status;
+* callback query parameters;
+* error-code structure;
+* request and verification timeout expectations;
+* sandbox/test support if currently available.
+
+The currently expected v4 concepts may resemble:
+
+POST https://api.zarinpal.com/pg/v4/payment/request.json
+
+POST https://api.zarinpal.com/pg/v4/payment/verify.json
+
+Redirect:
+
+https://www.zarinpal.com/pg/StartPay/{authority}
+
+But Codex must verify the current official contract before implementing.
+
+Document the verification date and official source assumptions.
+
+Do not use unofficial blogs as the source of truth.
+
+---
+
+# 4. Currency and amount decision
+
+The project currently stores IRT as whole Tomans.
+
+Zarinpal may require a specific amount unit according to the current contract.
+
+Create an explicit converter:
+
+ZarinpalAmountConverter
+
+Responsibilities:
+
+* convert local IRT amount to the exact gateway unit;
+* use overflow-safe arithmetic;
+* reject invalid or unsupported currencies;
+* convert only once;
+* never use floating-point arithmetic.
+
+Example design if the gateway expects Rials:
+
+gatewayAmount = Math.multiplyExact(tomanAmount, 10)
+
+If the current verified API expects Tomans, preserve the amount exactly.
+
+Do not assume.
+
+Requirements:
+
+* Payment.baseAmount and Payment.payableAmount remain in the project’s canonical IRT unit.
+* Store the exact gateway amount used for request and verification.
+* The exact same gateway amount must be used during Verify.
+* Do not recalculate from a changed Plan or Order.
+* Verify uses the persisted Payment amount snapshot.
+
+Create tests for:
+
+* normal conversion;
+* zero if allowed;
+* negative rejection;
+* overflow;
+* unsupported currency.
+
+---
+
+# 5. Zarinpal configuration
+
+Create:
+
+ZarinpalProperties
+
+Suggested package:
+
+com.parazit.panel.config.properties
+
+Prefix:
+
+app.payment.zarinpal
+
+Fields:
+
+boolean enabled
+
+String merchantId
+
+URI apiBaseUrl
+
+URI startPayBaseUrl
+
+String requestPath
+
+String verifyPath
+
+URI callbackBaseUrl
+
+Duration connectTimeout
+
+Duration readTimeout
+
+int maxTransientRetries
+
+Duration retryDelay
+
+boolean sandboxEnabled if officially supported
+
+boolean verifySsl
+
+Requirements:
+
+* Merchant ID is required only when Zarinpal is enabled.
+* Never provide a real default merchant ID.
+* Production SSL verification must default to true.
+* Callback URL must be an HTTPS public URL outside local development.
+* Validate all URLs and timeouts.
+* Do not reveal merchant ID through actuator or logs.
+* Do not override toString in a way that exposes secrets.
+* Bind immutable properties.
+* Register conditionally using `@ConditionalOnProperty`.
+
+Environment variables:
+
+ZARINPAL_ENABLED=false
+
+ZARINPAL_MERCHANT_ID=
+
+ZARINPAL_API_BASE_URL=https://api.zarinpal.com
+
+ZARINPAL_STARTPAY_BASE_URL=https://www.zarinpal.com/pg/StartPay
+
+ZARINPAL_REQUEST_PATH=/pg/v4/payment/request.json
+
+ZARINPAL_VERIFY_PATH=/pg/v4/payment/verify.json
+
+ZARINPAL_CALLBACK_BASE_URL=https://example.com/api/payments/zarinpal/callback
+
+ZARINPAL_CONNECT_TIMEOUT=PT5S
+
+ZARINPAL_READ_TIMEOUT=PT20S
+
+ZARINPAL_MAX_TRANSIENT_RETRIES=2
+
+ZARINPAL_RETRY_DELAY=PT1S
+
+ZARINPAL_VERIFY_SSL=true
+
+Update `.env.example`.
+
+No real secrets.
+
+---
+
+# 6. Payment status alignment
+
+Review PaymentStatus from Task 27.
+
+Zarinpal flow requires clear states such as:
+
+CREATED
+
+WAITING_FOR_PAYMENT
+
+PROCESSING
+
+APPROVED
+
+REJECTED
+
+EXPIRED
+
+FAILED
+
+CANCELLED
+
+UNKNOWN
+
+Add `UNKNOWN` only if it is needed for an uncertain verification result and is not already available.
+
+Recommended transitions:
+
+CREATED -> WAITING_FOR_PAYMENT
+
+WAITING_FOR_PAYMENT -> PROCESSING
+
+WAITING_FOR_PAYMENT -> CANCELLED
+
+WAITING_FOR_PAYMENT -> EXPIRED
+
+PROCESSING -> APPROVED
+
+PROCESSING -> FAILED
+
+PROCESSING -> UNKNOWN
+
+UNKNOWN -> PROCESSING
+
+UNKNOWN -> APPROVED
+
+UNKNOWN -> FAILED
+
+Rules:
+
+* Callback success does not directly transition to APPROVED.
+* Callback success may claim PROCESSING before server verification.
+* Callback cancellation transitions to CANCELLED only when the Payment is still payable.
+* APPROVED is terminal.
+* Repeated callback for APPROVED Payment is idempotent.
+* FAILED must not overwrite APPROVED.
+* CANCELLED callback must not overwrite APPROVED.
+* Do not expose a generic setter.
+
+Use a corrective Flyway migration if the database status constraint requires changes.
+
+---
+
+# 7. Zarinpal transaction persistence
+
+Create a provider-specific entity or gateway-attempt entity rather than overloading Payment with every provider field.
+
+Preferred model:
+
+ZarinpalPaymentAttempt
+
+Suggested package:
+
+com.parazit.panel.domain.payment.zarinpal
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited
+
+UUID paymentId
+
+UUID requestId
+
+ZarinpalAttemptStatus status
+
+long gatewayAmount
+
+String authority
+
+String referenceId
+
+String gatewayCode
+
+String cardHash
+
+String cardPanMasked
+
+Instant requestedAt
+
+Instant redirectedAt
+
+Instant callbackReceivedAt
+
+Instant verificationStartedAt
+
+Instant verifiedAt
+
+Instant failedAt
+
+String failureCode
+
+String failureMessage
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Requirements:
+
+* One Payment may have multiple request attempts only when prior attempts are definitely unusable or expired.
+* requestId provides idempotency for initialization.
+* authority must be unique when non-null.
+* referenceId should be unique when non-null if the gateway guarantees uniqueness.
+* Store only masked card PAN.
+* Store card hash only if it is returned and needed for audit.
+* Do not store full PAN, CVV, PIN, OTP, or raw metadata.
+* Bound messages.
+* Do not store gateway request/response JSON.
+* paymentId is a scalar UUID with a foreign key.
+* Do not use bidirectional JPA relationships.
+* Preserve attempt history.
+
+---
+
+# 8. Zarinpal attempt status
+
+Create:
+
+ZarinpalAttemptStatus
+
+Suggested values:
+
+CREATED
+
+REQUESTING
+
+REDIRECT_READY
+
+CALLBACK_RECEIVED
+
+VERIFYING
+
+VERIFIED
+
+CANCELLED
+
+FAILED
+
+UNKNOWN
+
+Rules:
+
+* CREATED -> REQUESTING
+* REQUESTING -> REDIRECT_READY
+* REQUESTING -> FAILED or UNKNOWN
+* REDIRECT_READY -> CALLBACK_RECEIVED
+* REDIRECT_READY -> CANCELLED
+* CALLBACK_RECEIVED -> VERIFYING
+* VERIFYING -> VERIFIED
+* VERIFYING -> FAILED or UNKNOWN
+* VERIFIED is terminal.
+* Repeated identical transitions are deterministic.
+* No generic setter.
+
+Create controlled domain methods.
+
+---
+
+# 9. Database migration
+
+Create the next migration based on the actual migration history.
+
+Suggested:
+
+V10__create_zarinpal_payment_attempts.sql
+
+Adjust version as needed.
+
+Table:
+
+zarinpal_payment_attempts
+
+Columns:
+
+id UUID primary key
+
+payment_id UUID not null
+
+request_id UUID not null
+
+status VARCHAR(32) not null
+
+gateway_amount BIGINT not null
+
+authority VARCHAR(64) null
+
+reference_id VARCHAR(128) null
+
+gateway_code VARCHAR(32) null
+
+card_hash VARCHAR(128) null
+
+card_pan_masked VARCHAR(32) null
+
+requested_at TIMESTAMPTZ null
+
+redirected_at TIMESTAMPTZ null
+
+callback_received_at TIMESTAMPTZ null
+
+verification_started_at TIMESTAMPTZ null
+
+verified_at TIMESTAMPTZ null
+
+failed_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique request_id;
+* unique authority when non-null;
+* unique reference_id when non-null if safe;
+* foreign key payment_id -> payments(id);
+* gateway_amount > 0;
+* valid status values;
+* VERIFIED requires verified_at and reference_id;
+* REDIRECT_READY requires authority;
+* timestamps consistent where practical.
+
+Indexes:
+
+payment_id
+
+request_id
+
+authority
+
+reference_id
+
+status
+
+created_at
+
+Use RESTRICT or NO ACTION deletion.
+
+Do not rewrite old migrations.
+
+---
+
+# 10. Attempt repository
+
+Create:
+
+ZarinpalPaymentAttemptRepository
+
+Suggested package:
+
+com.parazit.panel.domain.payment.zarinpal.repository
+
+Extend:
+
+UuidRepository<ZarinpalPaymentAttempt>
+
+Add:
+
+Optional<ZarinpalPaymentAttempt> findByRequestId(UUID requestId)
+
+Optional<ZarinpalPaymentAttempt> findByAuthority(String authority)
+
+Optional<ZarinpalPaymentAttempt> findVerifiedByPaymentId(UUID paymentId)
+
+List<ZarinpalPaymentAttempt> findAllByPaymentIdOrderByCreatedAtDesc(
+UUID paymentId
+)
+
+boolean existsByAuthority(String authority)
+
+Create:
+
+SpringDataZarinpalPaymentAttemptRepository
+
+ZarinpalPaymentAttemptRepositoryAdapter
+
+Follow existing repository abstraction.
+
+---
+
+# 11. Provider port models
+
+Create infrastructure-independent models.
+
+Create:
+
+ZarinpalCreateRequest
+
+Fields:
+
+String merchantId
+
+long amount
+
+String callbackUrl
+
+String description
+
+String mobile
+
+String email
+
+Create:
+
+ZarinpalCreateResponse
+
+Fields:
+
+boolean successful
+
+String authority
+
+int code
+
+String message
+
+String paymentUrl
+
+Create:
+
+ZarinpalVerifyRequest
+
+Fields:
+
+String merchantId
+
+long amount
+
+String authority
+
+Create:
+
+ZarinpalVerifyResponse
+
+Fields:
+
+boolean successful
+
+boolean alreadyVerified
+
+int code
+
+String message
+
+String referenceId
+
+String cardHash
+
+String cardPanMasked
+
+long fee
+
+String feeType
+
+Requirements:
+
+* Immutable records.
+* No RestClient types.
+* No Jackson annotations.
+* No raw JSON.
+* Sensitive output kept minimal.
+* Mask card PAN if the gateway response is not already safely masked.
+* Sanitize gateway message.
+
+---
+
+# 12. Gateway client port
+
+Create:
+
+ZarinpalGatewayClient
+
+Suggested package:
+
+com.parazit.panel.application.port.out.payment.zarinpal
+
+Methods:
+
+ZarinpalCreateResponse createPayment(
+ZarinpalCreateRequest request
+)
+
+ZarinpalVerifyResponse verifyPayment(
+ZarinpalVerifyRequest request
+)
+
+Requirements:
+
+* Infrastructure-independent.
+* No Payment entities.
+* No database access.
+* No callback/business orchestration.
+* No generic Object or Map.
+* No secrets in exceptions.
+
+---
+
+# 13. Remote DTOs
+
+Create infrastructure-only request/response DTOs matching the verified official API.
+
+Suggested package:
+
+com.parazit.panel.infrastructure.payment.zarinpal.dto
+
+Possible records:
+
+ZarinpalRequestRemoteDto
+
+ZarinpalVerifyRemoteDto
+
+ZarinpalDataEnvelopeRemoteDto<T>
+
+ZarinpalErrorEnvelopeRemoteDto
+
+ZarinpalRequestDataRemoteDto
+
+ZarinpalVerifyDataRemoteDto
+
+Requirements:
+
+* Exact JSON property names.
+* Unknown fields tolerated.
+* Infrastructure-only.
+* No JPA annotations.
+* Do not use Lombok @Data.
+* Validate missing data/errors explicitly.
+* Do not leak DTOs to application or API layers.
+
+---
+
+# 14. Zarinpal RestClient configuration
+
+Create:
+
+ZarinpalRestClientConfiguration
+
+Create conditionally enabled RestClient bean.
+
+Configure:
+
+* base URL;
+* connect timeout;
+* read timeout;
+* JSON;
+* SSL verification;
+* user agent if required;
+* content type application/json;
+* safe request/response logging without bodies or secrets.
+
+Do not log merchant ID.
+
+Do not disable SSL verification in production.
+
+Do not reuse 3x-ui session/cookie infrastructure.
+
+Zarinpal does not use the 3x-ui authentication mechanism.
+
+---
+
+# 15. Remote adapter
+
+Create:
+
+RestClientZarinpalGatewayClient
+
+Suggested package:
+
+com.parazit.panel.infrastructure.payment.zarinpal
+
+Requirements:
+
+* Implement ZarinpalGatewayClient.
+* POST to verified request endpoint.
+* POST to verified verify endpoint.
+* Map official data/errors envelope.
+* Construct StartPay URL from returned authority.
+* Validate authority format.
+* Validate response code.
+* Handle malformed response.
+* Handle timeout.
+* Handle connection failure.
+* Handle HTTP 4xx/5xx.
+* Sanitize messages.
+* Never log request bodies.
+* Never log merchant ID or full authority.
+* Do not automatically approve local Payment.
+
+Retry policy:
+
+Request initialization:
+
+* transient retry may be dangerous because the gateway may create more than one authority.
+* If requestId cannot be transmitted to Zarinpal, do not assume remote idempotency.
+* Use at most a carefully documented bounded retry only for failures known to occur before request transmission.
+* Prefer no automatic POST retry after an uncertain timeout.
+
+Verify:
+
+* verify calls may be retried carefully because Verify is expected to be repeatable, but confirm official behavior.
+* bounded retries only for transient failures.
+* never retry validation/business errors.
+
+---
+
+# 16. Zarinpal PaymentProcessor implementation
+
+Create:
+
+ZarinpalPaymentProcessor
+
+Implement the `PaymentProcessor` contract created in Task 27.
+
+supportedMethod():
+
+PaymentMethod.ZARINPAL
+
+Responsibilities:
+
+* map generic initialization command to Zarinpal-specific initialization service;
+* map verification command to Zarinpal-specific verification service;
+* do not contain HTTP DTO logic;
+* do not use switch statements;
+* register conditionally only when Zarinpal is enabled.
+
+If the Task 27 generic interface does not cleanly represent callback verification, refactor it minimally.
+
+Do not force manual card payment into an online gateway-shaped verification model.
+
+A cleaner split is acceptable:
+
+PaymentInitiationProcessor
+
+OnlinePaymentVerificationProcessor
+
+Explain any interface refinement.
+
+---
+
+# 17. Initiation use case
+
+Create:
+
+InitializeZarinpalPaymentUseCase
+
+Method:
+
+InitializeZarinpalPaymentResult initialize(
+InitializeZarinpalPaymentCommand command
+)
+
+Command fields:
+
+UUID requestId
+
+UUID paymentId
+
+Long telegramUserId
+
+String description
+
+String mobile
+
+String email
+
+Requirements:
+
+* requestId required and globally unique.
+* paymentId required.
+* telegramUserId positive.
+* description required and bounded.
+* mobile/email optional.
+* No amount accepted from external caller.
+* Amount comes from trusted persisted Payment.
+* No merchant ID accepted externally.
+* No callback URL accepted externally.
+
+Result fields:
+
+UUID paymentId
+
+UUID attemptId
+
+UUID requestId
+
+PaymentStatus paymentStatus
+
+ZarinpalAttemptStatus attemptStatus
+
+String authority
+
+String paymentUrl
+
+Instant expiresAt
+
+boolean newlyInitialized
+
+Do not expose merchant ID.
+
+---
+
+# 18. Initiation validation
+
+Initialize service must verify:
+
+* Payment exists.
+* Payment belongs to the User identified by telegram ID.
+* Payment method is ZARINPAL.
+* Payment is not APPROVED.
+* Payment is not CANCELLED, REJECTED, or EXPIRED.
+* Payment has a positive payableAmount.
+* Payment currency is supported.
+* Order still exists and belongs to the same User.
+* No APPROVED Payment already exists for the Order.
+* requestId was not previously used for different data.
+* Existing REDIRECT_READY attempt may be returned idempotently.
+* Existing valid authority should not be replaced unnecessarily.
+
+Do not update Payment amount from Plan or current Order data.
+
+Use the Payment snapshot.
+
+---
+
+# 19. Initiation transaction boundaries
+
+Do not keep a DB transaction open during gateway request.
+
+Preferred flow:
+
+Phase A — prepare transaction:
+
+* validate Payment/User/Order;
+* handle requestId replay;
+* create ZarinpalPaymentAttempt in CREATED;
+* set gatewayAmount;
+* mark REQUESTING;
+* commit.
+
+Phase B — remote request:
+
+* call Zarinpal;
+* receive authority or failure.
+
+Phase C — completion transaction:
+
+* on success:
+
+  * mark attempt REDIRECT_READY;
+  * persist authority;
+  * mark Payment WAITING_FOR_PAYMENT;
+* on confirmed gateway rejection:
+
+  * mark attempt FAILED;
+  * keep Payment retryable according to domain rules;
+* on uncertain timeout:
+
+  * mark attempt UNKNOWN;
+  * do not mark Payment APPROVED.
+
+Use focused transaction components.
+
+Do not rely on self-invoked `@Transactional`.
+
+---
+
+# 20. Callback endpoint
+
+Create a public callback endpoint:
+
+GET /api/payments/zarinpal/callback
+
+Expected verified query parameters may include:
+
+Authority
+
+Status
+
+Requirements:
+
+* Query parameter names must match the verified gateway contract.
+* Do not require a logged-in user session.
+* This endpoint is called by the gateway/user browser.
+* Look up local attempt only by persisted authority.
+* Do not accept Payment ID, Order ID, User ID, or amount from callback.
+* Validate authority format.
+* Normalize callback status.
+* Handle missing parameters.
+* Handle unknown authority safely.
+* Do not reveal whether arbitrary authority values exist beyond necessary response behavior.
+* Callback must invoke server-to-server Verify when callback indicates success.
+* Callback cancellation must not call Verify unless official behavior requires otherwise.
+* Repeated callbacks must be idempotent.
+
+Do not approve Payment directly from query parameters.
+
+---
+
+# 21. Callback result surface
+
+The callback is browser-facing.
+
+Choose one of these approaches:
+
+Preferred for Task 28:
+
+Return an HTTP redirect to a configured frontend/Telegram landing page with a non-sensitive outcome code.
+
+Configuration:
+
+ZARINPAL_SUCCESS_REDIRECT_URL
+
+ZARINPAL_FAILURE_REDIRECT_URL
+
+ZARINPAL_CANCEL_REDIRECT_URL
+
+Example outcomes:
+
+?result=success&paymentId=<safe-id>
+
+?result=failed
+
+?result=cancelled
+
+Do not include:
+
+authority
+
+reference ID
+
+merchant ID
+
+gateway error text
+
+Order details
+
+Alternatively return a minimal HTML page only if the project has no frontend route.
+
+Do not expose stack traces or internal exception details in HTML.
+
+For automated API testing, a JSON internal callback service may be tested below the controller.
+
+---
+
+# 22. Callback application models
+
+Create:
+
+HandleZarinpalCallbackCommand
+
+Fields:
+
+String authority
+
+String callbackStatus
+
+Create:
+
+HandleZarinpalCallbackResult
+
+Fields:
+
+UUID paymentId
+
+UUID attemptId
+
+PaymentStatus paymentStatus
+
+ZarinpalAttemptStatus attemptStatus
+
+ZarinpalCallbackOutcome outcome
+
+String referenceId
+
+boolean newlyVerified
+
+Create:
+
+ZarinpalCallbackOutcome
+
+Values:
+
+APPROVED
+
+ALREADY_APPROVED
+
+CANCELLED
+
+FAILED
+
+UNKNOWN
+
+Requirements:
+
+* Do not expose gateway raw messages.
+* Reference ID may be omitted from browser redirect.
+* Immutable records.
+
+---
+
+# 23. Verification service
+
+Create:
+
+VerifyZarinpalPaymentService
+
+Responsibilities:
+
+1. Validate callback structure.
+2. Normalize authority.
+3. Load attempt by authority.
+4. Load Payment.
+5. Handle APPROVED/VERIFIED replay idempotently.
+6. Validate method is ZARINPAL.
+7. Validate attempt belongs to Payment.
+8. Validate Payment amount and persisted gateway amount.
+9. Claim verification:
+
+   * attempt CALLBACK_RECEIVED;
+   * attempt VERIFYING;
+   * Payment PROCESSING.
+10. Commit claim.
+11. Call gateway Verify using persisted:
+
+    * merchantId;
+    * gatewayAmount;
+    * authority.
+12. Handle response.
+13. In completion transaction:
+
+    * successful verification:
+
+      * mark attempt VERIFIED;
+      * store reference ID;
+      * store masked card information;
+      * mark Payment APPROVED;
+      * set paidAt/approvedAt;
+    * official already-verified success:
+
+      * reconcile as approved only if local Payment/attempt and reference data are consistent;
+    * confirmed failure:
+
+      * mark attempt FAILED;
+      * mark Payment FAILED only when safe;
+    * uncertain timeout:
+
+      * mark attempt UNKNOWN;
+      * mark Payment UNKNOWN/PROCESSING according to domain design;
+      * never approve.
+
+Do not publish provisioning event in Task 28.
+
+Task 31 will connect approval to provisioning.
+
+---
+
+# 24. Callback cancellation behavior
+
+When callback status indicates cancellation or failure before Verify:
+
+* Load attempt by authority.
+* If Payment already APPROVED:
+  return ALREADY_APPROVED and do not cancel it.
+* If attempt already VERIFIED:
+  preserve success.
+* Otherwise:
+
+  * mark attempt CANCELLED;
+  * mark Payment CANCELLED if domain rules permit;
+  * store no raw gateway message.
+* Repeated cancelled callback is idempotent.
+* No Verify call.
+* No VPN provisioning.
+
+Unknown callback status:
+
+* Do not treat as approved.
+* Return failed/unknown safely.
+* Log sanitized warning.
+
+---
+
+# 25. Successful verification codes
+
+Do not hardcode only one success code without checking the current official API.
+
+Support the current official meanings, which may include:
+
+* successful verification;
+* already verified transaction.
+
+Codex must document the exact accepted codes from current official sources.
+
+Rules:
+
+* “already verified” is not automatically trusted when local records conflict.
+* Ensure:
+
+  * authority matches;
+  * amount matches persisted request amount;
+  * Payment method matches;
+  * attempt is linked correctly;
+  * no other approved Payment exists for the Order.
+* Store the gateway code used for the final decision.
+
+All other codes must be mapped explicitly or generically to safe failure categories.
+
+---
+
+# 26. Approval invariants
+
+Before `Payment.markApproved(...)`, verify:
+
+* Payment method is ZARINPAL.
+* Payment is not already approved by another attempt unless replaying the same verified transaction.
+* Attempt authority matches callback authority.
+* Verification used the exact persisted gateway amount.
+* Reference ID is nonblank.
+* Order has no different APPROVED Payment.
+* User and Order ownership remain consistent.
+* Payment has not expired according to business policy, unless the gateway officially confirms a timely payment and project rules permit acceptance.
+* No manual payment approval is involved.
+
+The database must remain the final guard against multiple approved Payments per Order.
+
+---
+
+# 27. Concurrent callback and verification safety
+
+Handle:
+
+* two callbacks for the same authority;
+* callback and internal verification arriving simultaneously;
+* duplicate browser refreshes;
+* concurrent verification attempts across application instances.
+
+Requirements:
+
+* exactly one local transition to APPROVED;
+* exactly one reference ID persisted;
+* no duplicate side effects;
+* no raw unique-constraint exception;
+* operation can return idempotent success;
+* database is the correctness authority.
+
+Use:
+
+* optimistic locking with `@Version`;
+* conditional status claim;
+* pessimistic locking in short transaction;
+* or another technically correct strategy.
+
+Do not lock across remote HTTP calls.
+
+Do not rely only on JVM synchronization.
+
+---
+
+# 28. Uncertain verification handling
+
+Scenario:
+
+Verify request times out after Zarinpal may have processed it.
+
+Rules:
+
+* Do not approve.
+* Mark attempt UNKNOWN.
+* Preserve authority and amount.
+* Do not create another payment attempt immediately.
+* Allow a bounded reconciliation Verify call using the same authority and amount.
+* If later Verify returns success/already-verified:
+  approve idempotently.
+* If repeated verification remains unavailable:
+  leave UNKNOWN.
+* Expose a safe retryable result.
+* Future scheduled reconciliation may be added later.
+
+Do not create a new authority for an attempt whose payment outcome is unknown.
+
+---
+
+# 29. Initialization uncertainty
+
+A payment request timeout may occur after Zarinpal generated an authority but before the application received it.
+
+Because the gateway request API may not support a merchant-provided idempotency key:
+
+* do not blindly retry indefinitely;
+* mark the attempt UNKNOWN;
+* do not create unlimited new attempts;
+* allow the user/operator to retry through a new requestId only after documented policy;
+* expire uncertain attempts after a configured interval if later needed;
+* never mark Payment approved.
+
+Document this limitation.
+
+---
+
+# 30. Exceptions
+
+Create or reuse focused exceptions:
+
+ZarinpalDisabledException
+
+ZarinpalConfigurationException
+
+ZarinpalPaymentNotAllowedException
+
+ZarinpalRequestFailedException
+
+ZarinpalRequestUnknownException
+
+ZarinpalAuthorityNotFoundException
+
+ZarinpalCallbackInvalidException
+
+ZarinpalVerificationFailedException
+
+ZarinpalVerificationUnknownException
+
+ZarinpalResponseInvalidException
+
+ZarinpalAmountMismatchException
+
+PaymentAlreadyApprovedException
+
+PaymentVerificationConflictException
+
+Requirements:
+
+* Safe messages.
+* No merchant ID.
+* No full authority.
+* No raw gateway response.
+* No full card details.
+* No SQL details.
+* No stack trace in API/browser response.
+
+Suggested internal mappings:
+
+invalid input → 400
+
+missing authority/Payment → 404
+
+invalid lifecycle/conflict → 409
+
+gateway rejection → 422 or 502 according to current API conventions
+
+gateway unavailable → 503
+
+timeout → 504
+
+uncertain result → 503
+
+malformed gateway response → 502
+
+---
+
+# 31. Internal payment initialization API
+
+Create:
+
+POST /internal/payments/{paymentId}/zarinpal/initialize
+
+Request:
+
+{
+"requestId": "uuid",
+"telegramUserId": 123456789,
+"description": "Purchase of VPN plan",
+"mobile": null,
+"email": null
+}
+
+Response:
+
+{
+"paymentId": "uuid",
+"attemptId": "uuid",
+"requestId": "uuid",
+"paymentStatus": "WAITING_FOR_PAYMENT",
+"attemptStatus": "REDIRECT_READY",
+"paymentUrl": "https://www.zarinpal.com/pg/StartPay/...",
+"expiresAt": "...",
+"newlyInitialized": true
+}
+
+Requirements:
+
+* Controller depends on input port.
+* No repository injection.
+* No merchant ID in response.
+* Authority may be omitted because paymentUrl is sufficient.
+* No real user authentication yet.
+* Application ownership validation is mandatory.
+
+HTTP behavior:
+
+new initialization → 201
+
+idempotent requestId replay → 200
+
+invalid state → 409
+
+missing Payment/User → 404
+
+gateway unavailable → 503
+
+timeout/unknown → 503 or 504 according to current conventions
+
+invalid request → 400
+
+---
+
+# 32. Optional internal verification endpoint
+
+Create only if useful for operations/testing:
+
+POST /internal/payments/zarinpal/{authority}/verify
+
+This endpoint is internal and must not be the primary customer flow.
+
+Requirements:
+
+* Requires safe internal request DTO.
+* Does not accept amount.
+* Loads persisted amount.
+* Idempotent.
+* Useful for recovery of UNKNOWN attempts.
+* Do not expose merchant ID.
+* Do not implement authentication in this task.
+* Clearly mark as internal and temporary.
+
+It may be deferred if callback and service tests provide enough coverage.
+
+---
+
+# 33. API DTOs and mappers
+
+Create dedicated DTO records:
+
+InitializeZarinpalPaymentRequest
+
+InitializeZarinpalPaymentResponse
+
+Create:
+
+ZarinpalPaymentApiMapper
+
+Responsibilities:
+
+* request/path to command;
+* result to response;
+* no entity mapping;
+* no infrastructure DTO dependency;
+* manual explicit mapping.
+
+Callback controller must delegate to:
+
+HandleZarinpalCallbackUseCase
+
+Do not place gateway logic in controller.
+
+---
+
+# 34. Logging
+
+INFO:
+
+* Zarinpal initialization prepared;
+* redirect authority received, masked;
+* callback received;
+* verification started;
+* Payment approved;
+* callback cancellation processed;
+* idempotent callback replay.
+
+DEBUG:
+
+* request ID;
+* attempt ID;
+* gateway code;
+* retry/reconciliation attempt;
+* state transitions;
+* masked authority prefix/suffix only.
+
+WARN:
+
+* unknown authority;
+* amount mismatch;
+* duplicate/concurrent verification;
+* callback with unknown status;
+* uncertain gateway result;
+* already-verified gateway response with inconsistent local state.
+
+ERROR:
+
+* malformed response;
+* unrecoverable verification failure with stack trace in server logs.
+
+Include:
+
+paymentId
+
+orderId
+
+attemptId
+
+requestId
+
+paymentStatus
+
+attemptStatus
+
+gatewayCode
+
+duration
+
+traceId
+
+Never log:
+
+merchantId
+
+full authority
+
+full payment URL
+
+mobile
+
+email
+
+card hash
+
+card PAN beyond safe masked representation
+
+raw request/response body
+
+---
+
+# 35. Test fixtures
+
+Create sanitized fixtures:
+
+src/test/resources/payment/zarinpal/
+
+request-success.json
+
+request-error.json
+
+request-malformed.json
+
+verify-success.json
+
+verify-already-verified.json
+
+verify-failed.json
+
+verify-malformed.json
+
+Requirements:
+
+* Match verified current official contract.
+* No real merchant ID.
+* No real authority.
+* No real card data.
+* No production reference IDs.
+* Include unknown fields to verify tolerance.
+
+---
+
+# 36. Domain unit tests
+
+Test ZarinpalPaymentAttempt:
+
+* valid creation;
+* initial status;
+* invalid amount;
+* request ID required;
+* Payment ID required;
+* mark REQUESTING;
+* mark REDIRECT_READY requires authority;
+* mark CALLBACK_RECEIVED;
+* mark VERIFYING;
+* mark VERIFIED requires reference ID;
+* cancellation;
+* failure;
+* unknown state;
+* invalid transitions;
+* terminal behavior;
+* authority normalization;
+* masked PAN validation;
+* failure message sanitization.
+
+Extend Payment tests:
+
+* WAITING_FOR_PAYMENT;
+* PROCESSING;
+* APPROVED;
+* CANCELLED;
+* UNKNOWN if added;
+* APPROVED cannot be overwritten;
+* cancelled callback cannot overwrite approved;
+* repeated approval idempotency.
+
+---
+
+# 37. Configuration tests
+
+Verify:
+
+* disabled by default;
+* merchant ID required only when enabled;
+* valid URLs;
+* positive timeouts;
+* retry range;
+* SSL default true;
+* callback URL validation;
+* secrets not included in toString or logs.
+
+---
+
+# 38. Amount converter tests
+
+Test:
+
+* exact supported conversion;
+* local IRT semantics;
+* zero;
+* negative;
+* overflow;
+* unsupported currency;
+* request and verify use same result.
+
+---
+
+# 39. Remote adapter integration tests
+
+Using WireMock or MockWebServer:
+
+Request:
+
+* success;
+* API error envelope;
+* malformed JSON;
+* HTTP 400;
+* HTTP 500/502/503/504;
+* timeout;
+* connection failure;
+* exact path;
+* exact amount;
+* callback URL;
+* metadata mapping;
+* payment URL construction.
+
+Verify:
+
+* no unsafe duplicate POST retry after uncertain timeout;
+* no merchant ID or body logging where testable.
+
+Verify:
+
+* success;
+* already verified;
+* failed code;
+* error envelope;
+* malformed JSON;
+* timeout;
+* transient retry policy;
+* exact persisted amount;
+* exact authority;
+* no amount from callback.
+
+---
+
+# 40. Initiation service unit tests
+
+Test:
+
+* successful initialization;
+* Payment becomes WAITING_FOR_PAYMENT;
+* attempt becomes REDIRECT_READY;
+* exact gateway amount;
+* URL returned;
+* requestId replay returns same attempt;
+* requestId conflict;
+* missing Payment;
+* ownership mismatch;
+* wrong method;
+* approved Payment rejected/idempotent as documented;
+* expired Payment rejected;
+* unsupported currency;
+* Order already paid;
+* gateway rejection;
+* timeout produces UNKNOWN;
+* no transaction held during gateway call, validated structurally where possible.
+
+---
+
+# 41. Callback/verification service unit tests
+
+Test:
+
+* successful callback and Verify;
+* callback cancellation;
+* unknown callback status;
+* missing authority;
+* unknown authority;
+* wrong Payment method;
+* amount comes from persisted attempt;
+* verification success approves Payment;
+* reference ID stored;
+* masked card fields stored;
+* already-verified response reconciles;
+* repeated callback returns idempotent success;
+* cancellation after approval does not cancel;
+* concurrent verification claim;
+* amount mismatch;
+* verify failure;
+* verify timeout marks UNKNOWN;
+* later retry approves;
+* Order with another approved Payment conflicts;
+* no provisioning triggered.
+
+Use fixed Instants.
+
+---
+
+# 42. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+* save attempt;
+* auditing;
+* unique requestId;
+* unique authority;
+* reference ID uniqueness if configured;
+* find by requestId;
+* find by authority;
+* verified attempt by Payment;
+* history ordering;
+* status persistence;
+* timestamp constraints;
+* foreign key;
+* gateway amount;
+* safe masked PAN fields;
+* Flyway;
+* Hibernate validation.
+
+Flush when testing constraints.
+
+---
+
+# 43. Full integration tests
+
+Use:
+
+* PostgreSQL Testcontainers;
+* mock Zarinpal server;
+* real Payment services and adapters where practical.
+
+Successful flow:
+
+1. Create valid User and Order.
+2. Create ZARINPAL Payment.
+3. Initialize.
+4. Verify attempt REDIRECT_READY.
+5. Simulate callback Status=OK with authority.
+6. Mock successful Verify.
+7. Verify Payment APPROVED.
+8. Verify reference ID stored.
+9. Verify exactly one approved Payment.
+10. Verify no VPN provision created.
+
+Cancellation flow:
+
+* initialize;
+* callback cancelled;
+* Payment CANCELLED;
+* no Verify request;
+* no provisioning.
+
+Repeated callback:
+
+* call callback twice;
+* one approval;
+* no duplicate side effect;
+* stable reference ID.
+
+---
+
+# 44. Uncertain-result integration tests
+
+Request timeout:
+
+* attempt UNKNOWN;
+* Payment not approved;
+* no uncontrolled retry;
+* no second authority created automatically.
+
+Verify timeout after gateway processed payment:
+
+* first Verify times out;
+* attempt UNKNOWN;
+* Payment not approved yet;
+* repeated reconciliation returns success/already verified;
+* Payment becomes APPROVED once.
+
+Persistent gateway outage:
+
+* remains UNKNOWN;
+* safe error;
+* no provisioning.
+
+---
+
+# 45. Concurrency integration tests
+
+Scenario A: duplicate initialization with same requestId
+
+* one attempt;
+* at most one gateway request where claim strategy works;
+* both callers converge.
+
+Scenario B: two callbacks for same authority
+
+* one Verify claim/request where possible;
+* one APPROVED transition;
+* both receive stable outcome.
+
+Scenario C: callbacks from separate transactions/application-instance simulation
+
+* database remains authority;
+* no duplicate approval;
+* no raw unique error.
+
+Scenario D: callback cancellation races with success callback
+
+* verified success has precedence;
+* APPROVED is never overwritten by CANCELLED;
+* deterministic final state.
+
+Requirements:
+
+* real PostgreSQL;
+* mock gateway;
+* separate transactions;
+* deterministic synchronization;
+* no Thread.sleep;
+* executor shutdown;
+* timeout.
+
+---
+
+# 46. Controller tests
+
+Initialization endpoint:
+
+* success → 201;
+* replay → 200;
+* missing Payment → 404;
+* ownership mismatch → 404;
+* wrong method → 409;
+* invalid request → 400;
+* gateway unavailable → 503;
+* timeout/unknown → 503 or 504.
+
+Callback:
+
+* valid success redirect;
+* valid cancellation redirect;
+* missing authority;
+* unknown authority;
+* invalid status;
+* duplicate callback;
+* approved Payment callback replay;
+* verify failure redirect;
+* timeout/unknown redirect;
+* no sensitive query parameters in redirect.
+
+Verify standard error responses for internal APIs:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+Callback browser errors should be minimal and safe.
+
+---
+
+# 47. Architecture verification
+
+Verify:
+
+* domain attempt model does not depend on API/infrastructure;
+* application services depend on ports/repositories;
+* RestClient DTOs remain infrastructure-only;
+* controllers depend on input ports;
+* no controller injects repository or RestClient;
+* no Payment approval from callback parameters alone;
+* no amount accepted from callback;
+* no merchant ID exposed;
+* no raw JSON persistence;
+* no DB transaction around HTTP call;
+* no blind uncertain POST retry;
+* no manual card payment code;
+* no receipt upload;
+* no operator approval;
+* no provisioning event;
+* no Telegram/QR/subscription code;
+* no field injection;
+* no service locator.
+
+Extend existing architecture tests if present.
+
+---
+
+# 48. Documentation
+
+Create:
+
+docs/payment/zarinpal-payment.md
+
+Document:
+
+* official API contract and verification date;
+* request endpoint;
+* verify endpoint;
+* StartPay redirect;
+* configuration;
+* canonical local currency;
+* gateway amount conversion;
+* Payment versus attempt lifecycle;
+* initialization idempotency;
+* callback security;
+* why callback is not trusted;
+* server-to-server Verify;
+* success and already-verified code handling;
+* duplicate callback behavior;
+* concurrent verification;
+* transaction boundaries;
+* uncertain request behavior;
+* uncertain verify behavior;
+* error mapping;
+* masked sensitive fields;
+* internal initialization endpoint;
+* browser callback behavior;
+* no provisioning yet;
+* Task 29 manual payment separation.
+
+Include Mermaid diagrams for:
+
+* successful initialization;
+* browser redirect and callback;
+* successful Verify;
+* cancelled callback;
+* duplicate callback;
+* timeout then reconciliation;
+* concurrent callbacks.
+
+Update:
+
+docs/payment/payment-foundation.md
+
+only where Task 28 refines the provider strategy.
+
+---
+
+# 49. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/payment/zarinpal/
+ZarinpalPaymentAttempt.java
+ZarinpalAttemptStatus.java
+ZarinpalCallbackOutcome.java
+
+src/main/java/com/parazit/panel/domain/payment/zarinpal/repository/
+ZarinpalPaymentAttemptRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/payment/zarinpal/
+ZarinpalGatewayClient.java
+
+src/main/java/com/parazit/panel/application/port/in/payment/zarinpal/
+InitializeZarinpalPaymentUseCase.java
+HandleZarinpalCallbackUseCase.java
+
+src/main/java/com/parazit/panel/application/payment/zarinpal/model/
+ZarinpalCreateRequest.java
+ZarinpalCreateResponse.java
+ZarinpalVerifyRequest.java
+ZarinpalVerifyResponse.java
+
+src/main/java/com/parazit/panel/application/payment/zarinpal/command/
+InitializeZarinpalPaymentCommand.java
+HandleZarinpalCallbackCommand.java
+
+src/main/java/com/parazit/panel/application/payment/zarinpal/result/
+InitializeZarinpalPaymentResult.java
+HandleZarinpalCallbackResult.java
+
+src/main/java/com/parazit/panel/application/payment/zarinpal/
+ZarinpalPaymentProcessor.java
+ZarinpalAmountConverter.java
+InitializeZarinpalPaymentService.java
+VerifyZarinpalPaymentService.java
+PrepareZarinpalRequestTransaction.java
+CompleteZarinpalRequestTransaction.java
+PrepareZarinpalVerificationTransaction.java
+CompleteZarinpalVerificationTransaction.java
+
+src/main/java/com/parazit/panel/infrastructure/payment/zarinpal/
+RestClientZarinpalGatewayClient.java
+ZarinpalRestClientConfiguration.java
+
+src/main/java/com/parazit/panel/infrastructure/payment/zarinpal/dto/
+ZarinpalRequestRemoteDto.java
+ZarinpalVerifyRemoteDto.java
+ZarinpalResponseEnvelopeRemoteDto.java
+ZarinpalErrorRemoteDto.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/payment/zarinpal/
+SpringDataZarinpalPaymentAttemptRepository.java
+ZarinpalPaymentAttemptRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/payment/zarinpal/
+ZarinpalPaymentController.java
+ZarinpalCallbackController.java
+InitializeZarinpalPaymentRequest.java
+InitializeZarinpalPaymentResponse.java
+ZarinpalPaymentApiMapper.java
+
+src/main/java/com/parazit/panel/config/properties/
+ZarinpalProperties.java
+
+src/main/resources/db/migration/
+V10__create_zarinpal_payment_attempts.sql
+or the actual next migration
+
+src/test/resources/payment/zarinpal/
+request-success.json
+request-error.json
+request-malformed.json
+verify-success.json
+verify-already-verified.json
+verify-failed.json
+verify-malformed.json
+
+src/test/java/com/parazit/panel/domain/payment/zarinpal/
+ZarinpalPaymentAttemptTest.java
+
+src/test/java/com/parazit/panel/application/payment/zarinpal/
+ZarinpalAmountConverterTest.java
+InitializeZarinpalPaymentServiceTest.java
+VerifyZarinpalPaymentServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/payment/zarinpal/
+RestClientZarinpalGatewayClientIntegrationTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/payment/zarinpal/
+ZarinpalPaymentAttemptRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/payment/zarinpal/
+ZarinpalPaymentFlowIntegrationTest.java
+ZarinpalPaymentUncertainResultIntegrationTest.java
+ConcurrentZarinpalCallbackIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/payment/zarinpal/
+ZarinpalPaymentControllerTest.java
+ZarinpalCallbackControllerTest.java
+
+docs/payment/
+zarinpal-payment.md
+
+Adapt packages and migration number to existing project conventions.
+
+---
+
+# 50. Verification commands
+
+Run the commands supported by the current build system.
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* properties tests pass;
+* amount conversion tests pass;
+* domain attempt tests pass;
+* gateway mock tests pass;
+* initialization tests pass;
+* callback tests pass;
+* verification tests pass;
+* uncertain-result tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts with Zarinpal disabled;
+* application starts with valid test configuration;
+* no real gateway is called automatically;
+* callback alone never approves Payment;
+* exact persisted amount is used in Verify;
+* repeated callback does not approve twice;
+* cancellation does not overwrite approval;
+* no VPN provisioning occurs;
+* no manual card payment code was added;
+* no merchant ID or production gateway data was committed;
+* no tests were disabled.
+
+---
+
+# 51. Optional manual verification
+
+Do not run automatically.
+
+Use only a Zarinpal test/sandbox mechanism if currently officially supported, or a dedicated low-value test transaction under explicit user control.
+
+Manual flow:
+
+1. Configure merchant ID through environment variables.
+2. Create a test Order and ZARINPAL Payment.
+3. Initialize Payment.
+4. Open returned StartPay URL.
+5. Complete or cancel the transaction.
+6. Verify callback.
+7. Verify:
+
+   * authority stored;
+   * exact amount used;
+   * Payment approved only after Verify;
+   * reference ID stored;
+   * callback replay is idempotent.
+8. Confirm no VPN client is provisioned yet.
+
+Do not commit:
+
+merchant ID
+
+authority
+
+reference ID
+
+card information
+
+callback output
+
+screenshots containing sensitive information
+
+---
+
+# 52. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Official Zarinpal contract and source date
+3. Currency-unit decision
+4. Zarinpal attempt aggregate design
+5. Payment-state changes
+6. Request idempotency strategy
+7. Callback security design
+8. Verification strategy
+9. Transaction-boundary design
+10. Concurrency strategy
+11. Uncertain-result strategy
+12. Planned files to create
+13. Planned files to modify
+14. Migration and security risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Configuration contract
+6. Amount conversion behavior
+7. Initialization behavior
+8. Callback behavior
+9. Verification behavior
+10. Success/already-verified code handling
+11. Idempotency behavior
+12. Transaction boundaries
+13. Concurrency behavior
+14. Uncertain-result handling
+15. API contracts
+16. Unit-test results
+17. Integration-test results
+18. Concurrency-test results
+19. Flyway and Hibernate results
+20. Build result
+21. Commands executed
+22. Remaining issues
+23. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(payment): implement Zarinpal request callback and verification
+
+Stop after completing Task 28.
+
+Do not begin Task 29.
+

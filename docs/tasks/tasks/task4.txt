@@ -1,0 +1,87 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the project.
+
+Task 4 – Configuration System
+
+Requirements:
+
+1. Configure Spring Profiles:
+
+* local
+* dev
+* prod
+
+2. Create the following configuration files:
+
+src/main/resources/application.yml
+src/main/resources/application-local.yml
+src/main/resources/application-dev.yml
+src/main/resources/application-prod.yml
+
+3. Configure:
+
+* Server port
+* Application name
+* Jackson
+* Logging
+* Spring MVC
+* Actuator
+* PostgreSQL datasource
+* Flyway
+* Redis
+
+4. Enable actuator endpoints:
+
+* health
+* info
+* metrics
+
+5. Configure graceful shutdown.
+
+6. Enable virtual threads if supported by the current Spring Boot version.
+
+7. Create a type-safe configuration package:
+
+com.parazit.panel.config.properties
+
+8. Create @ConfigurationProperties classes for:
+
+DatabaseProperties
+RedisProperties
+TelegramProperties
+PanelProperties
+PaymentProperties
+
+Only define the configuration classes.
+Do NOT implement any services.
+
+9. Enable ConfigurationProperties scanning.
+
+10. Create an .env.example file containing:
+
+DATABASE_URL
+DATABASE_USERNAME
+DATABASE_PASSWORD
+
+REDIS_HOST
+REDIS_PORT
+
+BOT_TOKEN
+
+PANEL_URL
+PANEL_USERNAME
+PANEL_PASSWORD
+
+PAYMENT_MERCHANT_ID
+
+11. Use environment variables wherever appropriate.
+
+12. Verify that the application starts successfully.
+
+13. Do not implement business logic.
+
+14. Show every created or modified file before applying changes.
+
+15. Wait for approval before continuing.
+

@@ -1,0 +1,910 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 13 – User Settings
+
+Goal:
+
+Implement a dedicated User Settings module that stores and manages user-specific preferences independently from the core User profile.
+
+The settings foundation must support future Telegram notifications, renewal reminders, usage alerts, and other user preferences without polluting the User aggregate.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code and architecture from Tasks 1–12.
+* Reuse BaseEntity, User, UserRepository, repository abstractions, Flyway, logging, exception handling, validation, dependency injection, and test infrastructure.
+* Do not implement Telegram handlers yet.
+* Do not connect to Telegram API.
+* Do not implement referral, plans, payments, subscriptions, 3x-ui, or admin features.
+* Do not implement actual reminder jobs in this task.
+* Do not implement notification delivery.
+* Do not expose JPA entities directly through APIs.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Do not add unnecessary dependencies.
+* Use Java 21.
+* Use Flyway for schema changes.
+* Stop after completing Task 13.
+* Do not begin Task 14.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* current User aggregate;
+* current language design from Task 12;
+* existing repository abstractions;
+* BaseEntity and auditing strategy;
+* exception conventions;
+* API DTO conventions;
+* transaction boundaries;
+* Flyway migration versions;
+* current test infrastructure;
+* any settings-like fields already stored on User.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture decisions
+
+5. Risks and migration concerns
+
+6. Settings aggregate design
+
+Create a dedicated entity:
+
+UserSettings
+
+Suggested package:
+
+com.parazit.panel.domain.user.settings
+
+The entity should extend BaseEntity.
+
+Required fields:
+
+UUID id inherited from BaseEntity
+
+UUID userId
+
+boolean notificationsEnabled
+
+boolean renewalRemindersEnabled
+
+boolean usageAlertsEnabled
+
+Integer usageAlertThresholdPercent
+
+Instant createdAt inherited from BaseEntity
+
+Instant updatedAt inherited from BaseEntity
+
+Design rules:
+
+* One settings record per user.
+* userId must be unique and required.
+* Do not create a bidirectional JPA relationship.
+* Prefer storing userId as UUID instead of @OneToOne unless there is a strong existing architectural reason.
+* Keep User and UserSettings as separate persistence concerns.
+* Do not add Telegram chat settings yet.
+* Do not add payment preferences.
+* Do not add theme, timezone, or locale unless already required.
+* Keep the aggregate focused.
+
+Default values:
+
+notificationsEnabled = true
+
+renewalRemindersEnabled = true
+
+usageAlertsEnabled = true
+
+usageAlertThresholdPercent = 80
+
+3. Domain invariants
+
+The following invariants must hold:
+
+* usageAlertThresholdPercent must be between 1 and 100.
+* usageAlertThresholdPercent must not be null.
+* userId must not be null.
+* If notificationsEnabled is false, reminder and alert preferences may remain stored but no delivery logic is implemented in this task.
+* Same-value updates must be idempotent.
+* Settings must not modify User status, blocked state, language, or profile data.
+
+Create a controlled factory:
+
+UserSettings.createDefault(UUID userId)
+
+Create focused mutation methods:
+
+enableNotifications()
+
+disableNotifications()
+
+setRenewalRemindersEnabled(boolean enabled)
+
+setUsageAlertsEnabled(boolean enabled)
+
+changeUsageAlertThresholdPercent(int thresholdPercent)
+
+updatePreferences(
+boolean notificationsEnabled,
+boolean renewalRemindersEnabled,
+boolean usageAlertsEnabled,
+int usageAlertThresholdPercent
+)
+
+Avoid unrestricted public setters.
+
+4. Persistence mapping
+
+Map UserSettings as a PostgreSQL-backed JPA entity.
+
+Suggested table:
+
+user_settings
+
+Requirements:
+
+* Use @Entity.
+* Use @Table.
+* Use snake_case column names.
+* Add unique constraint for user_id.
+* Add index for user_id.
+* Use UUID for user_id.
+* Use BOOLEAN columns.
+* Use INTEGER for usage_alert_threshold_percent.
+* Add database check constraint for threshold between 1 and 100.
+* created_at and updated_at must use TIMESTAMPTZ.
+* Do not use eager relationships.
+* Do not add foreign key cascading deletes unless explicitly justified.
+* Add a foreign key to users(id) if compatible with the current schema and architecture.
+* Prefer ON DELETE CASCADE only if deleting a user is intended to remove settings automatically.
+* Explain the chosen delete behavior before implementation.
+
+5. Flyway migration
+
+Create the next migration version.
+
+Suggested name:
+
+V3__create_user_settings_table.sql
+
+Adjust the version based on existing migrations.
+
+The migration must:
+
+* create user_settings;
+* define UUID primary key;
+* define user_id UUID not null;
+* add unique constraint on user_id;
+* add foreign key to users(id);
+* define all boolean settings;
+* define threshold;
+* define created_at;
+* define updated_at;
+* add index on user_id;
+* add threshold check constraint;
+* use defaults only if they align with domain creation behavior;
+* remain compatible with Hibernate validation.
+
+Do not rely on Hibernate to create the table.
+
+6. Repository abstraction
+
+Create:
+
+UserSettingsRepository
+
+Suggested package:
+
+com.parazit.panel.domain.user.settings.repository
+
+Requirements:
+
+* Extend UuidRepository<UserSettings>.
+* Add:
+
+Optional<UserSettings> findByUserId(UUID userId)
+
+boolean existsByUserId(UUID userId)
+
+* Keep it independent from Spring Data.
+* Do not expose JpaRepository, Page, Pageable, or Specification.
+* Do not add future query methods.
+
+7. Spring Data repository
+
+Create:
+
+SpringDataUserSettingsRepository
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.user.settings
+
+Requirements:
+
+* Extend SpringDataUuidRepository<UserSettings>.
+* Add derived methods:
+
+findByUserId
+
+existsByUserId
+
+* Keep it inside infrastructure.
+
+8. Repository adapter
+
+Create:
+
+UserSettingsRepositoryAdapter
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.user.settings
+
+Requirements:
+
+* Extend JpaRepositoryAdapter<UserSettings, UUID>.
+* Implement UserSettingsRepository.
+* Delegate specific methods.
+* Use constructor injection.
+* Annotate concrete adapter appropriately.
+* Do not add business logic.
+* Do not catch generic persistence exceptions.
+
+9. Settings creation strategy
+
+User settings must exist for every registered user.
+
+Choose and implement one clear strategy.
+
+Preferred strategy:
+
+* RegisterUserService ensures default UserSettings exists after a new user is created.
+* Existing users without settings receive defaults lazily when settings are requested or updated.
+
+Requirements:
+
+* Registration remains idempotent.
+* Existing users must not receive duplicate settings.
+* Database unique constraint is the final authority.
+* Do not publish events unless the project already has an event pattern.
+* Do not create a complex event-driven mechanism for this task.
+* Explain the chosen strategy before implementation.
+
+A valid flow:
+
+New user registration:
+
+1. create User;
+2. save User;
+3. create default UserSettings;
+4. save settings;
+5. return registration result.
+
+Existing user registration:
+
+1. load User;
+
+2. ensure settings exist;
+
+3. create defaults only if missing;
+
+4. preserve existing settings.
+
+5. Concurrency handling
+
+Handle concurrent default-settings creation.
+
+Requirements:
+
+* Do not rely only on existsByUserId.
+* Preserve unique user_id constraint.
+* Concurrent attempts must not create duplicate rows.
+* Reuse a technically correct duplicate-recovery strategy consistent with Task 10.
+* Do not use synchronized or JVM-only locks.
+* Do not catch generic Exception.
+* Do not expose database constraint names.
+
+11. Application use cases
+
+Create input ports:
+
+GetUserSettingsUseCase
+
+UpdateUserSettingsUseCase
+
+Suggested package:
+
+com.parazit.panel.application.port.in.user.settings
+
+Methods:
+
+UserSettingsResult getSettings(GetUserSettingsQuery query)
+
+UserSettingsResult updateSettings(UpdateUserSettingsCommand command)
+
+12. Application input models
+
+Create:
+
+GetUserSettingsQuery
+
+Field:
+
+Long telegramUserId
+
+Create:
+
+UpdateUserSettingsCommand
+
+Fields:
+
+Long telegramUserId
+
+boolean notificationsEnabled
+
+boolean renewalRemindersEnabled
+
+boolean usageAlertsEnabled
+
+Integer usageAlertThresholdPercent
+
+Suggested packages:
+
+com.parazit.panel.application.user.settings.query
+
+com.parazit.panel.application.user.settings.command
+
+Prefer Java records.
+
+Requirements:
+
+* telegramUserId is required and positive.
+* threshold is required.
+* threshold must be between 1 and 100.
+* Do not include userId directly in public API input.
+* Do not depend on Telegram SDK types.
+* Keep records free of business logic.
+
+13. Result model
+
+Create:
+
+UserSettingsResult
+
+Suggested package:
+
+com.parazit.panel.application.user.settings.result
+
+Fields:
+
+UUID settingsId
+
+UUID userId
+
+Long telegramUserId
+
+boolean notificationsEnabled
+
+boolean renewalRemindersEnabled
+
+boolean usageAlertsEnabled
+
+int usageAlertThresholdPercent
+
+Instant createdAt
+
+Instant updatedAt
+
+Requirements:
+
+* Immutable.
+* Do not expose entity.
+* Do not include unrelated profile data.
+* Preserve naming consistency.
+
+14. Get settings service
+
+Create:
+
+GetUserSettingsService
+
+Suggested package:
+
+com.parazit.panel.application.user.settings
+
+Requirements:
+
+* Implement GetUserSettingsUseCase.
+* Depend on:
+
+UserRepository
+UserSettingsRepository
+
+* Use constructor injection.
+* Use a transaction appropriate for lazy default creation.
+* Find User by telegramUserId.
+* Throw UserNotFoundException when absent.
+* Load settings by userId.
+* If missing, create and persist defaults.
+* Return UserSettingsResult.
+* Do not change lastInteractionAt merely because settings were read.
+* Do not modify User.
+
+Because lazy creation may write, do not mark the whole operation read-only if it can create defaults.
+
+15. Update settings service
+
+Create:
+
+UpdateUserSettingsService
+
+Suggested package:
+
+com.parazit.panel.application.user.settings
+
+Requirements:
+
+* Implement UpdateUserSettingsUseCase.
+* Depend on:
+
+UserRepository
+UserSettingsRepository
+SystemClockPort only if needed by current design
+
+* Use constructor injection.
+* Use @Transactional.
+* Find User by telegramUserId.
+* Throw UserNotFoundException when absent.
+* Load or create default settings.
+* Apply explicit domain mutation.
+* Save settings.
+* Return UserSettingsResult.
+
+Behavior:
+
+* Updating settings is idempotent.
+* Same-value update succeeds.
+* User profile data remains unchanged.
+* User language remains unchanged.
+* User status remains unchanged.
+* blocked remains unchanged.
+* Invalid threshold is rejected.
+
+16. API endpoints
+
+Create internal endpoints.
+
+Suggested controller:
+
+UserSettingsController
+
+Suggested package:
+
+com.parazit.panel.api.internal.user.settings
+
+Endpoints:
+
+GET /internal/users/{telegramUserId}/settings
+
+PUT /internal/users/{telegramUserId}/settings
+
+PUT request example:
+
+{
+"notificationsEnabled": true,
+"renewalRemindersEnabled": true,
+"usageAlertsEnabled": true,
+"usageAlertThresholdPercent": 80
+}
+
+Response example:
+
+{
+"settingsId": "uuid",
+"userId": "uuid",
+"telegramUserId": 123456789,
+"notificationsEnabled": true,
+"renewalRemindersEnabled": true,
+"usageAlertsEnabled": true,
+"usageAlertThresholdPercent": 80,
+"createdAt": "2026-07-10T12:00:00Z",
+"updatedAt": "2026-07-10T12:00:00Z"
+}
+
+Requirements:
+
+* Use dedicated API request and response DTOs.
+* Do not expose entity.
+* GET returns 200.
+* PUT returns 200.
+* Missing user returns 404.
+* Invalid threshold returns 400.
+* Do not add authentication yet.
+* Mark endpoints internal in documentation.
+
+17. API DTOs
+
+Create:
+
+UpdateUserSettingsRequest
+
+Fields:
+
+Boolean notificationsEnabled
+
+Boolean renewalRemindersEnabled
+
+Boolean usageAlertsEnabled
+
+Integer usageAlertThresholdPercent
+
+Validation:
+
+@NotNull on all fields
+
+@Min(1)
+
+@Max(100)
+
+Create:
+
+UserSettingsResponse
+
+Use fields from UserSettingsResult.
+
+Prefer Java records.
+
+18. API mapper
+
+Create:
+
+UserSettingsApiMapper
+
+Requirements:
+
+* Convert request and path variable to UpdateUserSettingsCommand.
+* Convert path variable to GetUserSettingsQuery.
+* Convert result to response.
+* Use explicit manual mapping.
+* Do not add MapStruct unless already present.
+* Keep mapping out of controllers.
+
+19. Error handling
+
+Use existing standard error responses.
+
+Handle:
+
+* missing user → 404
+* invalid threshold → 400
+* malformed JSON → 400
+* unexpected persistence failure → 500
+
+Requirements:
+
+* traceId present;
+* no stack trace in API;
+* no SQL details;
+* no constraint names;
+* no credentials.
+
+Create a focused settings exception only if existing exception design requires it.
+
+20. Logging
+
+Requirements:
+
+* Log settings creation at INFO or DEBUG.
+* Log settings updates at INFO.
+* Include:
+
+userId
+telegramUserId
+settingsId
+traceId through MDC
+
+* Avoid logging full personal data.
+* Logging boolean preference changes is acceptable.
+* Do not log request bodies.
+* Concurrent duplicate recovery should be expected and not logged as an application failure.
+
+21. Domain unit tests
+
+Create pure unit tests for UserSettings.
+
+Test:
+
+* default creation;
+* default values;
+* null userId rejected;
+* threshold below 1 rejected;
+* threshold above 100 rejected;
+* enable notifications;
+* disable notifications;
+* renewal reminder change;
+* usage alert change;
+* threshold change;
+* full preference update;
+* same-value update;
+* unrelated state is absent from aggregate.
+
+Do not start Spring context.
+
+22. Application service unit tests
+
+GetUserSettingsService:
+
+* existing user and existing settings;
+* existing user without settings creates defaults;
+* missing user throws UserNotFoundException;
+* default settings saved once;
+* user is not modified.
+
+UpdateUserSettingsService:
+
+* updates existing settings;
+* creates defaults when missing;
+* rejects invalid threshold;
+* preserves User fields;
+* same-value update succeeds;
+* repository interactions are correct.
+
+Use fakes or Mockito according to project convention.
+
+23. Repository integration tests
+
+Use PostgreSQL Testcontainers.
+
+Test:
+
+* save settings;
+* generated UUID;
+* auditing;
+* findByUserId;
+* existsByUserId;
+* unique user_id constraint;
+* threshold check constraint;
+* boolean persistence;
+* update persistence;
+* foreign key enforcement;
+* delete behavior chosen in migration;
+* Hibernate validation;
+* Flyway migration success.
+
+24. Registration integration tests
+
+Update or extend registration integration tests.
+
+Verify:
+
+* new user registration creates default settings;
+* repeated registration does not create duplicate settings;
+* existing settings are preserved;
+* missing settings for an existing user are recreated lazily;
+* concurrent registration still creates one user and one settings row.
+
+25. Settings integration tests
+
+Test:
+
+* GET creates defaults when missing;
+* GET returns existing settings;
+* PUT updates settings;
+* reload returns updated values;
+* invalid threshold rejected;
+* missing user returns not found;
+* User profile and language remain unchanged;
+* audit timestamps update correctly;
+* duplicate settings never occur.
+
+26. Controller tests
+
+GET tests:
+
+* returns 200;
+* returns defaults;
+* missing user returns 404;
+* traceId included in error response.
+
+PUT tests:
+
+* valid update returns 200;
+* all booleans persisted;
+* threshold 1 accepted;
+* threshold 100 accepted;
+* threshold 0 rejected;
+* threshold 101 rejected;
+* null field rejected;
+* malformed JSON rejected;
+* response Content-Type is application/json;
+* entity internals are not exposed.
+
+27. Architecture rules
+
+Verify:
+
+* UserSettings repository interface does not import Spring Data.
+* Application services depend on repository interfaces.
+* API depends on input ports.
+* Domain does not import API or infrastructure.
+* No Spring Data repository is injected into controller.
+* No Telegram SDK appears.
+* No reminder job is implemented.
+* No notification delivery is implemented.
+* No field injection exists.
+* User aggregate is not polluted with preference fields.
+
+28. Documentation
+
+Create:
+
+docs/use-cases/user-settings.md
+
+Document:
+
+* purpose of UserSettings;
+* separation from User profile;
+* default values;
+* field meanings;
+* validation rules;
+* one-settings-record-per-user rule;
+* settings creation strategy;
+* registration integration;
+* concurrency behavior;
+* GET and PUT API contracts;
+* transaction boundaries;
+* future reminder and notification integration;
+* deferred settings not included in this task.
+
+Include Mermaid sequence diagrams for:
+
+* lazy settings creation;
+* settings update;
+* new-user registration with default settings.
+
+29. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/user/settings/
+UserSettings.java
+
+src/main/java/com/parazit/panel/domain/user/settings/repository/
+UserSettingsRepository.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/user/settings/
+SpringDataUserSettingsRepository.java
+UserSettingsRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/application/port/in/user/settings/
+GetUserSettingsUseCase.java
+UpdateUserSettingsUseCase.java
+
+src/main/java/com/parazit/panel/application/user/settings/query/
+GetUserSettingsQuery.java
+
+src/main/java/com/parazit/panel/application/user/settings/command/
+UpdateUserSettingsCommand.java
+
+src/main/java/com/parazit/panel/application/user/settings/result/
+UserSettingsResult.java
+
+src/main/java/com/parazit/panel/application/user/settings/
+GetUserSettingsService.java
+UpdateUserSettingsService.java
+
+src/main/java/com/parazit/panel/api/internal/user/settings/
+UserSettingsController.java
+UpdateUserSettingsRequest.java
+UserSettingsResponse.java
+UserSettingsApiMapper.java
+
+src/main/resources/db/migration/
+V3__create_user_settings_table.sql
+
+src/test/java/com/parazit/panel/domain/user/settings/
+UserSettingsTest.java
+
+src/test/java/com/parazit/panel/application/user/settings/
+GetUserSettingsServiceTest.java
+UpdateUserSettingsServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/user/settings/
+UserSettingsRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/user/settings/
+UserSettingsIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/user/settings/
+UserSettingsControllerTest.java
+
+docs/use-cases/
+user-settings.md
+
+Adapt names to existing project conventions where necessary.
+
+30. Verification commands
+
+Run the appropriate build commands.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile and PostgreSQL.
+
+Manually verify:
+
+GET /internal/users/{telegramUserId}/settings
+
+PUT /internal/users/{telegramUserId}/settings
+
+Confirm:
+
+* all previous tests pass;
+* UserSettings domain tests pass;
+* repository tests pass;
+* registration tests pass;
+* settings integration tests pass;
+* controller tests pass;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* one settings row exists per user;
+* no Telegram integration was implemented;
+* no reminder jobs were implemented;
+* no credentials were committed.
+
+31. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Settings aggregate design decision
+3. Foreign-key and delete behavior decision
+4. Default-settings creation strategy
+5. Planned files to create
+6. Planned files to modify
+7. Risks and concurrency concerns
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Default settings behavior
+6. Registration integration
+7. API contract
+8. Test results
+9. Build result
+10. Commands executed
+11. Remaining issues
+12. Suggested commit message
+
+Use this commit message unless the repository convention requires another format:
+
+feat(user): add user settings management
+
+Stop after completing Task 13.
+
+Do not start Task 14.
+

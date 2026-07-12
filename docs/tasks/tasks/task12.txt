@@ -1,0 +1,667 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 12 – User Language Management
+
+Goal:
+
+Implement a dedicated user-language management use case so the application can read and change a user's preferred language independently from the general profile flow.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all code and architecture from Tasks 1–11.
+* Reuse the User aggregate, UserRepository, SystemClockPort, logging, validation, exception handling, persistence, DI, and existing profile logic.
+* Do not implement Telegram handlers yet.
+* Do not connect to the Telegram API.
+* Do not implement referral, plans, payments, subscriptions, 3x-ui, or admin functionality.
+* Do not expose JPA entities.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not add unnecessary dependencies.
+* Use Java 21.
+* Stop after completing Task 12.
+* Do not begin Task 13.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* UserLanguage enum;
+* current User language behavior;
+* RegisterUser language resolution;
+* User Profile language update flow;
+* existing exception conventions;
+* current API DTO and mapper conventions;
+* transaction boundaries;
+* current test infrastructure;
+* any duplicated language logic.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture decisions
+
+5. Duplication or refactoring concerns
+
+6. Language use-case design
+
+Create two dedicated input ports.
+
+Suggested package:
+
+com.parazit.panel.application.port.in.user
+
+Create:
+
+GetUserLanguageUseCase
+
+Method:
+
+UserLanguageResult getLanguage(GetUserLanguageQuery query)
+
+Create:
+
+ChangeUserLanguageUseCase
+
+Method:
+
+UserLanguageResult changeLanguage(ChangeUserLanguageCommand command)
+
+Requirements:
+
+* Keep interfaces independent from infrastructure.
+* Do not use Spring Data types.
+* Do not expose User entity.
+* Keep each interface focused.
+* Do not combine unrelated profile operations.
+
+3. Application input models
+
+Create:
+
+GetUserLanguageQuery
+
+Fields:
+
+Long telegramUserId
+
+Create:
+
+ChangeUserLanguageCommand
+
+Fields:
+
+Long telegramUserId
+
+String languageCode
+
+Suggested packages:
+
+com.parazit.panel.application.user.query
+com.parazit.panel.application.user.command
+
+Prefer Java records.
+
+Requirements:
+
+* telegramUserId is required and positive.
+* languageCode is required for changing language.
+* Commands must not depend on Telegram SDK classes.
+* Commands must not contain persistence annotations.
+* Keep business rules out of the records.
+
+4. Result model
+
+Create:
+
+UserLanguageResult
+
+Suggested package:
+
+com.parazit.panel.application.user.result
+
+Fields:
+
+UUID userId
+
+Long telegramUserId
+
+UserLanguage language
+
+Instant updatedAt
+
+Requirements:
+
+* Immutable.
+* Do not expose User entity.
+* Do not include unrelated profile data.
+* Use domain enum for language.
+* updatedAt should reflect the persisted user update timestamp.
+
+5. Language code resolver
+
+Reuse the existing UserLanguageResolver from Task 10.
+
+Review and refactor it if needed.
+
+Required behavior:
+
+* "fa", "fa-IR", and codes starting with "fa" map to FA.
+* "en", "en-US", and codes starting with "en" map to EN.
+* Matching is case-insensitive.
+* Trim input.
+* For registration:
+
+  * null, blank, or unsupported values default to FA.
+* For explicit user language changes:
+
+  * null, blank, or unsupported values must be rejected.
+
+Do not create duplicate resolvers.
+
+Provide separate methods if needed, for example:
+
+UserLanguage resolveOrDefault(String languageCode)
+
+UserLanguage resolveRequired(String languageCode)
+
+Choose names consistent with the existing codebase.
+
+6. User-not-found behavior
+
+Create or reuse:
+
+UserNotFoundException
+
+Requirements:
+
+* It should represent a missing application/domain resource.
+* It must not expose database details.
+* It should map to HTTP 404.
+* Include a safe identifier such as telegramUserId in the message.
+* Do not expose stack traces in API responses.
+
+Integrate it into the existing GlobalExceptionHandler.
+
+7. Get language service
+
+Create:
+
+GetUserLanguageService
+
+Suggested package:
+
+com.parazit.panel.application.user
+
+Requirements:
+
+* Implement GetUserLanguageUseCase.
+* Depend on UserRepository.
+* Use constructor injection.
+* Use a read-only transaction if consistent with current conventions.
+* Find the user by telegramUserId.
+* Throw UserNotFoundException when absent.
+* Return UserLanguageResult.
+* Do not update lastInteractionAt merely because language was read.
+* Do not save the user during read operations.
+
+8. Change language service
+
+Create:
+
+ChangeUserLanguageService
+
+Suggested package:
+
+com.parazit.panel.application.user
+
+Requirements:
+
+* Implement ChangeUserLanguageUseCase.
+* Depend on:
+
+UserRepository
+UserLanguageResolver
+SystemClockPort
+
+* Use constructor injection.
+* Define the write transaction at the application-service level.
+* Validate the language code using strict resolution.
+* Load the user by telegramUserId.
+* Throw UserNotFoundException when absent.
+* Call the domain method:
+
+user.changeLanguage(...)
+
+* Record the interaction time only if consistent with the current User aggregate design.
+* Save through UserRepository if required.
+* Return UserLanguageResult.
+
+Behavior:
+
+* Changing to a different supported language succeeds.
+* Changing to the same language is idempotent.
+* Same-language requests must not fail.
+* Do not alter username, profile names, status, or blocked state.
+* Do not reactivate or unblock users.
+* Do not use the registration defaulting rule for explicit changes.
+
+9. Domain behavior
+
+Review User.changeLanguage.
+
+Requirements:
+
+* Reject null language.
+* Avoid unrelated mutations.
+* Support idempotent same-language calls.
+* Do not expose a public generic setter.
+* Preserve all existing invariants.
+
+If interaction time should be updated during a language change, use an explicit domain method or application orchestration rather than hidden side effects.
+
+10. API endpoints
+
+Create dedicated internal endpoints.
+
+Suggested controller:
+
+UserLanguageController
+
+Suggested package:
+
+com.parazit.panel.api.internal.user
+
+Endpoints:
+
+GET /internal/users/{telegramUserId}/language
+
+PUT /internal/users/{telegramUserId}/language
+
+PUT request example:
+
+{
+"languageCode": "en"
+}
+
+Response example:
+
+{
+"userId": "uuid",
+"telegramUserId": 123456789,
+"language": "EN",
+"updatedAt": "2026-07-10T12:00:00Z"
+}
+
+Requirements:
+
+* Use dedicated API DTOs.
+* Do not reuse application command/result directly as HTTP models.
+* Do not expose User entity.
+* GET returns HTTP 200.
+* PUT returns HTTP 200.
+* Missing user returns HTTP 404.
+* Invalid or unsupported language returns HTTP 400.
+* Do not add authentication in this task.
+* Mark endpoints internal in documentation.
+
+11. API DTOs
+
+Create:
+
+ChangeUserLanguageRequest
+
+Fields:
+
+String languageCode
+
+Validation:
+
+@NotBlank
+@Size(max = 16)
+
+Create:
+
+UserLanguageResponse
+
+Fields:
+
+UUID userId
+
+Long telegramUserId
+
+UserLanguage language
+
+Instant updatedAt
+
+Prefer Java records.
+
+12. API mapper
+
+Create or extend a focused mapper.
+
+Suggested:
+
+UserLanguageApiMapper
+
+Requirements:
+
+* Convert path variable and request to ChangeUserLanguageCommand.
+* Convert query path variable to GetUserLanguageQuery.
+* Convert UserLanguageResult to response.
+* Use explicit manual mapping.
+* Do not add MapStruct unless already present.
+* Keep mapping out of controllers.
+
+13. Conflict with Task 11 profile flow
+
+Review Task 11's profile language update capability.
+
+Choose one of these designs:
+
+Preferred option:
+
+* Keep UpdateUserProfile focused on profile names.
+* Move language changes exclusively to Task 12.
+* Remove language from UpdateUserProfileCommand and its API request.
+* Preserve backward compatibility only if an API contract has already been intentionally published.
+
+Alternative option:
+
+* Allow both flows but make both delegate to the same language policy and domain method.
+
+Avoid two independent implementations of language validation.
+
+Explain the decision before implementation.
+
+14. Logging
+
+Requirements:
+
+* Log successful language changes at INFO.
+* Same-language no-op may be logged at DEBUG.
+* Include:
+
+userId
+telegramUserId
+oldLanguage
+newLanguage
+traceId through MDC
+
+* Do not log full request bodies.
+* Do not log unrelated personal data.
+* Missing users may be logged at DEBUG or WARN based on existing conventions.
+* Unexpected errors must include stack traces in server logs only.
+
+15. Unit tests for language resolver
+
+Extend or update UserLanguageResolver tests.
+
+Test registration/default resolution:
+
+* fa
+* FA
+* fa-IR
+* en
+* EN
+* en-US
+* null defaults to FA
+* blank defaults to FA
+* unsupported defaults to FA
+
+Test strict resolution:
+
+* fa succeeds
+* fa-IR succeeds
+* en succeeds
+* en-US succeeds
+* null rejected
+* blank rejected
+* unsupported rejected
+* trimmed input succeeds
+* matching is case-insensitive
+
+16. Unit tests for GetUserLanguageService
+
+Test:
+
+* existing user returns correct language;
+* result contains user ID and Telegram ID;
+* missing user throws UserNotFoundException;
+* repository save is never called;
+* no interaction timestamp is changed;
+* no Spring context is required.
+
+17. Unit tests for ChangeUserLanguageService
+
+Test:
+
+* FA to EN succeeds;
+* EN to FA succeeds;
+* same-language change succeeds;
+* unsupported language rejected;
+* blank language rejected;
+* missing user throws UserNotFoundException;
+* blocked user remains blocked;
+* suspended user remains suspended;
+* profile fields remain unchanged;
+* SystemClockPort is used if interaction time is updated;
+* repository interactions are correct.
+
+Use fixed Instants.
+
+18. Integration tests
+
+Use PostgreSQL Testcontainers.
+
+Test:
+
+* language can be read after registration;
+* language change persists;
+* reload returns new language;
+* same-language update is idempotent;
+* missing user behavior;
+* blocked and status fields are preserved;
+* profile fields remain unchanged;
+* audit updatedAt changes after a real language update;
+* all Flyway migrations succeed;
+* Hibernate validation succeeds.
+
+If same-language changes intentionally avoid persistence, verify updatedAt behavior accordingly and document it.
+
+19. Controller tests
+
+Test GET:
+
+* existing user returns 200;
+* correct JSON contract;
+* missing user returns 404;
+* error response contains traceId.
+
+Test PUT:
+
+* supported language returns 200;
+* lowercase code accepted;
+* regional language code accepted;
+* blank language returns 400;
+* unsupported language returns 400;
+* missing user returns 404;
+* malformed JSON returns 400;
+* response Content-Type is application/json;
+* JPA entity internals are not exposed.
+
+20. Error response rules
+
+Ensure the existing standard error response is used.
+
+For invalid language:
+
+* HTTP 400
+* safe message
+* traceId present
+* no stack trace
+* no SQL information
+
+For missing user:
+
+* HTTP 404
+* safe message
+* traceId present
+
+21. Architecture rules
+
+Verify:
+
+* API depends on input use-case interfaces.
+* Application services depend on UserRepository and ports.
+* Application does not import infrastructure packages.
+* Domain does not depend on API.
+* No Spring Data repository is injected into controller or service.
+* No Telegram SDK type appears.
+* No duplicate language resolver exists.
+* No field injection exists.
+* No unrelated module logic was added.
+
+22. Documentation
+
+Create:
+
+docs/use-cases/user-language.md
+
+Document:
+
+* purpose;
+* supported languages;
+* default registration language;
+* strict explicit-change behavior;
+* GET and PUT contracts;
+* idempotency;
+* unsupported language handling;
+* missing-user behavior;
+* transaction boundaries;
+* relation to User Profile;
+* future Telegram keyboard integration;
+* deferred localization-message system.
+
+Include Mermaid sequence diagrams for:
+
+* get language;
+* change language.
+
+23. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/in/user/
+GetUserLanguageUseCase.java
+ChangeUserLanguageUseCase.java
+
+src/main/java/com/parazit/panel/application/user/query/
+GetUserLanguageQuery.java
+
+src/main/java/com/parazit/panel/application/user/command/
+ChangeUserLanguageCommand.java
+
+src/main/java/com/parazit/panel/application/user/result/
+UserLanguageResult.java
+
+src/main/java/com/parazit/panel/application/user/
+GetUserLanguageService.java
+ChangeUserLanguageService.java
+UserLanguageResolver.java
+
+src/main/java/com/parazit/panel/api/internal/user/
+UserLanguageController.java
+ChangeUserLanguageRequest.java
+UserLanguageResponse.java
+UserLanguageApiMapper.java
+
+src/test/java/com/parazit/panel/application/user/
+UserLanguageResolverTest.java
+GetUserLanguageServiceTest.java
+ChangeUserLanguageServiceTest.java
+
+src/test/java/com/parazit/panel/integration/user/
+UserLanguageIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/user/
+UserLanguageControllerTest.java
+
+docs/use-cases/
+user-language.md
+
+Adapt names where required by existing conventions.
+
+24. Verification commands
+
+Run the appropriate build commands.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile and PostgreSQL.
+
+Manually verify:
+
+GET /internal/users/{telegramUserId}/language
+
+PUT /internal/users/{telegramUserId}/language
+
+Confirm:
+
+* all previous tests pass;
+* new unit tests pass;
+* integration tests pass;
+* controller tests pass;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* no duplicate language logic remains;
+* no Telegram integration was implemented;
+* no credentials were committed.
+
+25. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Architecture decision about Task 11 language updates
+3. Planned files to create
+4. Planned files to modify
+5. Risks and edge cases
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Refactoring performed
+5. Language resolution behavior
+6. API contract
+7. Test results
+8. Build result
+9. Commands executed
+10. Remaining issues
+11. Suggested commit message
+
+Use this commit message unless the repository convention requires another format:
+
+feat(user): add dedicated user language management
+
+Stop after completing Task 12.
+
+Do not start Task 13.
+

@@ -1,0 +1,927 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 16 – Plan Entity and Persistence Foundation
+
+Goal:
+
+Design and implement the Plan aggregate and its persistence foundation for VPN products.
+
+This task defines:
+
+* what a purchasable VPN plan is;
+* how plan data is validated;
+* how plans are stored in PostgreSQL;
+* how plans are accessed through repository abstractions.
+
+Do not implement:
+
+* Admin CRUD
+* Plan listing API
+* Plan selection
+* Orders
+* Payments
+* Subscriptions
+* Telegram Bot handlers
+* 3x-ui integration
+* VPN account creation
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code from Tasks 1–15.
+* Reuse BaseEntity, Flyway, repository abstractions, auditing, exception handling, logging, dependency injection, Testcontainers, and test conventions.
+* Do not expose JPA entities through controllers.
+* Do not create Plan controllers or API DTOs.
+* Do not add unnecessary dependencies.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Use Java 21.
+* Use PostgreSQL.
+* Flyway must remain the only schema-management mechanism.
+* Stop after completing Task 16.
+* Do not begin Task 17.
+
+1. Current-state assessment
+
+Inspect:
+
+* current package structure;
+* BaseEntity implementation;
+* UUID generation;
+* JPA auditing;
+* repository abstractions;
+* current Flyway migration versions;
+* exception conventions;
+* Testcontainers support;
+* test fixtures;
+* architecture tests;
+* any existing plan, pricing, product, order, or subscription code.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Domain design decisions
+
+5. Database migration risks
+
+6. Conflicts with existing conventions
+
+7. Plan aggregate
+
+Create:
+
+Plan
+
+Suggested package:
+
+com.parazit.panel.domain.plan
+
+Plan must extend BaseEntity.
+
+Fields:
+
+String code
+
+String name
+
+String description
+
+PlanStatus status
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+int displayOrder
+
+The inherited fields remain:
+
+UUID id
+
+Instant createdAt
+
+Instant updatedAt
+
+Rules:
+
+* code is the stable business identifier.
+* code must be required, unique, normalized, and immutable.
+* name is required.
+* description is optional.
+* priceAmount is stored as an integer amount.
+* Do not use double or float for money.
+* durationDays must be positive.
+* trafficLimitBytes is used for traffic-limited plans.
+* unlimited plans must not have trafficLimitBytes.
+* maxDevices is optional.
+* displayOrder must be zero or greater.
+* Plan must not contain User, Order, Payment, Subscription, Telegram, or 3x-ui fields.
+* Do not create entity relationships in this task.
+* Do not expose generic public setters.
+
+3. PlanStatus
+
+Create:
+
+PlanStatus
+
+Values:
+
+DRAFT
+ACTIVE
+INACTIVE
+ARCHIVED
+
+Persist it using EnumType.STRING.
+
+Semantics:
+
+DRAFT:
+The plan is incomplete or not yet published.
+
+ACTIVE:
+The plan is available for users.
+
+INACTIVE:
+The plan is temporarily unavailable.
+
+ARCHIVED:
+The plan is permanently retired but remains in the database.
+
+Use status as the source of truth for availability.
+
+Do not add a separate active boolean.
+
+Recommended transitions:
+
+DRAFT -> ACTIVE
+DRAFT -> ARCHIVED
+ACTIVE -> INACTIVE
+ACTIVE -> ARCHIVED
+INACTIVE -> ACTIVE
+INACTIVE -> ARCHIVED
+ARCHIVED -> no outgoing transition
+
+Create explicit domain methods:
+
+activate()
+
+deactivate()
+
+archive()
+
+Do not create a generic status setter.
+
+Define and test same-state behavior clearly.
+
+4. PlanType
+
+Create:
+
+PlanType
+
+Values:
+
+TRAFFIC_LIMITED
+UNLIMITED
+
+Persist it using EnumType.STRING.
+
+Rules:
+
+TRAFFIC_LIMITED:
+
+* trafficLimitBytes is required;
+* trafficLimitBytes must be positive.
+
+UNLIMITED:
+
+* trafficLimitBytes must be null.
+
+Do not add trial, promotional, lifetime, or enterprise types yet.
+
+5. CurrencyCode
+
+Create:
+
+CurrencyCode
+
+Initial value:
+
+IRT
+
+Meaning:
+
+Iranian Toman
+
+Persist it using EnumType.STRING.
+
+Do not add a currency library.
+
+Do not add exchange-rate conversion.
+
+Do not add USD unless it already exists as a confirmed project requirement.
+
+6. Money representation
+
+Use:
+
+long priceAmount
+
+Rules:
+
+* priceAmount must be zero or positive.
+* Do not use float or double.
+* Do not perform formatting inside the entity.
+* Do not calculate tax, discount, commission, or gateway fees.
+* The value is represented in whole Tomans when currency is IRT.
+
+Example:
+
+500000 means 500,000 Toman.
+
+Document this decision.
+
+7. Traffic representation
+
+Use:
+
+Long trafficLimitBytes
+
+Store traffic in bytes.
+
+Use the binary convention:
+
+1 GiB = 1024 × 1024 × 1024 bytes
+
+Example:
+
+30 GiB = 30L * 1024 * 1024 * 1024
+
+Rules:
+
+* Do not store GB as a floating-point value.
+* Limited plans require a positive byte count.
+* Unlimited plans require null.
+* Conversion for display can be added in future application or API layers.
+
+8. Maximum devices
+
+Use:
+
+Integer maxDevices
+
+Rules:
+
+* null means no application-level device limit is defined.
+* When present, it must be positive.
+* Do not implement device-limit enforcement.
+* Do not treat this field as a 3x-ui IP-limit implementation.
+* Enforcement is deferred to later tasks.
+
+9. Plan code
+
+Code rules:
+
+* required;
+* unique;
+* immutable;
+* uppercase;
+* trimmed;
+* length between 3 and 64;
+* no spaces;
+* allowed characters:
+
+A-Z
+0-9
+_
+-
+
+Examples:
+
+MONTHLY_30GB
+MONTHLY_UNLIMITED
+THREE_MONTH_100GB
+
+Do not derive the code from the database UUID.
+
+Do not generate it automatically.
+
+10. Controlled creation
+
+Create a controlled factory similar to:
+
+Plan.create(
+String code,
+String name,
+String description,
+PlanType type,
+long priceAmount,
+CurrencyCode currency,
+int durationDays,
+Long trafficLimitBytes,
+Integer maxDevices,
+int displayOrder
+)
+
+Initial status:
+
+DRAFT
+
+The factory must:
+
+* validate required fields;
+* normalize code;
+* normalize name;
+* trim description;
+* convert blank optional description to null;
+* validate type and traffic consistency;
+* validate price;
+* validate duration;
+* validate maxDevices;
+* validate displayOrder.
+
+Do not accept API DTOs inside the entity.
+
+11. Domain mutations
+
+Create a focused update method:
+
+updateDetails(
+String name,
+String description,
+PlanType type,
+long priceAmount,
+CurrencyCode currency,
+int durationDays,
+Long trafficLimitBytes,
+Integer maxDevices,
+int displayOrder
+)
+
+Rules:
+
+* code cannot change.
+* status must not be modified through updateDetails.
+* all invariants must be revalidated.
+* archived plans may be immutable if this fits the chosen lifecycle.
+* Do not create update(Map).
+* Do not expose setters.
+
+Create state methods:
+
+activate()
+
+deactivate()
+
+archive()
+
+Recommended rules:
+
+* only DRAFT or INACTIVE plans can activate;
+* only ACTIVE plans can deactivate;
+* DRAFT, ACTIVE, or INACTIVE plans can archive;
+* archived plans cannot change state;
+* activating an incomplete or invalid plan must fail.
+
+12. Validation limits
+
+Use sensible maximum lengths:
+
+code: 64
+
+name: 128
+
+description: 1000
+
+Validate:
+
+* blank code;
+* invalid code format;
+* blank name;
+* overly long fields;
+* negative price;
+* zero or negative duration;
+* negative displayOrder;
+* zero or negative maxDevices;
+* invalid traffic values;
+* null type;
+* null currency;
+* null status.
+
+Use focused domain exceptions or IllegalArgumentException according to current project conventions.
+
+Do not create excessive exception classes.
+
+13. JPA mapping
+
+Map Plan as a JPA entity.
+
+Table:
+
+plans
+
+Requirements:
+
+* @Entity
+* @Table
+* snake_case columns
+* UUID primary key inherited from BaseEntity
+* enums stored as strings
+* no relationships
+* no eager associations
+* code immutable after insert where supported
+* description nullable
+* traffic_limit_bytes nullable
+* max_devices nullable
+
+Add a unique constraint for:
+
+code
+
+Add indexes for:
+
+code
+
+status
+
+type
+
+display_order
+
+created_at
+
+Suggested columns:
+
+id UUID
+
+code VARCHAR(64)
+
+name VARCHAR(128)
+
+description VARCHAR(1000)
+
+status VARCHAR(32)
+
+type VARCHAR(32)
+
+price_amount BIGINT
+
+currency VARCHAR(8)
+
+duration_days INTEGER
+
+traffic_limit_bytes BIGINT
+
+max_devices INTEGER
+
+display_order INTEGER
+
+created_at TIMESTAMPTZ
+
+updated_at TIMESTAMPTZ
+
+14. Flyway migration
+
+Create the next migration based on the actual existing migration history.
+
+Suggested name:
+
+V5__create_plans_table.sql
+
+Do not assume V5 if another migration already uses it.
+
+Migration requirements:
+
+* create the plans table;
+* define UUID primary key;
+* define all Plan columns;
+* add unique code constraint;
+* add indexes;
+* add database check constraints;
+* remain compatible with Hibernate validation.
+
+Recommended checks:
+
+price_amount >= 0
+
+duration_days > 0
+
+display_order >= 0
+
+max_devices IS NULL OR max_devices > 0
+
+status IN (
+'DRAFT',
+'ACTIVE',
+'INACTIVE',
+'ARCHIVED'
+)
+
+type IN (
+'TRAFFIC_LIMITED',
+'UNLIMITED'
+)
+
+currency IN (
+'IRT'
+)
+
+Traffic consistency:
+
+(
+type = 'UNLIMITED'
+AND traffic_limit_bytes IS NULL
+)
+OR
+(
+type = 'TRAFFIC_LIMITED'
+AND traffic_limit_bytes > 0
+)
+
+Do not rely on Hibernate ddl-auto to create or update the table.
+
+15. Domain repository
+
+Create:
+
+PlanRepository
+
+Suggested package:
+
+com.parazit.panel.domain.plan.repository
+
+Extend:
+
+UuidRepository<Plan>
+
+Add:
+
+Optional<Plan> findByCode(String code)
+
+boolean existsByCode(String code)
+
+List<Plan> findAllByStatusOrderByDisplayOrderAsc(
+PlanStatus status
+)
+
+List<Plan> findAllOrderByDisplayOrderAsc()
+
+Rules:
+
+* independent from Spring Data;
+* no Page;
+* no Pageable;
+* no Specification;
+* no JpaRepository;
+* no admin-specific filtering yet;
+* no user-selection logic.
+
+Normalize plan code before repository lookup where appropriate.
+
+16. Spring Data repository
+
+Create:
+
+SpringDataPlanRepository
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.plan
+
+Extend:
+
+SpringDataUuidRepository<Plan>
+
+Add Spring Data methods corresponding to PlanRepository.
+
+Use deterministic ordering.
+
+When displayOrder values are equal, use a stable secondary ordering such as code or createdAt.
+
+17. Repository adapter
+
+Create:
+
+PlanRepositoryAdapter
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.plan
+
+Requirements:
+
+* extend JpaRepositoryAdapter<Plan, UUID>;
+* implement PlanRepository;
+* delegate plan-specific queries;
+* use constructor injection;
+* annotate the concrete adapter appropriately;
+* contain no domain or business logic;
+* do not catch and rethrow generic persistence exceptions.
+
+18. Domain exceptions
+
+Create focused exceptions only when consistent with the existing project design.
+
+Possible classes:
+
+InvalidPlanException
+
+InvalidPlanStateTransitionException
+
+Requirements:
+
+* safe messages;
+* no SQL details;
+* no persistence implementation details;
+* no PlanNotFoundException yet because no Plan use-case/API exists in this task.
+
+19. Plan domain tests
+
+Create pure unit tests without Spring context.
+
+Test successful creation:
+
+* traffic-limited Plan;
+* unlimited Plan;
+* default DRAFT status;
+* code normalization;
+* name normalization;
+* blank description becomes null;
+* all fields returned correctly.
+
+Test validation:
+
+* null code;
+* blank code;
+* code too short;
+* invalid code characters;
+* blank name;
+* overly long name;
+* negative price;
+* zero duration;
+* negative duration;
+* negative display order;
+* zero maxDevices;
+* negative maxDevices;
+* limited Plan without traffic;
+* limited Plan with zero traffic;
+* limited Plan with negative traffic;
+* unlimited Plan with traffic;
+* null type;
+* null currency.
+
+Test mutations:
+
+* valid detail update;
+* code remains unchanged;
+* DRAFT to ACTIVE;
+* ACTIVE to INACTIVE;
+* INACTIVE to ACTIVE;
+* DRAFT to ARCHIVED;
+* ACTIVE to ARCHIVED;
+* INACTIVE to ARCHIVED;
+* ARCHIVED cannot activate;
+* ARCHIVED cannot deactivate;
+* invalid transition rejected;
+* same-state behavior is deterministic.
+
+Test that updateDetails cannot break traffic invariants.
+
+20. Repository integration tests
+
+Use PostgreSQL Testcontainers.
+
+Verify:
+
+* Plan can be saved;
+* UUID is generated;
+* createdAt is populated;
+* updatedAt is populated;
+* findByCode works;
+* existsByCode works;
+* normalized code lookup works;
+* status query works;
+* display order sorting works;
+* stable secondary ordering works;
+* enum fields persist correctly;
+* currency persists correctly;
+* price persists exactly;
+* traffic bytes persist exactly;
+* nullable maxDevices works;
+* non-null maxDevices works;
+* update persists;
+* updatedAt changes;
+* unique code constraint works;
+* traffic consistency constraint works;
+* duration constraint works;
+* price constraint works;
+* displayOrder constraint works;
+* maxDevices constraint works;
+* Flyway migration succeeds;
+* Hibernate schema validation succeeds.
+
+Flush the persistence context when testing database constraints.
+
+Do not assert complete PostgreSQL error messages.
+
+21. Test fixture
+
+Create a test fixture only when it meaningfully reduces duplication.
+
+Suggested:
+
+PlanTestData
+
+Suggested package:
+
+com.parazit.panel.test.fixture
+
+Requirements:
+
+* test-only;
+* deterministic values;
+* readable defaults;
+* supports targeted overrides;
+* no complex generic builder framework;
+* no unnecessary random values.
+
+22. Architecture verification
+
+Verify:
+
+* domain.plan does not depend on infrastructure;
+* domain.plan does not depend on API;
+* PlanRepository does not depend on Spring Data;
+* infrastructure implements the domain repository;
+* no controller is added;
+* no API DTO is added;
+* no User relationship is added;
+* no Order relationship is added;
+* no Payment relationship is added;
+* no Subscription relationship is added;
+* no Telegram code is added;
+* no 3x-ui code is added;
+* no field injection exists;
+* no entity is exposed externally.
+
+Extend existing ArchUnit tests if ArchUnit is already present.
+
+Do not add a large new architecture-testing framework solely for this task.
+
+23. Documentation
+
+Create:
+
+docs/domain/plan-model.md
+
+Document:
+
+* purpose of Plan;
+* Plan fields;
+* Plan code rules;
+* PlanStatus lifecycle;
+* PlanType rules;
+* money representation;
+* IRT semantics;
+* traffic byte/GiB convention;
+* maxDevices semantics;
+* domain invariants;
+* database constraints;
+* repository responsibilities;
+* why Plan has no relationships yet;
+* why discounts are deferred;
+* why 3x-ui inbound mapping is deferred;
+* work deferred to Tasks 17–20.
+
+Include a Mermaid state diagram:
+
+stateDiagram-v2
+[*] --> DRAFT
+DRAFT --> ACTIVE
+DRAFT --> ARCHIVED
+ACTIVE --> INACTIVE
+ACTIVE --> ARCHIVED
+INACTIVE --> ACTIVE
+INACTIVE --> ARCHIVED
+ARCHIVED --> [*]
+
+24. Expected structure
+
+The resulting structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/plan/
+Plan.java
+PlanStatus.java
+PlanType.java
+CurrencyCode.java
+
+src/main/java/com/parazit/panel/domain/plan/repository/
+PlanRepository.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/plan/
+SpringDataPlanRepository.java
+PlanRepositoryAdapter.java
+
+src/main/resources/db/migration/
+V5__create_plans_table.sql
+
+src/test/java/com/parazit/panel/domain/plan/
+PlanTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/plan/
+PlanRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/test/fixture/
+PlanTestData.java
+
+docs/domain/
+plan-model.md
+
+Adapt names and migration numbers to the existing project.
+
+25. Verification
+
+Run the commands appropriate to the existing build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application using the local profile with PostgreSQL running.
+
+Confirm:
+
+* all tests from Tasks 1–15 still pass;
+* Plan unit tests pass;
+* Plan repository integration tests pass;
+* Flyway migration succeeds;
+* Hibernate validation succeeds;
+* application starts successfully;
+* no API was added;
+* no admin CRUD was implemented;
+* no payment logic was implemented;
+* no order or subscription logic was implemented;
+* no Telegram or 3x-ui integration was added;
+* no credentials were committed;
+* no tests were disabled.
+
+26. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Plan aggregate design
+3. PlanStatus lifecycle decision
+4. Money and currency decision
+5. Traffic-unit decision
+6. Planned files to create
+7. Planned files to modify
+8. Migration risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Domain invariants
+5. Lifecycle behavior
+6. Database migration details
+7. Repository behavior
+8. Test results
+9. Build result
+10. Commands executed
+11. Remaining issues
+12. Suggested commit message
+
+Use this commit message unless the repository already follows another convention:
+
+feat(plan): add plan domain model and persistence
+
+Stop after completing Task 16.
+
+Do not start Task 17.
+

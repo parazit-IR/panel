@@ -1,0 +1,547 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 8 – Dependency Injection Foundation
+
+Goal:
+
+Create a clean, explicit, and testable dependency injection foundation using Spring Boot constructor injection, configuration classes, ports, adapters, and bean validation.
+
+Important rules:
+
+* Inspect the current codebase before making changes.
+* Preserve all working code from previous tasks.
+* Do not create business entities such as User, Plan, Payment, Order, Subscription, or Referral yet.
+* Do not implement Telegram, 3x-ui, payment gateway, or VPN logic.
+* Do not add unnecessary dependencies.
+* Do not introduce a separate DI framework.
+* Use Spring dependency injection only.
+* Do not use field injection.
+* Do not use static service locators.
+* Do not use ApplicationContext.getBean in business code.
+* Do not annotate every class with @Component without considering architectural responsibility.
+* Prefer explicit constructor injection.
+* Prefer explicit @Bean definitions for infrastructure adapters when useful.
+* Stop after Task 8.
+* Do not begin Task 9.
+
+1. Current-state review
+
+Inspect and report:
+
+* the current package structure;
+* existing @Configuration classes;
+* existing @Component, @Service, @Repository, and @Bean usages;
+* constructor injection usage;
+* any field injection;
+* any circular dependency risk;
+* repository adapters created in Task 7;
+* configuration properties created in Task 4;
+* package scanning configuration;
+* architecture inconsistencies.
+
+Before implementation, provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture concerns
+
+5. Potential circular dependency risks
+
+6. Dependency injection rules
+
+Establish the following project-wide conventions:
+
+* Constructor injection only
+* Final dependencies
+* No @Autowired on constructors when there is only one constructor
+* No field injection
+* No setter injection except for framework-required cases
+* Domain classes must not depend on Spring
+* Application services may depend on domain interfaces
+* Infrastructure adapters may implement domain or application ports
+* API controllers may depend on application services
+* Configuration classes may create infrastructure beans
+* Avoid injecting concrete infrastructure implementations into application services
+* Avoid static mutable state
+* Avoid global singleton service locators
+
+Document these rules.
+
+3. Port and adapter example
+
+Create a minimal, non-business demonstration of dependency injection.
+
+Do not create User, Plan, Payment, Telegram, Panel, or Subscription services yet.
+
+Create an application port:
+
+Suggested package:
+
+com.parazit.panel.application.port.out
+
+Create:
+
+SystemClockPort
+
+Requirements:
+
+* It must expose:
+
+Instant now()
+
+* It must not depend on Spring.
+* It must not depend on infrastructure.
+* It must be small and focused.
+
+Create an infrastructure adapter:
+
+Suggested package:
+
+com.parazit.panel.infrastructure.time
+
+Create:
+
+SystemClockAdapter
+
+Requirements:
+
+* Implement SystemClockPort.
+* Use java.time.Clock.
+* Return Instant using the injected Clock.
+* Do not call Instant.now() directly inside application code.
+* Keep it replaceable for tests.
+
+4. Clock configuration
+
+Create:
+
+ClockConfiguration
+
+Suggested package:
+
+com.parazit.panel.config
+
+Requirements:
+
+* Define a Clock bean.
+* Use Clock.systemUTC().
+* Define SystemClockPort as a bean backed by SystemClockAdapter.
+* Prefer explicit @Bean registration.
+* Do not annotate SystemClockAdapter with @Component if it is already created through @Bean.
+* Avoid duplicate beans.
+* Name beans only when necessary.
+
+The intended bean flow should be:
+
+Clock
+-> SystemClockAdapter
+-> SystemClockPort
+
+5. Application service example
+
+Create a minimal application service to validate DI.
+
+Suggested package:
+
+com.parazit.panel.application.service
+
+Create:
+
+SystemInfoService
+
+Requirements:
+
+* Depend only on SystemClockPort.
+* Use constructor injection.
+* Expose a method:
+
+Instant currentTime()
+
+* Do not annotate domain classes.
+* The service may use @Service, or it may be created explicitly using @Bean.
+* Choose one approach and document the reason.
+* Do not create business logic.
+
+6. API verification endpoint
+
+Create a temporary or internal verification endpoint.
+
+Suggested package:
+
+com.parazit.panel.api.internal
+
+Create:
+
+DependencyInjectionVerificationController
+
+Endpoint:
+
+GET /internal/di/time
+
+Response example:
+
+{
+"currentTime": "2026-07-10T12:00:00Z"
+}
+
+Requirements:
+
+* Depend on SystemInfoService.
+* Use constructor injection.
+* Return a dedicated response DTO.
+* Do not return a Map.
+* Do not expose infrastructure classes.
+* Do not add authentication in this task.
+* Clearly document that the endpoint exists only to verify the DI foundation and may be removed later.
+
+Create a response DTO:
+
+SystemTimeResponse
+
+Prefer a Java record if appropriate.
+
+7. Configuration properties validation
+
+Review all @ConfigurationProperties classes created previously:
+
+* DatabaseProperties
+* RedisProperties
+* TelegramProperties
+* PanelProperties
+* PaymentProperties
+
+Requirements:
+
+* Use constructor binding through records or immutable classes where practical.
+* Add validation annotations only where values are mandatory.
+* Do not force Telegram, Panel, or Payment credentials to be present before those modules are enabled.
+* Support optional module configuration.
+* Avoid startup failure for disabled integrations.
+* Do not store secrets in logs.
+* Do not override toString in a way that reveals secrets.
+* Do not use Lombok @Data for configuration properties.
+
+Introduce enable flags where appropriate:
+
+telegram.enabled
+panel.enabled
+payment.enabled
+
+Use environment variables:
+
+TELEGRAM_ENABLED
+PANEL_ENABLED
+PAYMENT_ENABLED
+
+Default them to false.
+
+8. Conditional configuration foundation
+
+Prepare the project for optional integrations.
+
+Create configuration classes only if useful:
+
+TelegramModuleConfiguration
+PanelModuleConfiguration
+PaymentModuleConfiguration
+
+Requirements:
+
+* Use @ConditionalOnProperty.
+* Do not create actual Telegram, Panel, or Payment clients yet.
+* Do not create fake production beans.
+* The purpose is only to establish the configuration pattern.
+* Avoid empty configuration classes with no meaningful behavior.
+
+A better acceptable alternative is to document the conditional configuration pattern now and implement the actual module configurations when those modules are introduced.
+
+Choose the simpler option based on the current project state.
+
+9. Bean conflict prevention
+
+Ensure:
+
+* no duplicate bean definitions exist;
+* no ambiguous injection exists;
+* no bean overriding is enabled;
+* application startup fails clearly when required beans are missing;
+* infrastructure beans are replaceable in tests;
+* production beans do not accidentally load in slice tests.
+
+Do not enable:
+
+spring.main.allow-bean-definition-overriding=true
+
+10. Circular dependency prevention
+
+Review dependencies and ensure no cycle such as:
+
+Controller
+-> Service
+-> Adapter
+-> Controller
+
+or:
+
+Service A
+-> Service B
+-> Service A
+
+Requirements:
+
+* Do not enable circular references.
+* Do not use @Lazy merely to hide a circular dependency.
+* Do not set:
+
+spring.main.allow-circular-references=true
+
+* Fix the design instead.
+* Add documentation explaining how to prevent circular dependencies.
+
+11. Unit testing
+
+Create unit tests for SystemInfoService.
+
+Requirements:
+
+* Do not start the Spring context.
+* Use a fake or mocked SystemClockPort.
+* Verify that currentTime returns the exact Instant supplied by the port.
+* Keep the test fast and isolated.
+* Do not use Testcontainers.
+
+Prefer a simple fake implementation unless Mockito is already present and appropriate.
+
+12. Spring context integration test
+
+Create an integration test to verify bean wiring.
+
+Requirements:
+
+* Start the Spring application context.
+* Verify that:
+
+Clock bean exists
+SystemClockPort bean exists
+SystemInfoService bean exists
+DependencyInjectionVerificationController bean exists
+
+* Verify the injected SystemClockPort implementation is SystemClockAdapter.
+* Verify there is exactly one bean of each required type.
+* Verify application context starts without circular dependencies.
+
+Use:
+
+@SpringBootTest
+
+Do not require PostgreSQL or Redis unless the existing application context already requires them.
+
+If database configuration prevents a lightweight context test:
+
+* use the existing Testcontainers support;
+* or isolate the configuration under test;
+* do not disable core application validation merely to make the test pass.
+
+13. Web integration test
+
+Create a web test for:
+
+GET /internal/di/time
+
+Requirements:
+
+* Verify HTTP 200.
+* Verify Content-Type is application/json.
+* Verify currentTime exists.
+* Verify currentTime is a valid ISO-8601 UTC Instant.
+* Do not assert against the real current second.
+
+Prefer MockMvc or WebTestClient based on the current web stack.
+
+14. Test configuration override
+
+Demonstrate that infrastructure dependencies can be replaced in tests.
+
+Create a test configuration that provides a fixed Clock:
+
+Clock.fixed(
+Instant.parse("2026-01-01T00:00:00Z"),
+ZoneOffset.UTC
+)
+
+Requirements:
+
+* Use @TestConfiguration.
+* Override through a test-specific import or primary bean strategy.
+* Do not enable global bean overriding.
+* Verify the endpoint returns:
+
+2026-01-01T00:00:00Z
+
+Ensure the approach is deterministic and does not create ambiguous beans.
+
+15. Package structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/out/
+SystemClockPort.java
+
+src/main/java/com/parazit/panel/application/service/
+SystemInfoService.java
+
+src/main/java/com/parazit/panel/infrastructure/time/
+SystemClockAdapter.java
+
+src/main/java/com/parazit/panel/config/
+ClockConfiguration.java
+
+src/main/java/com/parazit/panel/api/internal/
+DependencyInjectionVerificationController.java
+SystemTimeResponse.java
+
+src/test/java/com/parazit/panel/application/service/
+SystemInfoServiceTest.java
+
+src/test/java/com/parazit/panel/config/
+DependencyInjectionContextTest.java
+FixedClockTestConfiguration.java
+
+src/test/java/com/parazit/panel/api/internal/
+DependencyInjectionVerificationControllerTest.java
+
+docs/architecture/
+dependency-injection.md
+
+Adapt package names only when required by the existing project structure.
+
+16. Documentation
+
+Create:
+
+docs/architecture/dependency-injection.md
+
+Document:
+
+* constructor injection rules;
+* why field injection is forbidden;
+* port and adapter dependency direction;
+* when to use @Service;
+* when to use @Component;
+* when to use @Repository;
+* when to use explicit @Bean definitions;
+* how optional integrations will use @ConditionalOnProperty;
+* how to replace infrastructure beans in tests;
+* how to prevent circular dependencies;
+* why domain classes must remain Spring-free;
+* why ApplicationContext must not be used as a service locator.
+
+Include this dependency direction:
+
+API
+-> Application
+-> Domain interfaces
+
+Infrastructure
+-> Domain/Application ports
+
+Configuration
+-> wires implementations to interfaces
+
+17. Architecture checks
+
+Verify the following manually or using existing architecture tests:
+
+* domain package contains no Spring annotations;
+* application ports contain no Spring annotations;
+* application services do not import infrastructure packages;
+* API controllers do not import repository implementation classes;
+* infrastructure adapters may import application or domain ports;
+* configuration package performs bean wiring;
+* no field injection exists;
+* no circular dependency configuration is enabled.
+
+If ArchUnit already exists, add rules for:
+
+* no field injection;
+* application must not depend on infrastructure;
+* domain must not depend on Spring;
+* controllers must not depend directly on Spring Data repositories.
+
+Do not add ArchUnit solely for this task unless already justified.
+
+18. Code quality
+
+Requirements:
+
+* Use final fields.
+* Use constructor injection.
+* Avoid @Autowired where unnecessary.
+* Avoid Lombok for trivial constructors unless already consistently used.
+* Prefer explicit code for architectural examples.
+* Do not use Map for API responses.
+* Do not use Object as a generic dependency type.
+* Do not create generic factories without a real need.
+* Do not create empty interfaces.
+* Do not expose implementation classes through public APIs.
+* Do not log secrets or configuration property values.
+
+19. Verification commands
+
+Run the commands appropriate for the current build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile.
+
+Verify:
+
+* application starts successfully;
+* all previous tests pass;
+* DI unit tests pass;
+* context test passes;
+* web test passes;
+* the fixed clock test is deterministic;
+* no field injection exists;
+* no duplicate beans exist;
+* no circular dependency exists;
+* no business feature was implemented;
+* no credentials were committed.
+
+20. Expected response after implementation
+
+Provide:
+
+1. Current-state assessment
+2. Architecture decisions
+3. Created files
+4. Modified files
+5. Dependency graph
+6. Test results
+7. Build result
+8. Commands executed
+9. Remaining issues
+10. Suggested commit message
+
+Use this commit message unless the repository already has another convention:
+
+feat(di): add dependency injection foundation and clock adapter
+
+Stop after completing Task 8.
+
+Do not start Task 9.
+

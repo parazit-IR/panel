@@ -1,0 +1,1099 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 20 – Plan Module Integration Test and Quality Gate
+
+Goal:
+
+Complete Phase 3 by consolidating, extending, and hardening all tests for:
+
+* Plan domain and persistence
+* Admin Plan management
+* Active Plan catalog
+* User Plan selection
+* Plan selection snapshots
+* Plan lifecycle
+* Plan visibility
+* Plan selection expiration
+* Plan-related concurrency behavior
+
+This task is a quality gate.
+
+Do not add new business features unless a small refactor is strictly required to make the existing Plan module correct, testable, deterministic, or architecturally consistent.
+
+Important rules:
+
+* Inspect the entire repository before changing anything.
+* Preserve all working behavior from Tasks 1–19.
+* Do not begin 3x-ui integration.
+* Do not implement Telegram handlers.
+* Do not implement Order, Payment, Subscription, VPN provisioning, Admin Dashboard, Cron Jobs, or deployment.
+* Do not add new Plan capabilities such as discounts, coupons, pricing versions, localized descriptions, inventory, or trial plans.
+* Do not weaken tests merely to make the build pass.
+* Do not disable tests.
+* Do not use @Disabled.
+* Do not remove database constraints.
+* Do not replace real integration tests with mocks.
+* Do not expose JPA entities.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not add unnecessary dependencies.
+* Use Java 21.
+* Use the existing build tool and test conventions.
+* Stop after completing Task 20.
+* Do not begin Task 21.
+
+1. Current-state assessment
+
+Inspect all production code, migrations, tests, and documentation related to:
+
+* Plan
+* PlanStatus
+* PlanType
+* CurrencyCode
+* PlanRepository
+* Admin Plan CRUD
+* Plan catalog
+* PlanSelection
+* PlanSelectionStatus
+* PlanSelectionRepository
+* selection eligibility
+* selection expiration
+* snapshot behavior
+* concurrency handling
+* exception mapping
+* controller contracts
+* Testcontainers support
+* coverage tooling
+* architecture tests
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Test inventory
+
+3. Missing coverage
+
+4. Flaky or duplicated tests
+
+5. Architecture inconsistencies
+
+6. Migration and schema concerns
+
+7. Production refactors that may be required
+
+8. Planned files to create
+
+9. Planned files to modify
+
+10. Phase 3 scope
+
+The Phase 3 quality gate must verify the complete flow:
+
+Admin creates a Plan
+-> Admin activates the Plan
+-> User catalog exposes it
+-> User selects it
+-> Selection stores a stable snapshot
+-> Admin changes the Plan
+-> Existing selection remains unchanged
+-> New selections use the updated Plan
+-> Hidden Plans cannot be viewed or selected
+-> Selection expiration works
+-> Exactly one ACTIVE selection exists per user
+
+No Order or Payment must be created.
+
+3. Existing test inventory
+
+Create an inventory grouped by:
+
+* Plan domain unit tests
+* Plan application unit tests
+* Plan repository integration tests
+* Admin Plan integration tests
+* Catalog integration tests
+* PlanSelection domain tests
+* PlanSelection service tests
+* PlanSelection repository integration tests
+* Snapshot integration tests
+* Concurrency tests
+* Controller tests
+* Architecture tests
+* Application context tests
+
+Identify:
+
+* duplicated behavior tests;
+* missing boundary tests;
+* tests coupled to implementation details;
+* tests using real time;
+* tests relying on execution order;
+* tests that start unnecessary Spring contexts;
+* tests that do not flush persistence when validating constraints.
+
+4. Shared test support
+
+Review the test infrastructure created in Task 15.
+
+Reuse or improve:
+
+* PostgreSQL Testcontainers support
+* database cleanup
+* fixed Clock support
+* test fixtures
+* transaction helpers
+* concurrency helpers
+
+Requirements:
+
+* Do not create a second competing Testcontainers foundation.
+* Do not require locally installed PostgreSQL.
+* Do not require Docker Compose for automated tests.
+* Reuse one PostgreSQL container strategy where practical.
+* Do not clean Flyway history.
+* Preserve isolation between User and Plan module tests.
+* Keep deterministic UUIDs, Instants, and codes where useful.
+* Avoid deep test inheritance.
+
+5. Database cleanup
+
+Ensure the cleanup strategy supports:
+
+* plan_selections
+* plans
+* referrals
+* user_settings
+* users
+
+Cleanup order must respect foreign keys.
+
+Suggested dependency order:
+
+plan_selections
+referrals
+user_settings
+plans
+users
+
+Verify actual constraints before choosing the order.
+
+Requirements:
+
+* No test-order dependency.
+* No leakage between test classes.
+* Concurrency tests must use committed transactions where required.
+* Transactional tests may use rollback where safe.
+* Cleanup must not remove Flyway schema history.
+
+6. Plan domain test coverage
+
+Ensure pure unit tests cover:
+
+Creation:
+
+* valid TRAFFIC_LIMITED Plan
+* valid UNLIMITED Plan
+* default DRAFT state
+* code normalization
+* optional description normalization
+* exact price storage
+* exact byte storage
+
+Validation boundaries:
+
+* code length minimum
+* code length maximum
+* invalid code character
+* name length maximum
+* description length maximum
+* price zero
+* negative price
+* duration one
+* duration zero
+* displayOrder zero
+* negative displayOrder
+* maxDevices one
+* maxDevices zero
+* limited traffic one byte
+* limited traffic zero
+* unlimited traffic null
+* unlimited traffic non-null
+
+Lifecycle:
+
+* all allowed transitions
+* all forbidden transitions
+* same-state behavior
+* archived plan immutability
+* update preserves code
+* update preserves status
+* invalid update preserves original valid state
+
+No Spring context for domain tests.
+
+7. PlanSelection domain test coverage
+
+Ensure pure unit tests cover:
+
+* snapshot creation from limited Plan
+* snapshot creation from unlimited Plan
+* snapshot copies all expected fields
+* selectedAt and expiresAt
+* exact TTL boundary
+* expiration one nanosecond before boundary
+* expiration at boundary
+* clear lifecycle
+* expire lifecycle
+* consume lifecycle if present
+* invalid terminal transitions
+* snapshot immutability
+* non-ACTIVE Plan rejection
+* invalid TTL
+* null user
+* traffic consistency
+* maxDevices boundaries
+* price and duration invariants
+
+8. Service unit tests
+
+Ensure isolated unit tests exist for:
+
+CreatePlanService
+
+GetPlanService
+
+ListPlansService
+
+UpdatePlanService
+
+ChangePlanStatusService
+
+ListAvailablePlansService
+
+GetAvailablePlanService
+
+SelectPlanService
+
+GetCurrentPlanSelectionService
+
+ClearPlanSelectionService
+
+PlanSelectionEligibilityPolicy
+
+Test:
+
+* happy paths
+* validation
+* missing resources
+* lifecycle failures
+* filtering
+* code normalization
+* hidden Plan semantics
+* idempotent same-plan selection
+* replacing another Plan
+* expired selection handling
+* user eligibility
+* result mapping
+* fixed clock usage
+* repository interactions
+* no accidental save during reads
+* no payment/order/subscription calls
+
+Use behavior-focused assertions.
+
+Do not over-specify internal method call order unless transaction behavior depends on it.
+
+9. Repository contract tests
+
+Verify PlanRepository:
+
+* save
+* findById
+* findByCode
+* existsByCode
+* list all ordered
+* filter by status
+* filter by type
+* filter by status and type
+* find ACTIVE by ID
+* find ACTIVE by code
+* deterministic secondary ordering
+* no null returns
+
+Verify PlanSelectionRepository:
+
+* save
+* find active by user ID
+* exists active by user ID
+* history order if supported
+* terminal rows preserved
+* no null returns
+
+Use real PostgreSQL.
+
+10. Plan database constraints
+
+Explicitly verify:
+
+* code unique
+* normalized duplicate conflict
+* price_amount >= 0
+* duration_days > 0
+* display_order >= 0
+* max_devices null or > 0
+* valid status
+* valid type
+* valid currency
+* limited Plan requires positive traffic
+* unlimited Plan requires null traffic
+* timestamps not null
+* Hibernate mapping matches migration
+
+Flush the persistence context.
+
+Do not assert full vendor-specific messages.
+
+11. PlanSelection database constraints
+
+Explicitly verify:
+
+* user foreign key
+* plan foreign key
+* exactly one ACTIVE selection per user
+* multiple CLEARED rows allowed
+* multiple EXPIRED rows allowed
+* snapshot price >= 0
+* duration > 0
+* maxDevices null or > 0
+* expiresAt > selectedAt
+* valid status
+* valid snapshot type
+* traffic snapshot consistency
+* required snapshot fields
+* TIMESTAMPTZ mapping
+* RESTRICT or NO ACTION delete behavior
+
+12. Admin Plan integration suite
+
+Consolidate and verify:
+
+Create:
+
+* DRAFT Plan persisted
+* UUID and audit fields
+* limited Plan
+* unlimited Plan
+* duplicate code conflict
+* lowercase/uppercase normalized conflict
+* concurrency conflict translated safely
+
+Read:
+
+* by ID
+* by normalized code
+* list all
+* status filter
+* type filter
+* combined filter
+* stable ordering
+
+Update:
+
+* valid details
+* code immutable
+* status unchanged
+* invalid cross-field update rejected
+* archived modification rejected
+* updatedAt changes
+
+Lifecycle:
+
+* DRAFT -> ACTIVE
+* ACTIVE -> INACTIVE
+* INACTIVE -> ACTIVE
+* all archive paths
+* archived terminal behavior
+* invalid transitions return conflict semantics
+
+13. Active Plan catalog integration suite
+
+Create Plans in every status.
+
+Verify:
+
+* only ACTIVE Plans listed
+* DRAFT hidden
+* INACTIVE hidden
+* ARCHIVED hidden
+* optional type filter
+* stable ordering
+* get ACTIVE by ID
+* get ACTIVE by lowercase code
+* hidden Plan by ID behaves as not found
+* hidden Plan by code behaves as not found
+* audit fields not changed by reads
+* no hidden lifecycle details in application result
+* empty catalog returns empty list
+
+14. Plan selection integration suite
+
+Verify:
+
+First selection:
+
+* ACTIVE Plan can be selected
+* selection is ACTIVE
+* snapshot exact
+* correct TTL
+* one ACTIVE row
+
+Same Plan:
+
+* repeated selection returns same selection
+* newlySelected=false
+* row count unchanged
+* expiresAt unchanged unless current design intentionally refreshes it
+* snapshot unchanged
+
+Different Plan:
+
+* existing ACTIVE selection becomes CLEARED
+* new selection becomes ACTIVE
+* exactly one ACTIVE row
+* history preserved
+* newlySelected=true
+
+Hidden Plan:
+
+* DRAFT rejected
+* INACTIVE rejected
+* ARCHIVED rejected
+* behavior is not found
+
+Eligibility:
+
+* active and unblocked User allowed
+* blocked User rejected
+* suspended User rejected
+* inactive User rejected
+* User state remains unchanged
+
+15. Snapshot integrity suite
+
+This is a critical quality gate.
+
+Scenario:
+
+1. Create and activate Plan A with:
+
+   * name A1
+   * price P1
+   * duration D1
+   * traffic T1
+   * maxDevices M1
+2. Select Plan A.
+3. Update Plan A to:
+
+   * name A2
+   * price P2
+   * duration D2
+   * traffic T2
+   * maxDevices M2
+4. Reload the selection.
+5. Verify selection still contains A1/P1/D1/T1/M1.
+6. Verify catalog/admin lookup shows A2/P2/D2/T2/M2.
+7. Clear the old selection.
+8. Select Plan A again.
+9. Verify the new selection contains A2/P2/D2/T2/M2.
+
+Also test:
+
+* changing Plan status after selection does not alter the old snapshot;
+* archived Plan selection remains readable until expired or cleared;
+* no current Plan lookup is required to render the existing selection.
+
+16. Expiration integration suite
+
+Use a fixed or mutable test clock.
+
+Verify:
+
+* selection valid before expiresAt
+* selection expires exactly at expiresAt
+* GET before expiry succeeds
+* GET at expiry marks selection EXPIRED and returns not found
+* selecting after expiry creates a new ACTIVE selection
+* previous row remains EXPIRED
+* exactly one ACTIVE row remains
+* clear after expiration follows documented behavior
+* no scheduled job is required
+* no real-time sleeping
+
+Do not use Thread.sleep.
+
+17. Plan-selection concurrency suite
+
+Harden deterministic concurrency tests.
+
+Scenario A: same User, same Plan
+
+* two concurrent service calls
+* exactly one ACTIVE selection
+* both complete according to documented idempotency behavior
+* both reference the same selection when recovery succeeds
+* no raw DataIntegrityViolationException escapes
+
+Scenario B: same User, different Plans
+
+* two concurrent service calls
+* exactly one ACTIVE selection
+* terminal history is valid
+* one request wins
+* the other returns documented conflict or resolved winner
+* no two ACTIVE rows
+
+Scenario C: current selection exists and two replacements race
+
+* partial unique index remains authoritative
+* no duplicate active row
+* old selection terminal state remains valid
+* no corrupt transition
+
+Requirements:
+
+* real PostgreSQL
+* separate transactions
+* deterministic synchronization primitives
+* ExecutorService closed
+* timeout used
+* no Thread.sleep
+* repeatability
+
+18. Plan creation concurrency suite
+
+Two concurrent Plan creations using codes that normalize identically:
+
+Example:
+
+monthly_30gb
+
+MONTHLY_30GB
+
+Verify:
+
+* one Plan row
+* one success
+* one PlanCodeAlreadyExistsException
+* no raw persistence error
+* normalized code stored
+* no partial invalid row
+
+19. Controller contract tests: Admin Plan API
+
+Verify all endpoints:
+
+POST /internal/admin/plans
+
+GET /internal/admin/plans
+
+GET /internal/admin/plans/{planId}
+
+GET /internal/admin/plans/by-code/{code}
+
+PUT /internal/admin/plans/{planId}
+
+POST /internal/admin/plans/{planId}/activate
+
+POST /internal/admin/plans/{planId}/deactivate
+
+POST /internal/admin/plans/{planId}/archive
+
+Verify:
+
+* exact success status
+* Location header on create
+* request validation
+* invalid enum behavior
+* duplicate conflict
+* missing resources
+* lifecycle conflict
+* archived update conflict
+* response fields
+* audit fields visible only in admin API
+* no Hibernate internals
+* standard error contract
+* traceId
+* no stack trace
+* no SQL details
+* no DELETE endpoint
+
+20. Controller contract tests: Plan catalog
+
+Verify:
+
+GET /api/plans
+
+GET /api/plans/{planId}
+
+GET /api/plans/by-code/{code}
+
+Verify:
+
+* only ACTIVE Plans
+* type filter
+* invalid type -> 400
+* hidden Plan -> 404
+* lowercase code accepted
+* minimal response
+* status absent
+* displayOrder absent if excluded
+* createdAt absent
+* updatedAt absent
+* application/json
+* empty list behavior
+* standard errors
+
+21. Controller contract tests: Plan selection
+
+Verify:
+
+PUT /api/users/{telegramUserId}/plan-selection
+
+GET /api/users/{telegramUserId}/plan-selection
+
+DELETE /api/users/{telegramUserId}/plan-selection
+
+PUT:
+
+* first selection
+* same selection
+* replacement
+* missing Plan
+* hidden Plan
+* missing User
+* ineligible User
+* invalid UUID
+* null body field
+* malformed JSON
+* conflict mapping
+
+GET:
+
+* current valid selection
+* missing selection
+* expired selection
+* snapshot response
+* no User internal IDs if excluded
+* no audit internals
+
+DELETE:
+
+* active selection cleared
+* no current selection
+* expired selection behavior
+* malformed path input
+
+All error responses must contain:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+22. Exception mapping quality gate
+
+Test mappings for:
+
+* PlanNotFoundException -> 404
+* AvailablePlanNotFoundException -> 404
+* PlanCodeAlreadyExistsException -> 409
+* InvalidPlanStateTransitionException -> 409
+* PlanModificationNotAllowedException -> 409
+* PlanSelectionNotFoundException -> 404
+* UserNotEligibleForPlanSelectionException -> 403
+* PlanSelectionConflictException -> 409
+* validation failure -> 400
+* malformed JSON -> 400
+* unexpected error -> 500
+
+Verify:
+
+* safe messages
+* no SQL
+* no constraint name
+* no stack trace
+* traceId always present
+* path correct
+
+23. Trace ID behavior
+
+Reuse Task 15 trace-ID tests.
+
+Ensure all new Plan endpoints:
+
+* generate or reuse trace ID;
+* place the same trace ID in error body;
+* use the configured response header if present;
+* clear MDC after request;
+* do not leak trace ID between requests.
+
+Do not introduce a second trace ID filter.
+
+24. Architecture tests
+
+If ArchUnit exists, extend it.
+
+Verify:
+
+* Plan domain does not depend on API or infrastructure
+* PlanSelection domain does not depend on API or infrastructure
+* Application does not depend on infrastructure
+* Admin controller depends on input ports
+* Catalog controller depends on input ports
+* Selection controller depends on input ports
+* Controllers do not inject repositories
+* Application services do not inject Spring Data repositories
+* PlanRepository and PlanSelectionRepository do not extend Spring Data
+* API DTOs are not JPA entities
+* no field injection
+* no ApplicationContext service locator
+* no Order/Payment/Subscription/3x-ui/Telegram dependency in Plan module
+
+If ArchUnit is absent, update the manual architecture checklist.
+
+25. Test fixtures
+
+Review and consolidate:
+
+PlanTestData
+
+PlanSelectionTestData
+
+UserTestData
+
+Requirements:
+
+* deterministic values
+* explicit overrides
+* readable defaults
+* no hidden random state
+* no reflection-based generic fixture engine
+* no production package pollution
+
+Create PlanSelectionTestData only if it reduces duplication meaningfully.
+
+26. Coverage targets
+
+Use existing JaCoCo configuration.
+
+If JaCoCo is not configured and Task 15 did not add it, add it only if compatible with the build.
+
+Suggested quality targets for Plan domain/application classes:
+
+* line coverage: at least 85%
+* branch coverage: at least 75%
+
+Targets should include:
+
+* Plan
+* PlanSelection
+* Plan services
+* catalog services
+* selection services
+* eligibility policy
+* result mappers where meaningful
+
+Do not add meaningless tests solely to reach a number.
+
+Do not exclude business services.
+
+27. Mutation-oriented review
+
+Review whether tests would detect these incorrect changes:
+
+* DRAFT Plans shown in catalog
+* INACTIVE Plans selectable
+* code becomes editable
+* archived Plans become editable
+* price stored as floating point
+* limited Plan allows null traffic
+* unlimited Plan accepts traffic
+* same-plan selection creates another row
+* replacing Plan leaves two ACTIVE selections
+* snapshot reads current Plan values
+* expiry boundary changes from >= to >
+* blocked User becomes eligible
+* partial unique index removed
+* admin DTO reused by catalog
+
+Add tests where these mutations could survive.
+
+28. Performance and stability
+
+Review test execution.
+
+Requirements:
+
+* domain and service tests remain context-free
+* controller slice tests used where practical
+* full Spring Boot context limited to integration tests
+* reuse compatible contexts
+* no real-clock assertions
+* no arbitrary sleeps
+* no excessive concurrency thread counts
+* no test-order dependency
+* no unbounded waits
+* no disabled tests
+* no flaky timestamp equality caused by database precision
+
+Normalize timestamp precision in assertions only when PostgreSQL/JPA precision requires it and document the reason.
+
+29. Full Phase 3 end-to-end integration scenario
+
+Create one end-to-end integration test at application-service or HTTP level.
+
+Recommended scenario:
+
+1. Register a User.
+2. Create a limited DRAFT Plan through admin use case.
+3. Verify catalog does not show it.
+4. Activate Plan.
+5. Verify catalog shows it.
+6. Select Plan.
+7. Verify selection snapshot.
+8. Update Plan price and name.
+9. Verify catalog shows updated Plan.
+10. Verify current selection shows old snapshot.
+11. Clear selection.
+12. Select updated Plan.
+13. Verify new snapshot.
+14. Deactivate Plan.
+15. Verify catalog hides it.
+16. Verify new selection attempt fails.
+17. Verify existing selection remains readable.
+18. Archive Plan.
+19. Verify admin lookup still sees archived Plan.
+20. Verify no Order, Payment, Subscription, or VPN client exists.
+
+Do not make this test replace focused tests.
+
+30. Flyway and schema validation
+
+Run migrations from an empty PostgreSQL database.
+
+Verify:
+
+* all migrations execute in order
+* plan table exists
+* plan selection table exists
+* partial unique index exists
+* foreign keys exist
+* check constraints exist
+* no migration was edited after prior use unless the repository is still explicitly pre-release and migration policy allows it
+* Hibernate ddl-auto remains validate
+* Hibernate validation passes
+* application startup succeeds
+
+Prefer adding a new corrective migration rather than editing an already-applied migration.
+
+31. Documentation
+
+Create:
+
+docs/testing/plan-module-test-strategy.md
+
+Document:
+
+* Phase 3 test pyramid
+* Plan domain tests
+* Admin management tests
+* catalog visibility tests
+* PlanSelection tests
+* snapshot tests
+* expiration tests
+* concurrency tests
+* Testcontainers strategy
+* database cleanup
+* fixed-clock strategy
+* coverage targets
+* architecture rules
+* verification commands
+* common debugging steps
+
+Create:
+
+docs/tasks/phase-3-plan-module-acceptance.md
+
+Acceptance checklist:
+
+* Plan aggregate complete
+* Plan lifecycle enforced
+* Plan code unique and immutable
+* Money uses integer Toman representation
+* Traffic uses bytes
+* Admin create works
+* Admin read works
+* Admin update works
+* Admin activate/deactivate/archive works
+* No physical delete exists
+* Only ACTIVE Plans appear in catalog
+* Hidden Plans behave as not found
+* User can select ACTIVE Plan
+* Same selection is idempotent
+* Different selection replaces prior ACTIVE selection
+* Exactly one ACTIVE selection per User
+* Snapshot remains stable after Plan update
+* Expiration works at exact boundary
+* Ineligible Users cannot select
+* Concurrent Plan creation safe
+* Concurrent selection safe
+* Flyway passes
+* Hibernate validation passes
+* Unit tests pass
+* Integration tests pass
+* Controller tests pass
+* Concurrency tests pass
+* Architecture checks pass
+* Coverage target met or gaps documented
+* No Order implemented
+* No Payment implemented
+* No Subscription implemented
+* No Telegram handler implemented
+* No 3x-ui integration implemented
+* Documentation updated
+* Full build passes
+
+Mark only verified items.
+
+Update existing Plan documentation only where behavior changed or needed clarification.
+
+32. Verification commands
+
+Use the actual build system.
+
+For Gradle, run the supported equivalent of:
+
+./gradlew clean test
+./gradlew integrationTest
+./gradlew jacocoTestReport
+./gradlew jacocoTestCoverageVerification
+./gradlew check
+./gradlew build
+
+Only use integrationTest if that source set exists.
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also:
+
+* start PostgreSQL through the existing local Docker Compose setup;
+* run the application with the local profile;
+* verify Actuator health;
+* manually exercise core Plan endpoints.
+
+33. Manual verification flow
+
+Perform and document:
+
+1. Register one active User.
+2. Create two DRAFT Plans.
+3. Activate one Plan.
+4. List catalog.
+5. Select active Plan.
+6. Repeat same selection.
+7. Update active Plan.
+8. Get selection and confirm old snapshot.
+9. Replace with second Plan after activating it.
+10. Clear selection.
+11. Deactivate second Plan.
+12. Attempt to select it.
+13. Archive first Plan.
+14. Retrieve it through admin API.
+15. Attempt to edit archived Plan.
+16. Confirm no Order/Payment/Subscription data was created.
+
+Do not commit secrets or local database data.
+
+34. Refactoring rules
+
+Allowed production refactors:
+
+* fix transaction boundary
+* centralize Plan code normalization
+* centralize Plan mapping
+* correct repository ordering
+* correct exception mapping
+* make test clock replaceable
+* remove duplicated catalog filtering
+* repair concurrency recovery
+* add missing repository method required for correctness
+* add corrective Flyway migration
+
+Not allowed:
+
+* redesign the entire architecture
+* add CQRS
+* add event sourcing
+* add Kafka
+* add Redis caching
+* implement Order
+* implement Payment
+* implement Subscription
+* implement Telegram
+* implement 3x-ui
+* rename all packages without need
+
+Explain every production-code refactor.
+
+35. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Test inventory
+3. Missing coverage
+4. Flaky or duplicated tests
+5. Schema and migration concerns
+6. Planned quality-gate approach
+7. Planned files to create
+8. Planned files to modify
+9. Production refactors that may be required
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Production refactors
+5. Test inventory by category
+6. Unit-test results
+7. Integration-test results
+8. Snapshot-test results
+9. Expiration-test results
+10. Concurrency-test results
+11. Controller-test results
+12. Architecture-test results
+13. Coverage results
+14. Flyway and Hibernate validation results
+15. Build result
+16. Commands executed
+17. Remaining risks
+18. Phase 3 acceptance status
+19. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+test(plan): complete phase three plan module quality gate
+
+Stop after completing Task 20.
+
+Do not start Task 21.
+

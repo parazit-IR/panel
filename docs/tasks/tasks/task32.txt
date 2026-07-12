@@ -1,0 +1,1615 @@
+You are a senior Java 21, Spring Boot, payment-system, transactional-outbox, concurrency, and quality-engineering specialist.
+
+Continue implementing the existing project.
+
+# Task 32 — Payment Module Integration Test and Quality Gate
+
+## Goal
+
+Complete Phase 5 by consolidating, expanding, hardening, and verifying all payment-related functionality implemented in Tasks 27–31.
+
+This task is a quality gate.
+
+It must verify the full behavior of:
+
+* Payment foundation
+* Payment strategy architecture
+* Order-payment relationship
+* Zarinpal initialization
+* Zarinpal callback
+* Zarinpal server-to-server verification
+* Manual card-to-card payment instructions
+* Unique payable amount reservation
+* Receipt upload and secure storage
+* Manual review queue
+* Operator claim, approval, and rejection
+* Shared payment approval
+* One approved Payment per Order
+* Transactional provisioning outbox
+* Outbox retry and stale recovery
+* 3x-ui provisioning trigger
+* Payment and provisioning idempotency
+* Payment-related concurrency
+* Error and security contracts
+
+Do not add new business features unless a small refactor is strictly required to make the existing implementation correct, secure, deterministic, testable, or architecturally consistent.
+
+Do not begin Task 33.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before changing anything.
+* Preserve all working behavior from Tasks 1–31.
+* Do not implement subscription links.
+* Do not implement QR Code generation.
+* Do not implement Telegram Bot handlers.
+* Do not implement refunds.
+* Do not implement chargebacks.
+* Do not implement automated bank matching.
+* Do not implement OCR approval.
+* Do not implement new payment providers.
+* Do not implement reminder jobs.
+* Do not implement deployment.
+* Do not disable failing tests.
+* Do not use `@Disabled`.
+* Do not weaken assertions merely to pass the build.
+* Do not replace real PostgreSQL integration tests with mocks.
+* Do not replace gateway mock integration tests with pure unit mocks.
+* Do not remove database constraints.
+* Do not expose JPA entities.
+* Do not expose payment secrets.
+* Do not add unnecessary dependencies.
+* Use constructor injection only.
+* Do not use field injection.
+* Use Java 21.
+* Use the current build tool and test conventions.
+* Stop after completing Task 32.
+
+---
+
+# 2. Current-state assessment
+
+Inspect all production code, migrations, tests, configuration, and documentation related to:
+
+* Order
+* Payment
+* PaymentMethod
+* PaymentStatus
+* PaymentProcessor strategies
+* ZarinpalPaymentAttempt
+* Zarinpal gateway adapter
+* ManualCardPaymentInstruction
+* ManualPaymentReceipt
+* ManualPaymentReview
+* manual receipt storage
+* shared PaymentApprovalService
+* ProvisioningOutbox
+* outbox processor
+* Xui provisioning integration
+* exception mappings
+* traceId
+* configuration properties
+* security-sensitive logging
+* Testcontainers support
+* temporary file-storage support
+* concurrency tests
+* controller tests
+* architecture tests
+* coverage configuration
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Test inventory
+3. Missing coverage
+4. Flaky or duplicated tests
+5. Architecture inconsistencies
+6. Database and migration concerns
+7. Security concerns
+8. Production refactors that may be required
+9. Planned files to create
+10. Planned files to modify
+
+---
+
+# 3. Phase 5 acceptance flow
+
+The complete payment phase must support and verify these flows.
+
+## Zarinpal flow
+
+User selects Plan
+-> Order exists
+-> ZARINPAL Payment exists
+-> Payment initialization
+-> Authority received
+-> User callback
+-> Server-to-server Verify
+-> Payment APPROVED
+-> Order PAID
+-> Provisioning outbox PENDING
+-> Outbox processor
+-> XUI provision ACTIVE
+-> Order COMPLETED
+
+## Manual payment flow
+
+User selects Plan
+-> Order exists
+-> CARD_TO_CARD Payment exists
+-> Unique payable amount reserved
+-> User uploads receipt
+-> Receipt queued
+-> Operator claims review
+-> Operator approves
+-> Payment APPROVED
+-> Order PAID
+-> Provisioning outbox PENDING
+-> Outbox processor
+-> XUI provision ACTIVE
+-> Order COMPLETED
+
+## Manual rejection flow
+
+Receipt queued
+-> Operator claims
+-> Operator rejects
+-> Receipt REJECTED
+-> Review REJECTED
+-> Payment returns to retryable state
+-> Instruction returns ACTIVE if valid
+-> No outbox
+-> No VPN client
+-> User may submit a replacement receipt
+
+---
+
+# 4. Existing test inventory
+
+Create a detailed inventory grouped by:
+
+* Payment domain tests
+* Order domain tests
+* Zarinpal attempt domain tests
+* Manual instruction domain tests
+* Receipt domain tests
+* Manual review domain tests
+* Provisioning outbox domain tests
+* Application service unit tests
+* Gateway adapter integration tests
+* File-storage integration tests
+* Repository integration tests
+* Full payment-flow integration tests
+* Concurrency tests
+* Controller tests
+* Architecture tests
+* Configuration tests
+* Application context tests
+
+Identify:
+
+* duplicate test intent;
+* missing boundaries;
+* tests coupled to implementation details;
+* tests that use real time;
+* tests that rely on test execution order;
+* tests that leave files behind;
+* tests that do not flush persistence constraints;
+* tests that do not verify no side effect occurred.
+
+---
+
+# 5. Shared test infrastructure
+
+Review and reuse the test foundation from Tasks 15 and 20.
+
+Requirements:
+
+* Reuse existing PostgreSQL Testcontainers support.
+* Do not create a second competing container foundation.
+* Reuse database cleanup utilities.
+* Reuse deterministic UUID and clock fixtures.
+* Reuse mock HTTP server support.
+* Add temporary receipt-storage support cleanly.
+* Do not require local PostgreSQL.
+* Do not require Docker Compose for automated tests.
+* Do not call real Zarinpal.
+* Do not call real 3x-ui.
+* Avoid deep inheritance hierarchies.
+* Keep integration tests isolated.
+
+Possible additions:
+
+PaymentIntegrationTestBase
+
+TemporaryReceiptStorageSupport
+
+MockZarinpalServerSupport
+
+MockXuiServerSupport
+
+Use only if meaningful.
+
+---
+
+# 6. Database cleanup strategy
+
+Ensure integration tests clean these tables safely:
+
+provisioning_outbox
+
+manual_payment_reviews
+
+manual_payment_receipts
+
+manual_card_payment_instructions
+
+zarinpal_payment_attempts
+
+payments
+
+orders
+
+xui_client_operations
+
+xui_client_provisions
+
+plan_selections
+
+plans
+
+referrals
+
+user_settings
+
+users
+
+Respect actual foreign-key order.
+
+Requirements:
+
+* Never clean Flyway history.
+* No test-order dependency.
+* Concurrency tests use committed transactions where required.
+* Rollback-based tests remain rollback-safe.
+* Cleanup must include temporary receipt files.
+* No test may leak files into another test.
+
+---
+
+# 7. Payment domain quality gate
+
+Ensure pure unit tests cover:
+
+## Payment
+
+* creation
+* supported methods
+* canonical currency
+* amount validation
+* baseAmount/payableAmount consistency
+* CREATED state
+* WAITING_FOR_PAYMENT
+* RECEIPT_SUBMITTED
+* WAITING_FOR_REVIEW
+* PROCESSING
+* APPROVED
+* CANCELLED
+* EXPIRED
+* FAILED
+* UNKNOWN if present
+* all valid transitions
+* all invalid transitions
+* terminal-state protection
+* repeated approval behavior
+* approved cannot become cancelled/rejected
+* approval timestamps
+* rejection timestamps
+* gateway fields
+* manual and Zarinpal behavior separation
+
+## Order
+
+* creation
+* amount snapshot
+* PAYMENT_PENDING
+* PAID
+* PROVISIONING
+* COMPLETED
+* PROVISIONING_FAILED
+* retry transition
+* cancellation
+* terminal behavior
+* paidAt
+* completedAt
+* failure metadata
+
+No Spring context for domain tests.
+
+---
+
+# 8. Zarinpal domain and converter tests
+
+Ensure tests cover:
+
+* attempt creation
+* request ID
+* gateway amount
+* authority
+* reference ID
+* status transitions
+* cancellation
+* unknown result
+* terminal verification
+* malformed state rejection
+* failure-message sanitization
+* masked PAN validation
+
+Amount converter:
+
+* exact local-to-gateway conversion
+* request and Verify use identical persisted amount
+* overflow
+* unsupported currency
+* zero and negative rules
+
+---
+
+# 9. Manual instruction quality gate
+
+Ensure pure tests cover:
+
+* base amount
+* unique suffix
+* final payable amount
+* overflow
+* ACTIVE reservation
+* exact expiry boundary
+* cancellation
+* expiration
+* receipt-pending transition
+* completed transition
+* reissue policy
+* active instruction immutability
+* destination snapshot
+* no plaintext sensitive fields where design forbids them
+
+Bank card value object:
+
+* normalization
+* checksum if supported
+* masking
+* formatting
+* safe toString
+* invalid characters
+* invalid length
+
+---
+
+# 10. Receipt domain and storage quality gate
+
+Ensure pure tests cover:
+
+* UPLOADING
+* stored metadata
+* SUBMITTED
+* QUEUED_FOR_REVIEW
+* WITHDRAWN
+* APPROVED
+* REJECTED
+* INVALID_FILE
+* required metadata
+* hash validation
+* claimed amount
+* sender-card last four
+* immutable storage key
+* invalid transitions
+
+Storage quality:
+
+* path confinement
+* atomic write
+* filename sanitization
+* no original filename used as path
+* load
+* exists
+* compensation delete
+* no path traversal
+* no symlink escape
+* no world-readable assumptions
+* exact size/hash
+* temporary cleanup
+
+File inspector:
+
+* JPEG
+* PNG
+* PDF
+* WEBP if supported
+* empty file
+* oversized file
+* mismatched content
+* fake extension
+* SVG rejection
+* HTML rejection
+* executable rejection
+* malformed image/PDF
+* dimensions
+* hash
+* MIME normalization
+
+---
+
+# 11. Manual review domain quality gate
+
+Ensure tests cover:
+
+* PENDING
+* CLAIMED
+* same-operator replay
+* another-operator conflict
+* claim expiry
+* release
+* re-claim
+* APPROVED
+* REJECTED
+* terminal states
+* rejection reason required
+* operator note rules
+* expected/claimed amount snapshot
+* duplicate-hash flag
+* reviewer identity validation
+
+---
+
+# 12. Outbox domain quality gate
+
+Ensure tests cover:
+
+* creation
+* immutable payload
+* PENDING
+* PROCESSING
+* PROCESSED
+* FAILED
+* UNKNOWN
+* DEAD
+* attempts
+* retry scheduling
+* exponential backoff
+* max-attempt handling
+* stale processing recovery
+* failure-message sanitization
+* terminal behavior
+* payload version validation
+
+---
+
+# 13. Payment strategy tests
+
+Verify:
+
+* processor registry selects Zarinpal for ZARINPAL.
+* processor registry selects manual processor for CARD_TO_CARD.
+* duplicate processors for same method fail application startup.
+* unsupported provider returns safe error.
+* no switch statement is required in business orchestration.
+* online verification capability is not forced onto manual provider.
+* manual review capability is not forced onto Zarinpal provider.
+* provider-disabled behavior is deterministic.
+
+---
+
+# 14. Repository contract tests
+
+Using real PostgreSQL, verify:
+
+## PaymentRepository
+
+* save
+* find by ID
+* find by Order
+* find by User
+* approved existence
+* active statuses
+* one APPROVED Payment per Order
+
+## OrderRepository
+
+* find by ID
+* find by PlanSelection
+* paid/completed existence
+* user history
+
+## ZarinpalPaymentAttemptRepository
+
+* request ID
+* authority
+* reference ID
+* verified attempt
+* history ordering
+
+## ManualCardPaymentInstructionRepository
+
+* active by Payment
+* request ID
+* active amount lookup
+* history order
+
+## ManualPaymentReceiptRepository
+
+* request ID
+* active by instruction
+* storage key
+* hash detection
+* queue order
+
+## ManualPaymentReviewRepository
+
+* by receipt
+* claim state
+* reviewer history
+
+## ProvisioningOutboxRepository
+
+* by event ID
+* by Order/type
+* available rows
+* claim behavior
+* skip-locked behavior if implemented
+
+No null returns.
+
+No Spring Data type leakage.
+
+---
+
+# 15. Database constraint quality gate
+
+Explicitly test:
+
+## Payments
+
+* amount checks
+* required fields
+* valid methods/statuses
+* one APPROVED per Order
+* foreign keys
+
+## Zarinpal attempts
+
+* unique request ID
+* unique authority
+* reference ID uniqueness if used
+* gateway amount
+* verified timestamp requirements
+
+## Manual instructions
+
+* request ID unique
+* one active instruction per Payment
+* active amount unique by currency
+* amount equation
+* expiry
+* terminal amount reuse
+
+## Receipts
+
+* request ID unique
+* one active receipt per instruction
+* required storage metadata
+* hash format
+* amount
+* foreign keys
+* queue timestamp rules
+
+## Reviews
+
+* one review per receipt
+* claim fields
+* terminal decision fields
+* rejection reason
+
+## Outbox
+
+* event ID unique
+* Order/type unique
+* valid status
+* attempt count
+* processing timestamps
+* JSONB payload
+* partial claim constraints if used
+
+Flush persistence context.
+
+Do not assert complete PostgreSQL messages.
+
+---
+
+# 16. Zarinpal initialization integration suite
+
+Verify:
+
+* valid Payment initialization
+* exact gateway amount
+* exact callback URL
+* authority stored
+* redirect URL generated
+* Payment WAITING_FOR_PAYMENT
+* attempt REDIRECT_READY
+* request ID replay
+* request ID conflict
+* provider disabled
+* wrong method
+* missing User/Order/Payment
+* approved Payment behavior
+* expired Payment
+* gateway rejection
+* malformed response
+* timeout
+* uncertain request
+* no duplicate uncontrolled request
+* no approval
+* no provisioning
+
+---
+
+# 17. Zarinpal callback and Verify integration suite
+
+Verify:
+
+* Status=OK leads to Verify
+* callback alone does not approve
+* exact persisted amount used
+* success approves
+* already verified reconciles
+* reference ID stored
+* masked card metadata stored
+* repeated callback idempotent
+* cancellation does not call Verify
+* cancellation does not overwrite approval
+* unknown status
+* unknown authority
+* malformed authority
+* Verify failure
+* Verify timeout
+* later reconciliation
+* one approved Payment
+* one outbox
+* no direct 3x-ui inside approval transaction
+
+---
+
+# 18. Manual instruction integration suite
+
+Verify:
+
+* exact amount generation
+* exact suffix range
+* unique active amount
+* one active instruction per Payment
+* request ID idempotency
+* active instruction reuse
+* expiration
+* cancellation
+* reissue
+* history preservation
+* reservation release
+* provider disabled
+* wrong method
+* no approval
+* no receipt
+* no provisioning
+
+---
+
+# 19. Receipt integration suite
+
+Verify:
+
+* valid upload
+* file stored outside PostgreSQL
+* metadata stored
+* hash stored
+* status queued
+* instruction RECEIPT_PENDING
+* Payment WAITING_FOR_REVIEW
+* metadata retrieval
+* content streaming
+* safe headers
+* idempotent replay
+* duplicate active receipt conflict
+* duplicate hash behavior
+* amount mismatch rejected before storage
+* invalid file rejected
+* oversized file
+* storage failure
+* completion failure compensation
+* orphan compensation behavior
+* no approval
+* no provisioning
+
+---
+
+# 20. Manual review integration suite
+
+Verify:
+
+## Claim
+
+* claim success
+* same-operator replay
+* another operator conflict
+* expired claim takeover
+* release
+* re-claim
+
+## Approval
+
+* receipt APPROVED
+* review APPROVED
+* instruction COMPLETED
+* Payment APPROVED
+* Order PAID
+* one outbox
+* no 3x-ui before processing
+* idempotent replay
+* no duplicate outbox
+
+## Rejection
+
+* receipt REJECTED
+* review REJECTED
+* Payment retryable
+* instruction ACTIVE if valid
+* instruction EXPIRED if expired
+* no outbox
+* new receipt allowed
+* history preserved
+
+---
+
+# 21. Shared approval integration suite
+
+Verify both methods converge on the same service.
+
+## Zarinpal
+
+verified attempt
+-> shared approval
+-> Payment APPROVED
+-> Order PAID
+-> outbox PENDING
+
+## Manual
+
+operator approval
+-> shared approval
+-> Payment APPROVED
+-> Order PAID
+-> outbox PENDING
+
+Verify:
+
+* same invariants
+* same Order transition
+* same outbox creation
+* no provider-specific provisioning duplication
+* approval replay
+* another approved Payment conflict
+* transaction rollback
+* exactly one outbox
+
+---
+
+# 22. Outbox integration suite
+
+Verify:
+
+* outbox created in approval transaction
+* no outbox if transaction rolls back
+* processor claims PENDING
+* Order becomes PROVISIONING
+* successful Task 24 provisioning
+* outbox PROCESSED
+* Order COMPLETED
+* idempotent existing provision counts as success
+* transient failure
+* retry schedule
+* later success
+* unknown remote result reconciliation
+* permanent failure
+* DEAD state
+* stale PROCESSING recovery
+* malformed payload
+* unsupported payload version
+* batch limit
+* multi-worker claiming
+* no duplicate client
+
+---
+
+# 23. End-to-end Zarinpal scenario
+
+Create one complete integration or HTTP-level scenario:
+
+1. Register User.
+2. Create/activate Plan.
+3. Select Plan.
+4. Create Order.
+5. Create ZARINPAL Payment.
+6. Initialize Zarinpal.
+7. Simulate successful callback.
+8. Mock successful Verify.
+9. Assert Payment APPROVED.
+10. Assert Order PAID.
+11. Assert outbox PENDING.
+12. Assert no provision yet.
+13. Run outbox processor.
+14. Assert XUI provision ACTIVE.
+15. Assert outbox PROCESSED.
+16. Assert Order COMPLETED.
+17. Replay callback.
+18. Run outbox again.
+19. Assert one remote client and one local provision.
+
+---
+
+# 24. End-to-end manual scenario
+
+Create one complete scenario:
+
+1. Register User.
+2. Create/activate Plan.
+3. Select Plan.
+4. Create Order.
+5. Create CARD_TO_CARD Payment.
+6. Initialize unique amount.
+7. Upload synthetic receipt.
+8. Claim as operator.
+9. Approve.
+10. Assert Payment APPROVED.
+11. Assert Order PAID.
+12. Assert outbox PENDING.
+13. Run processor.
+14. Assert XUI provision ACTIVE.
+15. Assert Order COMPLETED.
+16. Repeat approval.
+17. Repeat outbox processing.
+18. Assert no duplicates.
+
+---
+
+# 25. End-to-end manual rejection scenario
+
+1. Create manual Payment and instruction.
+2. Upload receipt.
+3. Claim.
+4. Reject.
+5. Assert no outbox.
+6. Assert no XUI provision.
+7. Assert Payment retryable.
+8. Assert instruction active if unexpired.
+9. Upload replacement receipt.
+10. Claim and approve.
+11. Complete provisioning.
+12. Verify history contains both receipts and reviews.
+
+---
+
+# 26. Financial correctness tests
+
+Verify:
+
+* local canonical amounts remain IRT.
+* Zarinpal conversion happens exactly once.
+* Zarinpal request and Verify use the same persisted gateway amount.
+* Manual base amount remains immutable.
+* Unique suffix does not change Order amount.
+* Manual payable amount equals base plus suffix.
+* Claimed receipt amount must equal instruction payable amount.
+* Payment approval uses persisted Payment/Order amounts.
+* No floating-point arithmetic.
+* Traffic or provisioning does not mutate Payment amount.
+* Overflow-safe arithmetic.
+
+---
+
+# 27. Idempotency quality gate
+
+Explicitly verify:
+
+* Payment creation idempotency if implemented
+* Zarinpal request ID
+* Zarinpal callback
+* Zarinpal Verify
+* Manual instruction request ID
+* Receipt request ID
+* Review approval replay
+* Shared Payment approval
+* Outbox event uniqueness
+* Outbox processing
+* Task 24 PlanSelection provisioning key
+* No duplicate remote client
+* No duplicate traffic or renewal behavior triggered by payment replay
+
+Create an idempotency matrix in documentation and tests.
+
+---
+
+# 28. Concurrency quality gate
+
+Use deterministic real-PostgreSQL tests.
+
+Required scenarios:
+
+## Zarinpal
+
+* same request ID concurrently
+* same callback concurrently
+* success callback racing cancellation
+* multiple application-instance verification simulation
+
+## Manual instructions
+
+* same Payment concurrently
+* many Payments same base amount
+* suffix collisions
+* exhausted suffix range
+
+## Receipts
+
+* same request ID
+* different request IDs same instruction
+* upload racing expiration
+* upload racing cancellation
+
+## Reviews
+
+* two operators claim
+* approve/approve race
+* approve/reject race
+* claim expiry takeover
+
+## Approval
+
+* Zarinpal and manual Payments for same Order race
+* one approved Payment
+* one outbox
+
+## Outbox
+
+* multiple workers claim same row
+* stale worker recovery
+* retry after uncertain provisioning
+
+Requirements:
+
+* No Thread.sleep.
+* Use barriers/latches.
+* Use separate transactions.
+* Shut down executors.
+* Add timeouts.
+* No flaky timing assumptions.
+* Repeatability.
+
+---
+
+# 29. Transaction-boundary quality gate
+
+Verify structurally and behaviorally:
+
+* Zarinpal HTTP calls occur outside DB transactions.
+* Receipt file IO occurs outside DB transactions.
+* 3x-ui calls occur outside payment-approval transaction.
+* Payment approval and outbox creation share one transaction.
+* File storage uses compensation on DB failure.
+* Outbox handler uses short claim/complete transactions.
+* No self-invocation breaks `@Transactional`.
+* No controller owns a transaction.
+* No transaction remains open during user-browser redirect handling.
+
+Add tests or architecture checks where possible.
+
+---
+
+# 30. Error-mapping quality gate
+
+Verify mappings for:
+
+* PaymentNotFound
+* OrderNotFound
+* invalid Payment method
+* Payment already approved
+* Payment conflict
+* Zarinpal disabled
+* Zarinpal invalid response
+* Zarinpal unavailable
+* Zarinpal timeout
+* Zarinpal uncertain
+* manual provider disabled
+* amount reservation exhausted
+* receipt invalid type
+* receipt too large
+* receipt duplicate
+* storage unavailable
+* review claim conflict
+* invalid review state
+* outbox not found
+* outbox retry conflict
+* provisioning unavailable
+* provisioning uncertain
+
+Verify standard internal errors include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No error leaks:
+
+merchant ID
+authority
+reference ID
+full card number
+storage key
+filesystem path
+receipt hash
+receipt contents
+SQL
+constraint names
+stack trace
+private keys
+cookies
+subscription IDs
+
+---
+
+# 31. Callback security quality gate
+
+Verify:
+
+* callback accepts only expected parameters.
+* callback does not accept amount.
+* callback does not accept Payment ID.
+* callback does not accept Order ID.
+* callback does not accept User ID.
+* callback looks up persisted authority.
+* callback status alone cannot approve.
+* server-to-server Verify is mandatory.
+* redirect URL contains no authority/reference ID.
+* malformed query handled safely.
+* duplicate callback safe.
+* cancellation after approval safe.
+* response/redirect open-redirect protection.
+
+---
+
+# 32. Receipt security quality gate
+
+Verify:
+
+* multipart limits
+* reverse-proxy limit documentation
+* path traversal
+* fake extensions
+* MIME mismatch
+* SVG rejection
+* HTML rejection
+* executable rejection
+* decompression/dimension limits
+* safe Content-Disposition
+* nosniff
+* private no-store caching
+* storage root confinement
+* storage path not exposed
+* full card details absent
+* file bytes absent from logs
+* temporary files removed
+* rejected files not persisted permanently
+
+---
+
+# 33. Operator security quality gate
+
+Current operator provider is temporary.
+
+Verify:
+
+* missing operator header rejected
+* blank operator rejected
+* invalid characters rejected
+* bounded length
+* operator ID not accepted from JSON
+* only claimant may decide
+* expired claim behavior
+* reviewer history
+* no production claim that header-based identity is secure
+
+Document mandatory future replacement with Spring Security.
+
+Do not implement full authentication in this task unless already part of the project.
+
+---
+
+# 34. Logging quality gate
+
+Review logs for:
+
+* Payment
+* Zarinpal
+* Manual instruction
+* Receipt
+* Review
+* Outbox
+* Provisioning
+
+Ensure logs contain useful IDs and traceId.
+
+Ensure logs do not contain:
+
+* merchant ID
+* full authority
+* payment URL
+* mobile/email from gateway metadata
+* full card numbers
+* receipt bytes
+* receipt Base64
+* storage paths
+* raw JSON
+* cookies
+* private keys
+* full subscription IDs
+* raw outbox payload
+* operator secrets
+
+Add log-capture tests where practical.
+
+---
+
+# 35. Configuration quality gate
+
+Test all properties:
+
+* Payment defaults
+* Zarinpal disabled default
+* merchant ID requirement
+* URL validation
+* timeouts
+* SSL verification
+* manual provider defaults
+* card-number secrecy
+* suffix range
+* receipt root
+* file-size limit
+* content types
+* review claim TTL
+* outbox polling
+* retry limits
+* processing timeout
+
+Verify application starts with all optional providers disabled.
+
+Verify invalid enabled configuration fails fast.
+
+Verify secrets do not appear in `toString`.
+
+---
+
+# 36. Architecture tests
+
+If ArchUnit exists, extend it.
+
+Verify:
+
+* payment domain does not depend on API/infrastructure
+* order domain does not depend on payment adapters
+* application does not depend on infrastructure
+* controllers depend on input ports
+* controllers do not inject repositories
+* services do not inject Spring Data repositories
+* gateway DTOs remain infrastructure-only
+* storage Path does not leak into application/domain
+* MultipartFile remains API-only
+* Payment approval centralized
+* Zarinpal and manual review share approval
+* outbox is durable provisioning trigger
+* no direct 3x-ui call from approval service
+* no in-memory event as sole guarantee
+* no JPA entity exposed
+* no field injection
+* no ApplicationContext service locator
+* no raw JSON persistence except versioned JSONB outbox payload
+
+If ArchUnit is absent, update manual architecture checklist.
+
+---
+
+# 37. Coverage targets
+
+Use existing JaCoCo.
+
+Suggested targets for Payment/Order/Outbox domain and application classes:
+
+* line coverage: at least 85%
+* branch coverage: at least 75%
+
+High-priority classes:
+
+* Payment
+* Order
+* ZarinpalPaymentAttempt
+* ManualCardPaymentInstruction
+* ManualPaymentReceipt
+* ManualPaymentReview
+* PaymentApprovalService
+* Zarinpal initialization/verification services
+* Manual instruction service
+* Receipt submission service
+* Review services
+* ProvisioningOutbox
+* ProvisioningOutboxProcessor
+* failure classifier
+
+Do not create meaningless tests only to raise coverage.
+
+Do not exclude business services.
+
+---
+
+# 38. Mutation-oriented review
+
+Ensure tests would detect these incorrect changes:
+
+* callback directly approves Payment
+* Verify uses callback amount
+* Zarinpal amount conversion occurs twice
+* cancellation overwrites APPROVED
+* manual suffix omitted
+* two active instructions share same amount
+* receipt upload approves Payment
+* invalid file accepted
+* receipt bytes stored in DB
+* another operator approves claimed review
+* rejection creates outbox
+* approval does not create outbox
+* outbox created outside approval transaction
+* two approved Payments exist for one Order
+* outbox processed twice creates two clients
+* retry creates a new PlanSelection
+* provisioning failure reverts Payment approval
+* storage path exposed
+* full card number logged
+
+Add tests where mutations could currently survive.
+
+---
+
+# 39. Performance and stability
+
+Review test and runtime behavior.
+
+Requirements:
+
+* pure unit tests start no Spring context
+* slice tests where appropriate
+* full context only where necessary
+* mock servers reused safely
+* temp directories cleaned
+* no real-clock sleeps
+* fixed/mutable clocks
+* no unbounded retry
+* bounded queue queries
+* outbox batch limits
+* large file rejection before excessive memory use
+* no loading all review history without bounds
+* no excessive concurrency thread counts
+* no timestamp precision flakiness
+
+Document any PostgreSQL timestamp precision normalization.
+
+---
+
+# 40. Flyway and schema validation
+
+Run all migrations from an empty PostgreSQL database.
+
+Verify:
+
+* all migration versions are ordered
+* no previously applied migration was edited
+* Payment tables exist
+* Zarinpal attempt table exists
+* manual instruction table exists
+* receipt table exists
+* review table exists
+* outbox table exists
+* partial unique indexes exist
+* foreign keys exist
+* status checks exist
+* JSONB payload works
+* one APPROVED Payment index exists
+* active amount reservation index exists
+* one active receipt index exists
+* Hibernate ddl-auto remains validate
+* Hibernate validation passes
+* application starts
+
+Prefer corrective migration over editing old SQL.
+
+---
+
+# 41. Documentation
+
+Create:
+
+docs/testing/payment-module-test-strategy.md
+
+Document:
+
+* Phase 5 test pyramid
+* domain tests
+* strategy tests
+* gateway adapter tests
+* storage tests
+* repository tests
+* full-flow tests
+* concurrency tests
+* outbox tests
+* fixed clock
+* mock gateway/XUI
+* temp storage
+* cleanup
+* coverage
+* security tests
+* verification commands
+* debugging guidance
+
+Create:
+
+docs/tasks/phase-5-payment-module-acceptance.md
+
+Checklist:
+
+* Payment aggregate complete
+* Order aggregate complete
+* Strategy architecture complete
+* Zarinpal request complete
+* Zarinpal callback secure
+* Zarinpal Verify complete
+* Manual instruction complete
+* Unique amount reservation complete
+* Receipt upload secure
+* Review queue complete
+* Operator claim complete
+* Manual approval complete
+* Manual rejection complete
+* Shared approval complete
+* One approved Payment per Order
+* Approval/outbox atomic
+* Zarinpal uses shared approval
+* Manual review uses shared approval
+* Outbox processor complete
+* Retry/backoff complete
+* Stale processing recovery complete
+* XUI provisioning triggered after commit
+* No duplicate VPN client
+* Payment idempotency complete
+* Concurrency verified
+* Error responses safe
+* Logging redaction verified
+* Flyway passes
+* Hibernate validation passes
+* Unit tests pass
+* Integration tests pass
+* Controller tests pass
+* Concurrency tests pass
+* Architecture checks pass
+* Coverage target met or gaps documented
+* No Telegram handler implemented
+* No subscription link implemented
+* No QR code implemented
+* No refund implemented
+* Full build passes
+
+Mark only verified items.
+
+Also create:
+
+docs/payment/payment-idempotency-matrix.md
+
+Include columns:
+
+Operation
+
+Idempotency key
+
+Database constraint
+
+Replay behavior
+
+Concurrency behavior
+
+Uncertain-result behavior
+
+Include:
+
+* Zarinpal initialization
+* Zarinpal callback/Verify
+* Manual instruction
+* Receipt upload
+* Review approval
+* Shared approval
+* Outbox creation
+* Outbox processing
+* XUI provisioning
+
+---
+
+# 42. Full verification commands
+
+Use actual supported commands.
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew integrationTest
+
+./gradlew jacocoTestReport
+
+./gradlew jacocoTestCoverageVerification
+
+./gradlew check
+
+./gradlew build
+
+Only run `integrationTest` if that source set exists.
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Also:
+
+* run application with providers disabled;
+* run with mock/test Zarinpal configuration;
+* run with temporary manual storage;
+* verify Actuator health;
+* manually exercise internal endpoints using synthetic data.
+
+---
+
+# 43. Manual verification flow
+
+Document and perform only with test data.
+
+## Zarinpal mock flow
+
+1. Create Order.
+2. Create Zarinpal Payment.
+3. Initialize.
+4. Simulate callback.
+5. Verify approval/outbox.
+6. Process outbox.
+7. Confirm one VPN provision.
+8. Replay callback.
+9. Confirm no duplicate.
+
+## Manual flow
+
+1. Create manual Payment.
+2. Initialize unique amount.
+3. Upload synthetic receipt.
+4. Review queue.
+5. Claim.
+6. Reject.
+7. Upload replacement.
+8. Claim and approve.
+9. Verify outbox.
+10. Process outbox.
+11. Confirm one VPN provision.
+12. Replay approval/outbox.
+
+Do not use real banking data or production clients.
+
+---
+
+# 44. Allowed production refactors
+
+Allowed only when required for correctness, security, or testability:
+
+* centralize Payment approval
+* refine provider capability interfaces
+* correct transaction boundaries
+* correct status transitions
+* add missing optimistic version
+* add corrective migration
+* centralize amount conversion
+* centralize error mapping
+* improve outbox claiming
+* correct compensation behavior
+* inject clock
+* improve log redaction
+* bound queue results
+* fix unsafe DTO toString
+* remove duplicated approval logic
+
+Not allowed:
+
+* redesign the whole project
+* add Kafka
+* add event sourcing
+* add CQRS
+* add new payment provider
+* add Telegram
+* add subscription URI
+* add QR
+* add refunds
+* add OCR approval
+* rename all packages without need
+
+Explain every production-code refactor.
+
+---
+
+# 45. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Test inventory
+3. Missing coverage
+4. Flaky or duplicated tests
+5. Financial correctness concerns
+6. Transaction-boundary concerns
+7. Concurrency concerns
+8. Security concerns
+9. Migration concerns
+10. Planned quality-gate approach
+11. Planned files to create
+12. Planned files to modify
+13. Production refactors that may be required
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Production refactors
+5. Test inventory by category
+6. Domain-test results
+7. Zarinpal-test results
+8. Manual-instruction-test results
+9. Receipt/storage-test results
+10. Review-test results
+11. Shared-approval-test results
+12. Outbox-test results
+13. End-to-end test results
+14. Concurrency-test results
+15. Controller-test results
+16. Architecture-test results
+17. Security-test results
+18. Coverage results
+19. Flyway and Hibernate results
+20. Build result
+21. Commands executed
+22. Remaining risks
+23. Phase 5 acceptance status
+24. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+test(payment): complete phase five payment module quality gate
+
+Stop after completing Task 32.
+
+Do not begin Task 33.
+

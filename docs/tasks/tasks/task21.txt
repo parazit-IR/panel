@@ -1,0 +1,550 @@
+You are a senior Java 21 and Spring Boot architect.
+
+Continue implementing the existing project.
+
+# Task 21 — 3x-ui Client Foundation
+
+## Goal
+
+Implement the infrastructure layer required to communicate with a 3x-ui server.
+
+This task establishes the client architecture only.
+
+Do NOT implement authentication, client creation, inbound retrieval, subscription generation, VPN provisioning, payment, Telegram Bot logic, or business workflows.
+
+Those belong to later tasks.
+
+---
+
+# Scope
+
+This task creates:
+
+* 3x-ui client abstraction
+* HTTP client
+* configuration
+* request executor
+* exception mapping
+* retry policy
+* timeout configuration
+* logging
+* integration-test foundation
+
+Nothing else.
+
+---
+
+# Constraints
+
+* Java 21
+* Spring Boot 3.x
+* Spring Web
+* Use RestClient (preferred)
+* Do not use RestTemplate
+* Do not use OpenFeign
+* Do not use WebClient unless the project is already reactive
+* Constructor injection only
+* No field injection
+* No Lombok @Data
+* Infrastructure layer only
+* Hexagonal architecture
+* No Telegram SDK usage
+* No payment logic
+* No Order logic
+* No Subscription logic
+
+Stop after Task 21.
+
+Do not start Task 22.
+
+---
+
+# 1. Review the existing architecture
+
+Inspect:
+
+* package structure
+* ports
+* adapters
+* configuration
+* exception hierarchy
+* logging
+* retry utilities
+* test infrastructure
+
+Before implementation provide:
+
+1. current assessment
+2. planned files
+3. architecture decisions
+4. possible conflicts
+
+---
+
+# 2. Configuration
+
+Create:
+
+XuiProperties
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.config
+
+Configuration prefix:
+
+app.xui
+
+Fields:
+
+baseUrl
+
+username
+
+password
+
+connectTimeout
+
+readTimeout
+
+maxRetries
+
+retryDelay
+
+verifySsl
+
+Example:
+
+app:
+xui:
+base-url: http://localhost:2053
+username: admin
+password: admin
+connect-timeout: 5s
+read-timeout: 20s
+max-retries: 3
+retry-delay: 1s
+verify-ssl: true
+
+Support .env values.
+
+Do not hardcode credentials.
+
+---
+
+# 3. Client abstraction
+
+Create:
+
+XuiClient
+
+Package:
+
+application.port.out.xui
+
+Methods:
+
+login()
+
+getInbounds()
+
+createClient()
+
+updateClient()
+
+deleteClient()
+
+These methods may throw UnsupportedOperationException for now except login() if preferred.
+
+Purpose:
+
+Define the contract.
+
+Implementation comes gradually.
+
+---
+
+# 4. HTTP implementation
+
+Create:
+
+RestClientXuiClient
+
+Package:
+
+infrastructure.xui
+
+Requirements:
+
+Implements XuiClient.
+
+Uses:
+
+Spring RestClient
+
+Configure:
+
+* base URL
+* timeouts
+* default headers
+* JSON
+* cookie support
+
+No business logic.
+
+---
+
+# 5. RestClient configuration
+
+Create:
+
+XuiRestClientConfiguration
+
+Create RestClient bean.
+
+Configure:
+
+* HttpComponents request factory
+* connection timeout
+* read timeout
+* JSON converters
+* base URL
+
+No interceptors yet except logging.
+
+---
+
+# 6. Cookie infrastructure
+
+Create:
+
+XuiSessionStore
+
+Responsibilities:
+
+* store cookies
+* retrieve cookies
+* clear cookies
+* expose current session state
+
+No persistence.
+
+Memory only.
+
+Thread-safe.
+
+Use ConcurrentHashMap or equivalent.
+
+No login logic yet.
+
+---
+
+# 7. Retry policy
+
+Create:
+
+XuiRetryExecutor
+
+Responsibilities:
+
+Retry transient failures.
+
+Retry:
+
+* timeout
+* connection refused
+* 502
+* 503
+* 504
+
+Do NOT retry:
+
+400
+
+401
+
+403
+
+404
+
+Validation failures
+
+Use Spring Retry only if already present.
+
+Otherwise implement a lightweight retry utility.
+
+---
+
+# 8. Exception hierarchy
+
+Create:
+
+XuiException
+
+Children:
+
+XuiConnectionException
+
+XuiTimeoutException
+
+XuiAuthenticationException
+
+XuiServerException
+
+XuiClientException
+
+Requirements:
+
+No SQL details.
+
+No HTTP library internals.
+
+Safe messages.
+
+---
+
+# 9. Logging
+
+Log:
+
+request method
+
+URL
+
+status code
+
+duration
+
+Retry count
+
+Never log:
+
+password
+
+cookies
+
+Authorization
+
+session id
+
+Request bodies containing secrets
+
+---
+
+# 10. Health check
+
+Implement:
+
+ping()
+
+Method only.
+
+No endpoint.
+
+Implementation:
+
+GET login page or lightweight endpoint if supported.
+
+Do not call automatically.
+
+---
+
+# 11. SSL support
+
+Support:
+
+verifySsl=true
+
+verifySsl=false
+
+When false:
+
+accept self-signed certificates.
+
+Document clearly:
+
+Production should always use verifySsl=true.
+
+---
+
+# 12. Integration-test infrastructure
+
+Create:
+
+XuiMockServerSupport
+
+Use:
+
+WireMock
+
+or
+
+MockWebServer
+
+depending on existing project.
+
+Provide reusable server.
+
+No real 3x-ui required.
+
+---
+
+# 13. Unit tests
+
+Test:
+
+properties binding
+
+retry utility
+
+session store
+
+exception mapping
+
+configuration
+
+RestClient creation
+
+No Spring Boot startup unless necessary.
+
+---
+
+# 14. Integration tests
+
+Verify:
+
+RestClient:
+
+timeouts
+
+headers
+
+JSON serialization
+
+retry
+
+SSL option
+
+cookie persistence
+
+using MockWebServer/WireMock.
+
+---
+
+# 15. Documentation
+
+Create:
+
+docs/xui/client-architecture.md
+
+Explain:
+
+layers
+
+ports
+
+adapters
+
+retry
+
+timeouts
+
+cookies
+
+SSL
+
+future login flow
+
+future client flow
+
+future inbound flow
+
+future subscription flow
+
+---
+
+# 16. Expected package structure
+
+application/
+port/out/xui/
+XuiClient.java
+
+infrastructure/
+xui/
+RestClientXuiClient.java
+
+```
+    config/
+        XuiProperties.java
+        XuiRestClientConfiguration.java
+
+    session/
+        XuiSessionStore.java
+
+    retry/
+        XuiRetryExecutor.java
+
+    exception/
+        XuiException.java
+        XuiAuthenticationException.java
+        XuiTimeoutException.java
+        XuiConnectionException.java
+        XuiServerException.java
+        XuiClientException.java
+```
+
+test/
+xui/
+XuiMockServerSupport.java
+
+docs/
+xui/
+client-architecture.md
+
+---
+
+# 17. Verification
+
+Run:
+
+./gradlew clean test
+
+./gradlew build
+
+Application must start.
+
+No endpoint added.
+
+No login performed.
+
+No request sent to a real server.
+
+No Task 22 code.
+
+---
+
+# 18. Output
+
+Before implementation:
+
+* assessment
+* planned files
+* architecture
+
+After implementation:
+
+* summary
+* created files
+* modified files
+* tests
+* build result
+* future work
+
+Suggested commit message:
+
+feat(xui): add 3x-ui client foundation
+
+Stop after Task 21.
+
+Do not begin Task 22.
+

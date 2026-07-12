@@ -1,0 +1,1323 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 17 – Admin Plan CRUD
+
+Goal:
+
+Implement internal administrative use cases and APIs for creating, retrieving, updating, activating, deactivating, and archiving VPN plans.
+
+This task must build on the Plan aggregate and persistence foundation created in Task 16.
+
+Do not implement:
+
+* public plan listing for users;
+* plan selection;
+* orders;
+* payments;
+* subscriptions;
+* Telegram handlers;
+* 3x-ui integration;
+* VPN provisioning;
+* real admin authentication or authorization.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code and conventions from Tasks 1–16.
+* Reuse Plan, PlanRepository, BaseEntity, logging, exception handling, traceId, validation, dependency injection, Testcontainers support, and architecture rules.
+* Do not expose Plan JPA entities through controllers.
+* Use dedicated API DTOs.
+* Application services must depend on PlanRepository, not Spring Data repositories.
+* API controllers must depend on input-port interfaces.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Do not add MapStruct unless it is already used.
+* Do not add Spring Security implementation in this task.
+* Use Java 21.
+* Use the existing build tool.
+* Stop after completing Task 17.
+* Do not begin Task 18.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* Plan aggregate and lifecycle;
+* PlanRepository methods;
+* Plan exceptions;
+* existing API conventions;
+* existing command/query/result patterns;
+* GlobalExceptionHandler mappings;
+* traceId behavior;
+* transaction conventions;
+* test fixtures;
+* integration-test support;
+* current migration history;
+* any internal admin package or controller already present.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture decisions
+
+5. API design decisions
+
+6. Risks and edge cases
+
+7. Admin use-case scope
+
+Implement these administrative operations:
+
+* Create plan
+* Get plan by ID
+* Get plan by code
+* List all plans
+* Update plan details
+* Activate plan
+* Deactivate plan
+* Archive plan
+
+Do not implement physical deletion.
+
+Reason:
+
+Plans may later be referenced by orders, payments, and subscriptions. Archiving is safer than deletion.
+
+Do not create a DELETE endpoint.
+
+3. Input ports
+
+Suggested package:
+
+com.parazit.panel.application.port.in.plan.admin
+
+Create:
+
+CreatePlanUseCase
+
+Method:
+
+PlanResult create(CreatePlanCommand command)
+
+Create:
+
+GetPlanUseCase
+
+Methods:
+
+PlanResult getById(GetPlanByIdQuery query)
+
+PlanResult getByCode(GetPlanByCodeQuery query)
+
+Create:
+
+ListPlansUseCase
+
+Method:
+
+List<PlanResult> list(ListPlansQuery query)
+
+Create:
+
+UpdatePlanUseCase
+
+Method:
+
+PlanResult update(UpdatePlanCommand command)
+
+Create:
+
+ChangePlanStatusUseCase
+
+Methods:
+
+PlanResult activate(ChangePlanStatusCommand command)
+
+PlanResult deactivate(ChangePlanStatusCommand command)
+
+PlanResult archive(ChangePlanStatusCommand command)
+
+Requirements:
+
+* Keep interfaces independent from infrastructure.
+* Do not use Spring Data types.
+* Do not expose Plan entities.
+* Do not add unrelated methods.
+* Keep use cases focused.
+
+If project convention favors one interface per operation, follow that convention instead.
+
+4. CreatePlanCommand
+
+Suggested package:
+
+com.parazit.panel.application.plan.admin.command
+
+Create:
+
+CreatePlanCommand
+
+Prefer a Java record.
+
+Fields:
+
+String code
+
+String name
+
+String description
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+int displayOrder
+
+Requirements:
+
+* No JPA annotations.
+* No API annotations.
+* No business logic beyond structural null checks if current conventions allow.
+* Do not include status.
+* New plans must always start as DRAFT.
+* Do not include ID.
+* Do not include createdAt or updatedAt.
+
+5. UpdatePlanCommand
+
+Create:
+
+UpdatePlanCommand
+
+Fields:
+
+UUID planId
+
+String name
+
+String description
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+int displayOrder
+
+Requirements:
+
+* code must not be editable.
+* status must not be editable here.
+* ID is required.
+* Preserve Plan aggregate invariants.
+* Do not include API request types.
+
+6. Query models
+
+Create:
+
+GetPlanByIdQuery
+
+Field:
+
+UUID planId
+
+Create:
+
+GetPlanByCodeQuery
+
+Field:
+
+String code
+
+Create:
+
+ListPlansQuery
+
+Suggested fields:
+
+PlanStatus status
+
+PlanType type
+
+Requirements:
+
+* status and type filters may be optional.
+* Do not add pagination yet unless the repository already has a standard pagination abstraction.
+* Do not use Pageable.
+* Do not add free-text search yet.
+* Normalize code in the application layer.
+
+Create:
+
+ChangePlanStatusCommand
+
+Field:
+
+UUID planId
+
+7. Result model
+
+Create:
+
+PlanResult
+
+Suggested package:
+
+com.parazit.panel.application.plan.result
+
+Fields:
+
+UUID id
+
+String code
+
+String name
+
+String description
+
+PlanStatus status
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+int displayOrder
+
+boolean available
+
+Instant createdAt
+
+Instant updatedAt
+
+Requirements:
+
+* Immutable.
+* Prefer a Java record.
+* Do not expose the entity.
+* available must be derived from status == ACTIVE.
+* Do not duplicate mutable availability state.
+* Do not include payment, order, subscription, or 3x-ui data.
+
+8. Plan mapper
+
+Create an application-level mapper or factory:
+
+PlanResultMapper
+
+Suggested package:
+
+com.parazit.panel.application.plan
+
+Requirements:
+
+* Convert Plan to PlanResult.
+* Do not place API mapping here.
+* Keep it stateless.
+* Prefer explicit manual mapping.
+* Avoid duplicating mapping in every service.
+
+9. CreatePlanService
+
+Create:
+
+CreatePlanService
+
+Suggested package:
+
+com.parazit.panel.application.plan.admin
+
+Requirements:
+
+* Implement CreatePlanUseCase.
+* Depend on PlanRepository.
+* Use constructor injection.
+* Use @Transactional.
+* Validate command is not null.
+* Normalize code consistently.
+* Check whether code already exists.
+* Create Plan through Plan.create(...).
+* Save through PlanRepository.
+* Return PlanResult.
+
+Important uniqueness behavior:
+
+* Application-level exists check provides a friendly error.
+* Database unique constraint remains final protection.
+* Concurrent requests with the same code must not create duplicate plans.
+* Handle duplicate-key race safely.
+* Do not expose SQL or constraint names.
+* Do not catch generic Exception.
+
+10. Plan code conflict
+
+Create:
+
+PlanCodeAlreadyExistsException
+
+Requirements:
+
+* Include a safe normalized plan code.
+* Map to HTTP 409.
+* Do not expose database details.
+* Use this exception for both application-level duplicate detection and recovered database uniqueness violation.
+
+If a general ConflictException already exists, reuse it cleanly.
+
+11. GetPlanService
+
+Create:
+
+GetPlanService
+
+Requirements:
+
+* Implement GetPlanUseCase.
+* Depend on PlanRepository.
+* Use constructor injection.
+* Use read-only transaction if consistent with project conventions.
+* Get by UUID.
+* Get by normalized code.
+* Throw PlanNotFoundException when absent.
+* Never save during retrieval.
+* Return PlanResult.
+
+Create:
+
+PlanNotFoundException
+
+Requirements:
+
+* Safe message.
+* Map to HTTP 404.
+* Support lookup by ID or code.
+* Do not expose persistence internals.
+
+12. ListPlansService
+
+Create:
+
+ListPlansService
+
+Requirements:
+
+* Implement ListPlansUseCase.
+* Depend on PlanRepository.
+* Use read-only transaction.
+* Support:
+
+all plans;
+filter by status;
+filter by type;
+filter by both status and type if practical.
+
+Ordering:
+
+* displayOrder ascending;
+* stable secondary ordering by code ascending.
+
+Do not sort inconsistently in memory if repository queries can provide deterministic ordering.
+
+If new repository methods are required, add only justified methods.
+
+Possible additions to PlanRepository:
+
+List<Plan> findAllByTypeOrderByDisplayOrderAscCodeAsc(PlanType type)
+
+List<Plan> findAllByStatusAndTypeOrderByDisplayOrderAscCodeAsc(
+PlanStatus status,
+PlanType type
+)
+
+Review existing method names and adapt consistently.
+
+Do not add pagination yet.
+
+13. UpdatePlanService
+
+Create:
+
+UpdatePlanService
+
+Requirements:
+
+* Implement UpdatePlanUseCase.
+* Depend on PlanRepository.
+* Use constructor injection.
+* Use @Transactional.
+* Find plan by ID.
+* Throw PlanNotFoundException when absent.
+* Call plan.updateDetails(...).
+* Do not change code.
+* Do not change status.
+* Save only if required by current repository/JPA conventions.
+* Return PlanResult.
+
+Archived plan behavior:
+
+Choose one clear rule.
+
+Recommended:
+
+Archived plans cannot be edited.
+
+If archived:
+
+* throw PlanModificationNotAllowedException;
+* map to HTTP 409.
+
+Explain and test the decision.
+
+14. ChangePlanStatusService
+
+Create:
+
+ChangePlanStatusService
+
+Requirements:
+
+* Implement ChangePlanStatusUseCase.
+* Depend on PlanRepository.
+* Use constructor injection.
+* Use @Transactional.
+* Find Plan by ID.
+* Throw PlanNotFoundException when absent.
+* Call aggregate methods:
+
+activate()
+deactivate()
+archive()
+
+* Preserve aggregate lifecycle rules.
+* Return PlanResult.
+
+Do not directly set enum values in the service.
+
+15. Status-transition error handling
+
+Reuse or create:
+
+InvalidPlanStateTransitionException
+
+Map to:
+
+HTTP 409
+
+Requirements:
+
+* Safe message.
+* Include plan ID and transition summary if useful.
+* Do not expose stack trace.
+* Do not allow archived plans to reactivate.
+* Do not weaken domain rules in the service.
+
+16. API controller
+
+Create:
+
+AdminPlanController
+
+Suggested package:
+
+com.parazit.panel.api.internal.plan.admin
+
+Base path:
+
+/internal/admin/plans
+
+Endpoints:
+
+POST /internal/admin/plans
+
+GET /internal/admin/plans
+
+GET /internal/admin/plans/{planId}
+
+GET /internal/admin/plans/by-code/{code}
+
+PUT /internal/admin/plans/{planId}
+
+POST /internal/admin/plans/{planId}/activate
+
+POST /internal/admin/plans/{planId}/deactivate
+
+POST /internal/admin/plans/{planId}/archive
+
+Do not create DELETE.
+
+Requirements:
+
+* Controller depends on input-port interfaces.
+* Use constructor injection.
+* Use dedicated request/response DTOs.
+* Do not expose Plan entities.
+* Do not inject PlanRepository.
+* Do not implement authentication.
+* Mark endpoints internal and administrative in documentation.
+
+17. CreatePlanRequest
+
+Create:
+
+CreatePlanRequest
+
+Fields:
+
+String code
+
+String name
+
+String description
+
+PlanType type
+
+Long priceAmount
+
+CurrencyCode currency
+
+Integer durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+Integer displayOrder
+
+Validation:
+
+code:
+
+@NotBlank
+@Size(min = 3, max = 64)
+@Pattern(regexp = "^[A-Za-z0-9_-]+$")
+
+name:
+
+@NotBlank
+@Size(max = 128)
+
+description:
+
+@Size(max = 1000)
+
+type:
+
+@NotNull
+
+priceAmount:
+
+@NotNull
+@PositiveOrZero
+
+currency:
+
+@NotNull
+
+durationDays:
+
+@NotNull
+@Positive
+
+trafficLimitBytes:
+
+Optional at API validation level because consistency depends on type.
+
+maxDevices:
+
+@Positive when present
+
+displayOrder:
+
+@NotNull
+@PositiveOrZero
+
+Do not duplicate all domain logic in Bean Validation.
+
+Domain remains the final authority for cross-field rules.
+
+18. UpdatePlanRequest
+
+Create:
+
+UpdatePlanRequest
+
+Fields:
+
+String name
+
+String description
+
+PlanType type
+
+Long priceAmount
+
+CurrencyCode currency
+
+Integer durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+Integer displayOrder
+
+Use equivalent validation.
+
+Do not include:
+
+code
+status
+id
+
+19. PlanResponse
+
+Create:
+
+PlanResponse
+
+Fields matching PlanResult:
+
+UUID id
+
+String code
+
+String name
+
+String description
+
+PlanStatus status
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+int displayOrder
+
+boolean available
+
+Instant createdAt
+
+Instant updatedAt
+
+Prefer a Java record.
+
+20. Plan API mapper
+
+Create:
+
+AdminPlanApiMapper
+
+Requirements:
+
+* Convert CreatePlanRequest to CreatePlanCommand.
+* Convert plan ID and UpdatePlanRequest to UpdatePlanCommand.
+* Convert plan ID to ChangePlanStatusCommand.
+* Convert PlanResult to PlanResponse.
+* Convert list results.
+* Use explicit manual mapping.
+* Keep mapping out of controller.
+* Do not use JPA entities.
+
+21. HTTP behavior
+
+POST create:
+
+* HTTP 201
+* Return created PlanResponse.
+* Add Location header:
+
+/internal/admin/plans/{id}
+
+Duplicate code:
+
+* HTTP 409
+
+GET list:
+
+* HTTP 200
+* Return JSON array.
+
+GET by ID:
+
+* HTTP 200
+* Missing → 404
+
+GET by code:
+
+* HTTP 200
+* Missing → 404
+
+PUT update:
+
+* HTTP 200
+* Missing → 404
+* Archived modification → 409
+* Invalid cross-field data → 400
+
+POST activate:
+
+* HTTP 200
+* Invalid transition → 409
+
+POST deactivate:
+
+* HTTP 200
+* Invalid transition → 409
+
+POST archive:
+
+* HTTP 200
+* Repeated archive behavior must follow domain rules.
+* Prefer idempotent same-state archive only if aggregate design supports it.
+* Otherwise return 409 consistently.
+
+22. List filters
+
+Support optional query parameters:
+
+status
+
+type
+
+Example:
+
+GET /internal/admin/plans?status=ACTIVE&type=TRAFFIC_LIMITED
+
+Requirements:
+
+* Invalid enum values return HTTP 400.
+* Empty filters list all plans.
+* Results ordered by displayOrder then code.
+* Do not expose Spring Pageable.
+* Do not implement search text.
+* Do not implement price range filtering.
+* Do not implement pagination yet.
+
+23. Repository additions
+
+Review PlanRepository and add only methods required for deterministic filtering.
+
+Possible final methods:
+
+List<Plan> findAllOrderByDisplayOrderAscCodeAsc()
+
+List<Plan> findAllByStatusOrderByDisplayOrderAscCodeAsc(
+PlanStatus status
+)
+
+List<Plan> findAllByTypeOrderByDisplayOrderAscCodeAsc(
+PlanType type
+)
+
+List<Plan> findAllByStatusAndTypeOrderByDisplayOrderAscCodeAsc(
+PlanStatus status,
+PlanType type
+)
+
+Update:
+
+SpringDataPlanRepository
+
+PlanRepositoryAdapter
+
+Requirements:
+
+* No Spring Data type leaks.
+* Do not add generic search abstractions.
+* No business logic in adapter.
+
+24. Transaction boundaries
+
+Rules:
+
+* Create, update, activate, deactivate, and archive are transactional.
+* Get and list operations may use read-only transactions.
+* Controllers must not be transactional.
+* Repository adapter must not own business transaction orchestration.
+* Concurrency uniqueness handling must remain safe.
+
+25. Logging
+
+Log administrative plan changes.
+
+Create:
+
+* INFO log for plan creation.
+* INFO log for detail update.
+* INFO log for activation.
+* INFO log for deactivation.
+* INFO log for archive.
+* DEBUG log for reads and lists if useful.
+
+Include:
+
+planId
+planCode
+oldStatus
+newStatus
+traceId through MDC
+
+Do not log full descriptions unnecessarily.
+Do not log request bodies.
+Do not log SQL errors or database credentials.
+
+26. Domain tests
+
+Review Task 16 Plan tests and extend only when required.
+
+Ensure tests cover:
+
+* archived plan modification rejection;
+* all lifecycle transitions used by admin services;
+* same-state transition behavior;
+* update preserves code;
+* update preserves status;
+* cross-field validation remains enforced.
+
+Do not duplicate existing tests.
+
+27. CreatePlanService unit tests
+
+Test:
+
+* successful limited-plan creation;
+* successful unlimited-plan creation;
+* code normalization;
+* default DRAFT status;
+* repository save;
+* duplicate code detected before save;
+* database race conflict translated to PlanCodeAlreadyExistsException;
+* invalid command;
+* invalid traffic/type combination;
+* repository interaction.
+
+Do not start Spring context.
+
+28. GetPlanService unit tests
+
+Test:
+
+* get by ID;
+* get by normalized code;
+* missing by ID;
+* missing by code;
+* repository save never called;
+* result mapping correct.
+
+29. ListPlansService unit tests
+
+Test:
+
+* no filters;
+* status filter;
+* type filter;
+* both filters;
+* empty result;
+* deterministic ordering is delegated or preserved;
+* repository method selection is correct.
+
+30. UpdatePlanService unit tests
+
+Test:
+
+* successful update;
+* missing plan;
+* archived plan rejected;
+* code preserved;
+* status preserved;
+* invalid data rejected;
+* unrelated fields unchanged;
+* repository interactions correct.
+
+31. ChangePlanStatusService unit tests
+
+Test:
+
+* draft to active;
+* active to inactive;
+* inactive to active;
+* draft to archived;
+* active to archived;
+* inactive to archived;
+* invalid transition;
+* archived transition rejected;
+* missing plan;
+* result contains new status.
+
+32. Integration tests
+
+Use PostgreSQL Testcontainers.
+
+Create an integration suite for admin use cases.
+
+Verify:
+
+* create persists Plan;
+* generated UUID;
+* auditing fields;
+* duplicate code rejected;
+* normalized code uniqueness;
+* get by ID;
+* get by code;
+* list all ordered;
+* list by status;
+* list by type;
+* list by status and type;
+* update persists;
+* code remains immutable;
+* lifecycle transitions persist;
+* archived plan cannot be modified;
+* Flyway succeeds;
+* Hibernate validation succeeds.
+
+33. Concurrency test for duplicate plan code
+
+Create a deterministic integration test.
+
+Scenario:
+
+Two concurrent create requests with the same normalized code.
+
+Verify:
+
+* exactly one Plan row exists;
+* one operation succeeds;
+* the other returns PlanCodeAlreadyExistsException;
+* no raw DataIntegrityViolationException escapes;
+* no duplicate record exists.
+
+Requirements:
+
+* Real PostgreSQL.
+* Separate transactions.
+* ExecutorService.
+* CountDownLatch, CyclicBarrier, or equivalent.
+* No Thread.sleep.
+* Executor is shut down.
+* Timeout prevents hanging.
+
+34. Controller tests
+
+Use MockMvc or the existing web-test stack.
+
+Create tests for:
+
+POST create:
+
+* valid limited plan → 201;
+* valid unlimited plan → 201;
+* Location header;
+* duplicate code → 409;
+* invalid code → 400;
+* blank name → 400;
+* negative price → 400;
+* invalid duration → 400;
+* inconsistent traffic/type → 400;
+* malformed JSON → 400.
+
+GET list:
+
+* returns 200;
+* returns array;
+* status filter works;
+* type filter works;
+* invalid status → 400;
+* invalid type → 400;
+* stable response fields.
+
+GET by ID:
+
+* existing → 200;
+* missing → 404;
+* invalid UUID path → 400.
+
+GET by code:
+
+* existing → 200;
+* lowercase lookup accepted;
+* missing → 404.
+
+PUT:
+
+* valid update → 200;
+* missing → 404;
+* archived → 409;
+* invalid data → 400;
+* code cannot be supplied or changed.
+
+Status endpoints:
+
+* activate → 200;
+* deactivate → 200;
+* archive → 200;
+* invalid transition → 409;
+* missing plan → 404.
+
+Verify all error responses contain:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No stack trace.
+No SQL details.
+
+35. API contract safety
+
+Verify responses do not expose:
+
+* Hibernate proxy data;
+* internal repository types;
+* BaseEntity implementation details beyond intended fields;
+* SQL constraint names;
+* stack traces;
+* internal exception class names;
+* unrelated future fields.
+
+36. Architecture rules
+
+Verify:
+
+* API controllers depend on input ports.
+* Application services depend on PlanRepository.
+* Application does not import infrastructure.
+* Domain does not import API.
+* PlanRepository does not extend Spring Data.
+* SpringDataPlanRepository stays in infrastructure.
+* No controller injects JpaRepository.
+* No field injection exists.
+* No real admin security is added.
+* No public user plan listing is added.
+* No payment, order, subscription, Telegram, or 3x-ui code is added.
+* No physical plan deletion exists.
+
+Extend ArchUnit tests if already present.
+
+37. Documentation
+
+Create:
+
+docs/use-cases/admin-plan-management.md
+
+Document:
+
+* purpose;
+* internal administrative scope;
+* create flow;
+* update flow;
+* lifecycle operations;
+* why code is immutable;
+* why deletion is not supported;
+* list filters;
+* request/response contracts;
+* HTTP status codes;
+* validation;
+* duplicate-code handling;
+* concurrency strategy;
+* transaction boundaries;
+* logging behavior;
+* security deferred to later work;
+* public plan display deferred to Task 18.
+
+Include Mermaid sequence diagrams for:
+
+* create Plan;
+* update Plan;
+* activate Plan;
+* duplicate-code conflict.
+
+Update:
+
+docs/domain/plan-model.md
+
+Only where Task 17 clarifies lifecycle or archived modification behavior.
+
+38. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/in/plan/admin/
+CreatePlanUseCase.java
+GetPlanUseCase.java
+ListPlansUseCase.java
+UpdatePlanUseCase.java
+ChangePlanStatusUseCase.java
+
+src/main/java/com/parazit/panel/application/plan/admin/command/
+CreatePlanCommand.java
+UpdatePlanCommand.java
+ChangePlanStatusCommand.java
+
+src/main/java/com/parazit/panel/application/plan/admin/query/
+GetPlanByIdQuery.java
+GetPlanByCodeQuery.java
+ListPlansQuery.java
+
+src/main/java/com/parazit/panel/application/plan/result/
+PlanResult.java
+
+src/main/java/com/parazit/panel/application/plan/
+PlanResultMapper.java
+
+src/main/java/com/parazit/panel/application/plan/admin/
+CreatePlanService.java
+GetPlanService.java
+ListPlansService.java
+UpdatePlanService.java
+ChangePlanStatusService.java
+
+src/main/java/com/parazit/panel/api/internal/plan/admin/
+AdminPlanController.java
+CreatePlanRequest.java
+UpdatePlanRequest.java
+PlanResponse.java
+AdminPlanApiMapper.java
+
+src/main/java/com/parazit/panel/common/exception/ or appropriate package/
+PlanNotFoundException.java
+PlanCodeAlreadyExistsException.java
+PlanModificationNotAllowedException.java
+
+src/test/java/com/parazit/panel/application/plan/admin/
+CreatePlanServiceTest.java
+GetPlanServiceTest.java
+ListPlansServiceTest.java
+UpdatePlanServiceTest.java
+ChangePlanStatusServiceTest.java
+
+src/test/java/com/parazit/panel/integration/plan/
+AdminPlanManagementIntegrationTest.java
+ConcurrentPlanCreationIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/plan/admin/
+AdminPlanControllerTest.java
+
+docs/use-cases/
+admin-plan-management.md
+
+Adapt names and packages to existing project conventions.
+
+39. Verification commands
+
+Run commands appropriate to the current build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile and PostgreSQL.
+
+Manually verify:
+
+1. Create a DRAFT plan.
+2. Retrieve it by ID.
+3. Retrieve it by code.
+4. Update details.
+5. Activate it.
+6. Deactivate it.
+7. Reactivate it.
+8. Archive it.
+9. Attempt to edit archived plan.
+10. Attempt duplicate-code creation.
+
+Confirm:
+
+* all previous tests pass;
+* admin Plan tests pass;
+* concurrency test passes;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* application starts;
+* no DELETE endpoint exists;
+* no security implementation was added;
+* no public listing was added;
+* no payment, subscription, Telegram, or 3x-ui logic was added;
+* no credentials were committed;
+* no tests were disabled.
+
+40. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Admin CRUD design
+3. Repository-query changes
+4. Archived-plan modification decision
+5. Duplicate-code concurrency strategy
+6. Planned files to create
+7. Planned files to modify
+8. Risks and edge cases
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. API contract
+5. Validation behavior
+6. Lifecycle behavior
+7. Duplicate-code handling
+8. Test results
+9. Concurrency-test results
+10. Build result
+11. Commands executed
+12. Remaining issues
+13. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(plan): add internal admin plan management
+
+Stop after completing Task 17.
+
+Do not start Task 18.
+

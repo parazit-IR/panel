@@ -1,0 +1,68 @@
+You are a senior Java and DevOps engineer.
+
+Continue implementing the project.
+
+Task 3 – Docker Development Environment
+
+Requirements:
+
+1. Create a docker directory.
+
+2. Create a production-quality docker-compose.yml.
+
+3. Add the following services:
+
+* PostgreSQL 17
+* Redis 8
+* Adminer
+
+4. Configure PostgreSQL:
+
+Database:
+panel_db
+
+Username:
+panel
+
+Password:
+panel
+
+Port:
+5432
+
+5. Configure Redis:
+
+Port:
+6379
+
+Enable persistent volume.
+
+6. Configure Adminer:
+
+Port:
+8080
+
+Connect to PostgreSQL automatically using environment variables.
+
+7. Create named Docker volumes.
+
+8. Create a dedicated Docker network.
+
+9. Add health checks for PostgreSQL and Redis.
+
+10. Use restart: unless-stopped.
+
+11. Add comments explaining important configurations.
+
+12. Verify that:
+
+docker compose up -d
+
+starts successfully.
+
+13. Do not add any application container yet.
+
+14. Show every created file before modifying anything.
+
+15. Wait for approval before continuing.
+

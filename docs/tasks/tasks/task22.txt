@@ -1,0 +1,618 @@
+You are a senior Java 21 and Spring Boot architect.
+
+Continue implementing the existing project.
+
+Task 22 – 3x-ui Authentication and Session Management
+
+Goal
+
+Implement complete authentication against a 3x-ui panel together with automatic session management.
+
+This task builds on Task 21.
+
+After this task every future request to 3x-ui must automatically reuse a valid authenticated session.
+
+Do NOT implement:
+
+* list inbounds
+* create client
+* update client
+* delete client
+* payment
+* subscription
+* Telegram Bot
+* VPN provisioning
+
+Stop after Task 22.
+
+Do not begin Task 23.
+
+---
+
+Requirements
+
+* Java 21
+* Spring Boot 3.x
+* RestClient
+* Hexagonal Architecture
+* Constructor Injection
+* Thread Safe
+* No RestTemplate
+* No WebClient
+* No OpenFeign
+
+---
+
+1. Review
+
+Inspect Task 21 implementation.
+
+Verify:
+
+* RestClient
+* SessionStore
+* Retry
+* Exception hierarchy
+* Configuration
+* Logging
+* Test infrastructure
+
+Before implementation provide:
+
+* assessment
+* planned files
+* architecture
+* possible improvements
+
+---
+
+2. Extend XuiClient
+
+Implement:
+
+login()
+
+logout()
+
+isLoggedIn()
+
+refreshSession()
+
+All methods must be fully implemented.
+
+Future methods remain unchanged.
+
+---
+
+3. Login endpoint
+
+Implement login against 3x-ui.
+
+Credentials:
+
+username
+
+password
+
+from XuiProperties.
+
+Detect successful login.
+
+Extract session cookies.
+
+Store them inside XuiSessionStore.
+
+Do not expose cookies.
+
+---
+
+4. Session Store
+
+Extend XuiSessionStore.
+
+Support:
+
+store()
+
+get()
+
+clear()
+
+isPresent()
+
+lastLoginTime()
+
+Thread Safe.
+
+Memory only.
+
+---
+
+5. Session expiration
+
+Implement automatic expiration detection.
+
+Requirements:
+
+If request returns:
+
+401
+
+403
+
+or login redirect
+
+session becomes invalid.
+
+Store clears itself.
+
+No stale cookies.
+
+---
+
+6. Auto Login
+
+Create:
+
+XuiAuthenticationManager
+
+Responsibilities:
+
+Ensure authenticated session exists.
+
+Algorithm:
+
+If session valid
+
+return
+
+Else
+
+login
+
+If login succeeds
+
+continue
+
+If login fails
+
+throw XuiAuthenticationException
+
+Every future API request must call:
+
+ensureAuthenticated()
+
+before execution.
+
+---
+
+7. Login synchronization
+
+Prevent multiple concurrent logins.
+
+Requirements:
+
+If 20 threads require login simultaneously:
+
+Exactly one performs login.
+
+Others wait.
+
+Reuse same session.
+
+Use:
+
+ReentrantLock
+
+or equivalent.
+
+Avoid synchronized on large methods.
+
+---
+
+8. Logout
+
+Implement:
+
+logout()
+
+Clear:
+
+cookies
+
+session
+
+authentication state
+
+No automatic logout during application shutdown.
+
+---
+
+9. Request execution
+
+Create:
+
+AuthenticatedRequestExecutor
+
+Responsibilities:
+
+ensureAuthenticated()
+
+execute request
+
+if authentication expired
+
+login again
+
+retry once
+
+return response
+
+Pseudo flow:
+
+ensureAuthenticated()
+
+↓
+
+execute request
+
+↓
+
+401?
+
+↓
+
+clear session
+
+↓
+
+login
+
+↓
+
+retry once
+
+↓
+
+return
+
+Do not retry forever.
+
+Maximum:
+
+one automatic re-login.
+
+---
+
+10. Retry interaction
+
+Retry policy must cooperate with authentication.
+
+Retry network failures.
+
+Do NOT retry invalid credentials.
+
+Retry after successful re-login only once.
+
+---
+
+11. Cookie handling
+
+Persist cookies only in memory.
+
+Support:
+
+JSESSIONID
+
+other cookies returned by panel.
+
+Automatically attach cookies to every request.
+
+Never log cookie values.
+
+---
+
+12. Logging
+
+Log:
+
+login success
+
+login failure
+
+logout
+
+session refresh
+
+automatic re-login
+
+authentication duration
+
+Never log:
+
+password
+
+cookie
+
+session id
+
+authorization header
+
+---
+
+13. Exception mapping
+
+Throw:
+
+XuiAuthenticationException
+
+invalid credentials
+
+XuiConnectionException
+
+network failure
+
+XuiTimeoutException
+
+timeout
+
+XuiServerException
+
+5xx
+
+No generic Exception.
+
+---
+
+14. Health support
+
+Implement:
+
+isAuthenticated()
+
+pingAuthenticated()
+
+pingAuthenticated()
+
+must require valid login.
+
+Used later.
+
+---
+
+15. Configuration
+
+Support:
+
+login timeout
+
+session timeout (optional)
+
+auto re-login enabled
+
+Example:
+
+app:
+
+xui:
+
+```
+auto-login: true
+
+session-timeout: PT30M
+```
+
+If session timeout unsupported by panel
+
+document it clearly.
+
+---
+
+16. Unit Tests
+
+Test:
+
+successful login
+
+failed login
+
+invalid credentials
+
+session storage
+
+logout
+
+session clear
+
+authentication manager
+
+double login prevention
+
+concurrent login
+
+retry interaction
+
+automatic re-login
+
+cookie attachment
+
+No real server.
+
+---
+
+17. Integration Tests
+
+Using WireMock or MockWebServer.
+
+Simulate:
+
+successful login
+
+401
+
+403
+
+expired session
+
+automatic login
+
+automatic retry
+
+network timeout
+
+invalid credentials
+
+Verify:
+
+only one login request
+
+cookies reused
+
+retry only once
+
+---
+
+18. Thread Safety Tests
+
+Simulate:
+
+50 concurrent threads.
+
+Requirements:
+
+Exactly one login request.
+
+Single session.
+
+No duplicate cookies.
+
+No race conditions.
+
+---
+
+19. Documentation
+
+Create:
+
+docs/xui/authentication.md
+
+Document:
+
+login flow
+
+session lifecycle
+
+cookie lifecycle
+
+authentication manager
+
+automatic re-login
+
+thread safety
+
+retry interaction
+
+future authenticated request flow
+
+Include Mermaid sequence diagrams.
+
+---
+
+20. Expected structure
+
+application/
+
+```
+port/out/xui/
+
+    XuiClient.java
+```
+
+infrastructure/
+
+```
+xui/
+
+    authentication/
+
+        XuiAuthenticationManager.java
+
+        AuthenticatedRequestExecutor.java
+
+    session/
+
+        XuiSessionStore.java
+
+    RestClientXuiClient.java
+```
+
+tests/
+
+```
+xui/
+
+    AuthenticationManagerTest.java
+
+    ConcurrentLoginTest.java
+```
+
+docs/
+
+```
+xui/
+
+    authentication.md
+```
+
+---
+
+21. Verification
+
+Run:
+
+./gradlew clean test
+
+./gradlew build
+
+Verify:
+
+Application starts.
+
+Login succeeds against mock server.
+
+Concurrent login safe.
+
+Automatic re-login works.
+
+No future API implemented.
+
+No Task 23 code.
+
+---
+
+22. Output
+
+Before implementation:
+
+* assessment
+* planned files
+* architecture
+
+After implementation:
+
+* summary
+* created files
+* modified files
+* tests
+* build result
+* concurrency result
+* future work
+
+Suggested commit message:
+
+feat(xui): implement authentication and session management
+
+Stop after Task 22.
+
+Do not begin Task 23.
+

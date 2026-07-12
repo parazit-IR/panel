@@ -1,0 +1,59 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+This is a brand new production-grade project.
+
+Do NOT change the architecture.
+Do NOT add extra libraries.
+Do NOT invent new features.
+
+Your job is only to implement exactly what is requested.
+
+Task 2 – Project Skeleton
+
+Requirements:
+
+1. Use Java 21.
+
+2. Use Spring Boot 3.x.
+
+3. Use Gradle Kotlin DSL (build.gradle.kts).
+
+4. Create the basic project structure only.
+
+5. Add only these dependencies:
+
+   * Spring Web
+   * Spring Boot Actuator
+   * Spring Data JPA
+   * Validation
+   * PostgreSQL Driver
+   * Flyway
+   * Spring Security
+   * Lombok
+   * Spring Boot Configuration Processor
+   * Spring Boot Test
+   * Testcontainers (PostgreSQL)
+
+6. Create the package structure:
+
+com.parazit.panel
+common
+config
+domain
+application
+infrastructure
+api
+security
+telegram
+payment
+panel
+subscription
+
+7. Do NOT implement any business logic.
+
+8. Verify the project builds successfully.
+
+9. Show every created file before making changes.
+
+10. Wait for approval before continuing to the next task.
+

@@ -1,0 +1,895 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 18 – Active Plan Catalog for Users
+
+Goal:
+
+Implement a read-only user-facing plan catalog that exposes only purchasable ACTIVE plans in a stable, minimal, and API-safe format.
+
+This task must build on the Plan aggregate, repository, and admin management implemented in Tasks 16 and 17.
+
+Do not implement:
+
+* plan selection;
+* cart;
+* order creation;
+* payment;
+* subscription creation;
+* Telegram Bot handlers;
+* 3x-ui integration;
+* VPN account provisioning;
+* admin authentication;
+* user authentication;
+* discounts;
+* coupons;
+* dynamic pricing;
+* pagination unless clearly justified by current project scale.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code from Tasks 1–17.
+* Reuse Plan, PlanRepository, exception handling, traceId, logging, validation, dependency injection, test support, and architecture rules.
+* Do not expose Plan JPA entities.
+* Do not reuse admin response DTOs as public/user-facing DTOs.
+* Do not expose DRAFT, INACTIVE, or ARCHIVED plans.
+* Do not expose internal audit or lifecycle details unless intentionally part of the contract.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not add unnecessary dependencies.
+* Do not use Lombok @Data.
+* Use Java 21.
+* Stop after completing Task 18.
+* Do not begin Task 19.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* Plan aggregate;
+* PlanStatus and PlanType;
+* PlanRepository methods;
+* Task 17 admin services and APIs;
+* current public/internal API package conventions;
+* exception handling;
+* logging conventions;
+* test support;
+* architecture tests;
+* any existing plan catalog or public endpoint.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. API contract decision
+
+5. Repository-query decision
+
+6. Risks and edge cases
+
+7. User-facing use-case scope
+
+Implement:
+
+* list all ACTIVE plans;
+* get one ACTIVE plan by ID;
+* get one ACTIVE plan by code;
+* optional filter by PlanType.
+
+Do not expose inactive lifecycle states.
+
+Behavior:
+
+* ACTIVE plan → visible.
+* DRAFT plan → invisible.
+* INACTIVE plan → invisible.
+* ARCHIVED plan → invisible.
+
+For direct lookups:
+
+* If the plan exists but is not ACTIVE, behave as not found.
+* Do not reveal that an inactive or archived plan exists.
+
+3. Input ports
+
+Suggested package:
+
+com.parazit.panel.application.port.in.plan.catalog
+
+Create:
+
+ListAvailablePlansUseCase
+
+Method:
+
+List<AvailablePlanResult> list(ListAvailablePlansQuery query)
+
+Create:
+
+GetAvailablePlanUseCase
+
+Methods:
+
+AvailablePlanResult getById(GetAvailablePlanByIdQuery query)
+
+AvailablePlanResult getByCode(GetAvailablePlanByCodeQuery query)
+
+Requirements:
+
+* Keep interfaces independent from infrastructure.
+* Do not expose Plan entities.
+* Do not use Spring Data types.
+* Keep operations read-only.
+* Do not add admin operations.
+
+4. Query models
+
+Create:
+
+ListAvailablePlansQuery
+
+Fields:
+
+PlanType type
+
+The filter may be optional.
+
+Create:
+
+GetAvailablePlanByIdQuery
+
+Field:
+
+UUID planId
+
+Create:
+
+GetAvailablePlanByCodeQuery
+
+Field:
+
+String code
+
+Suggested package:
+
+com.parazit.panel.application.plan.catalog.query
+
+Prefer Java records.
+
+Requirements:
+
+* No API annotations.
+* No JPA annotations.
+* No business logic beyond basic structural validation.
+* Normalize code in service or dedicated normalizer.
+
+5. Result model
+
+Create:
+
+AvailablePlanResult
+
+Suggested package:
+
+com.parazit.panel.application.plan.catalog.result
+
+Fields:
+
+UUID id
+
+String code
+
+String name
+
+String description
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+int displayOrder
+
+Requirements:
+
+* Immutable.
+* Prefer Java record.
+* Do not expose PlanStatus.
+* Do not expose available boolean because all results are available by definition.
+* Do not expose createdAt or updatedAt.
+* Do not expose internal lifecycle information.
+* Do not expose payment, subscription, order, or 3x-ui fields.
+* Keep the contract minimal.
+
+6. Display-oriented derived fields
+
+Decide whether to expose only canonical values or also display helpers.
+
+Preferred for this task:
+
+Expose canonical values only.
+
+Do not add:
+
+formattedPrice
+trafficLimitGb
+durationLabel
+localizedName
+
+Reason:
+
+Formatting and localization belong to Telegram/UI presentation layers.
+
+If a display helper is added, it must be deterministic and not replace canonical fields.
+
+7. Application mapper
+
+Create:
+
+AvailablePlanResultMapper
+
+Suggested package:
+
+com.parazit.panel.application.plan.catalog
+
+Requirements:
+
+* Convert Plan to AvailablePlanResult.
+* Explicit manual mapping.
+* Stateless.
+* Do not reuse admin API mapper.
+* Do not include status or auditing fields.
+* Do not map non-ACTIVE plans unless service validation already guarantees status.
+
+8. Repository queries
+
+Review existing PlanRepository methods.
+
+Add only the methods required for efficient ACTIVE catalog queries.
+
+Preferred methods:
+
+List<Plan> findAllByStatusOrderByDisplayOrderAscCodeAsc(
+PlanStatus status
+)
+
+List<Plan> findAllByStatusAndTypeOrderByDisplayOrderAscCodeAsc(
+PlanStatus status,
+PlanType type
+)
+
+Optional direct methods:
+
+Optional<Plan> findByIdAndStatus(
+UUID id,
+PlanStatus status
+)
+
+Optional<Plan> findByCodeAndStatus(
+String code,
+PlanStatus status
+)
+
+Choose between:
+
+* dedicated repository queries;
+* loading by ID/code and checking status in the application service.
+
+Preferred:
+
+Use direct status-constrained queries for user-facing lookup to avoid accidentally exposing non-active plans.
+
+Update:
+
+PlanRepository
+SpringDataPlanRepository
+PlanRepositoryAdapter
+
+Requirements:
+
+* No Spring Data types leak.
+* Deterministic order.
+* No business logic in adapter.
+* Do not add generic specification support.
+
+9. ListAvailablePlansService
+
+Create:
+
+ListAvailablePlansService
+
+Suggested package:
+
+com.parazit.panel.application.plan.catalog
+
+Requirements:
+
+* Implement ListAvailablePlansUseCase.
+* Depend on PlanRepository.
+* Use constructor injection.
+* Use read-only transaction.
+* Query only PlanStatus.ACTIVE.
+* Support optional PlanType filter.
+* Return deterministic ordering:
+
+displayOrder ascending;
+code ascending.
+
+* Return empty list when no active plan exists.
+* Never return null.
+* Do not mutate Plan.
+* Do not save.
+
+10. GetAvailablePlanService
+
+Create:
+
+GetAvailablePlanService
+
+Suggested package:
+
+com.parazit.panel.application.plan.catalog
+
+Requirements:
+
+* Implement GetAvailablePlanUseCase.
+* Depend on PlanRepository.
+* Use constructor injection.
+* Use read-only transaction.
+* Get only ACTIVE plans.
+* Normalize code.
+* Throw AvailablePlanNotFoundException when no visible plan exists.
+* Same exception should be used whether:
+
+  * ID does not exist;
+  * code does not exist;
+  * plan exists but is not ACTIVE.
+
+Do not reveal hidden lifecycle state.
+
+11. Exception design
+
+Create:
+
+AvailablePlanNotFoundException
+
+Requirements:
+
+* Safe message.
+* Map to HTTP 404.
+* Support lookup by ID or code.
+* Do not mention whether the plan is DRAFT, INACTIVE, or ARCHIVED.
+* Do not expose persistence details.
+* Reuse PlanNotFoundException only if doing so does not leak admin semantics.
+
+Preferred:
+
+Use a dedicated catalog exception because user-facing visibility rules differ from admin lookup.
+
+12. API controller
+
+Create:
+
+PlanCatalogController
+
+Suggested package:
+
+com.parazit.panel.api.plan.catalog
+
+Base path:
+
+/api/plans
+
+Endpoints:
+
+GET /api/plans
+
+GET /api/plans/{planId}
+
+GET /api/plans/by-code/{code}
+
+Requirements:
+
+* This is read-only.
+* No POST, PUT, PATCH, or DELETE.
+* Controller depends on input ports.
+* Use constructor injection.
+* Use dedicated response DTOs.
+* Do not expose admin DTOs.
+* Do not inject repository.
+* Do not implement authentication.
+* Do not include internal/admin in the route.
+
+13. List filter
+
+Support optional query parameter:
+
+type
+
+Example:
+
+GET /api/plans?type=UNLIMITED
+
+Behavior:
+
+* no type → all ACTIVE plans;
+* supported type → filtered ACTIVE plans;
+* invalid enum value → 400;
+* no matches → 200 with [].
+
+Do not support status as a query parameter.
+
+Users must never choose lifecycle status.
+
+14. API response DTO
+
+Create:
+
+AvailablePlanResponse
+
+Fields:
+
+UUID id
+
+String code
+
+String name
+
+String description
+
+PlanType type
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+Prefer Java record.
+
+Do not include:
+
+status
+available
+displayOrder if not needed by clients
+createdAt
+updatedAt
+internal identifiers
+3x-ui data
+
+Decision on displayOrder:
+
+Preferred:
+
+Do not expose displayOrder.
+
+Use it only for server-side ordering.
+
+15. API mapper
+
+Create:
+
+PlanCatalogApiMapper
+
+Requirements:
+
+* Convert AvailablePlanResult to AvailablePlanResponse.
+* Convert lists.
+* Convert path/query input into query records if useful.
+* Manual explicit mapping.
+* No JPA entity mapping.
+* No MapStruct unless already used.
+
+16. HTTP behavior
+
+GET /api/plans
+
+* 200
+* JSON array
+* only ACTIVE plans
+* ordered by displayOrder then code
+* empty list allowed
+
+GET /api/plans/{planId}
+
+* 200 when ACTIVE
+* 404 when missing or not ACTIVE
+* 400 for malformed UUID
+
+GET /api/plans/by-code/{code}
+
+* 200 when ACTIVE
+* lowercase input accepted through normalization
+* 404 when missing or not ACTIVE
+
+Invalid type query:
+
+* 400
+* standard error response
+* traceId included
+
+17. Caching decision
+
+Do not add Redis caching yet unless the project already has a clear caching abstraction and this task explicitly benefits from it.
+
+Preferred:
+
+No cache in Task 18.
+
+Reason:
+
+* plan volume is small;
+* correctness is more important;
+* caching introduces invalidation complexity after admin changes.
+
+Document that caching may be added later if needed.
+
+Do not use Spring Cache solely for this task.
+
+18. Localization decision
+
+Do not add localized plan names or descriptions in this task.
+
+Keep:
+
+name
+description
+
+as canonical values.
+
+Localization belongs to a later presentation/content task.
+
+Do not add language-specific columns.
+
+19. Logging
+
+Read operations should be low-noise.
+
+Requirements:
+
+* DEBUG log for list catalog requests if useful.
+* DEBUG log for successful direct lookup.
+* Do not log every request at INFO.
+* Missing visible plan may be DEBUG.
+* Include traceId through MDC.
+* Avoid logging personal data.
+* Do not log request bodies.
+* Do not log hidden plan status in user-facing error messages.
+
+Server logs may include internal status for diagnostics only if current logging policy permits it.
+
+20. Unit tests for mapper
+
+Test:
+
+* all allowed fields mapped;
+* status not exposed;
+* audit timestamps not exposed;
+* displayOrder not exposed if excluded;
+* null optional fields preserved;
+* limited and unlimited plans map correctly.
+
+21. ListAvailablePlansService unit tests
+
+Test:
+
+* lists ACTIVE plans;
+* no filter delegates to ACTIVE query;
+* TRAFFIC_LIMITED filter;
+* UNLIMITED filter;
+* empty list;
+* deterministic ordering responsibility;
+* repository save never called;
+* no non-active result returned.
+
+Use mocks or fakes consistently.
+
+Do not start Spring context.
+
+22. GetAvailablePlanService unit tests
+
+Test:
+
+* get ACTIVE plan by ID;
+* get ACTIVE plan by normalized code;
+* missing ID → AvailablePlanNotFoundException;
+* missing code → AvailablePlanNotFoundException;
+* inactive plan behaves as not found;
+* draft plan behaves as not found;
+* archived plan behaves as not found;
+* repository save never called;
+* result does not contain lifecycle fields.
+
+23. Repository integration tests
+
+Use PostgreSQL Testcontainers.
+
+Verify:
+
+* find active plans only;
+* filter active plans by type;
+* order by displayOrder then code;
+* direct lookup by ID and ACTIVE status;
+* direct lookup by normalized code and ACTIVE status;
+* inactive plan not returned;
+* draft plan not returned;
+* archived plan not returned;
+* empty results return empty list/Optional;
+* Hibernate validation still succeeds;
+* Flyway migrations still succeed.
+
+Reuse Plan fixtures and Testcontainers support.
+
+24. Catalog integration tests
+
+Create a use-case integration suite.
+
+Prepare plans in all states:
+
+* DRAFT
+* ACTIVE
+* INACTIVE
+* ARCHIVED
+
+Verify:
+
+* list returns only ACTIVE;
+* type filter returns correct subset;
+* direct ACTIVE lookup succeeds;
+* hidden-state lookup returns not found;
+* code lookup is normalized;
+* ordering is stable;
+* no entity mutation occurs;
+* no audit timestamp changes during read.
+
+25. Controller tests
+
+GET /api/plans:
+
+* returns 200;
+* returns JSON array;
+* only ACTIVE plans represented;
+* type filter works;
+* invalid type returns 400;
+* no results returns [];
+* response does not include status;
+* response does not include createdAt;
+* response does not include updatedAt;
+* response does not include displayOrder if excluded;
+* Content-Type is application/json.
+
+GET /api/plans/{id}:
+
+* active plan → 200;
+* missing → 404;
+* draft → 404;
+* inactive → 404;
+* archived → 404;
+* invalid UUID → 400.
+
+GET /api/plans/by-code/{code}:
+
+* active plan → 200;
+* lowercase code accepted;
+* missing → 404;
+* inactive → 404.
+
+Error responses must include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No stack trace.
+No SQL details.
+No hidden lifecycle status.
+
+26. Contract consistency
+
+Ensure user-facing plan responses are stable and minimal.
+
+Do not reuse:
+
+PlanResponse from admin API
+
+Reason:
+
+Admin response includes lifecycle and audit fields that users should not receive.
+
+Document the separation between:
+
+AdminPlanResponse
+AvailablePlanResponse
+
+27. Architecture rules
+
+Verify:
+
+* API catalog controller depends on input ports.
+* Catalog services depend on PlanRepository.
+* Application does not import infrastructure.
+* Domain does not import API.
+* No admin service is called from catalog service.
+* No controller injects Spring Data repository.
+* No JPA entity is returned.
+* No status query parameter exists.
+* No payment, order, subscription, Telegram, or 3x-ui logic is added.
+* No field injection exists.
+* No caching framework is added unnecessarily.
+
+Extend existing architecture tests if present.
+
+28. Documentation
+
+Create:
+
+docs/use-cases/available-plan-catalog.md
+
+Document:
+
+* purpose;
+* visibility rule;
+* only ACTIVE plans are exposed;
+* hidden states behave as not found;
+* endpoint contracts;
+* type filter;
+* ordering;
+* response fields;
+* why status is not exposed;
+* why admin DTOs are not reused;
+* why caching is deferred;
+* why localization is deferred;
+* work deferred to Task 19.
+
+Include Mermaid sequence diagrams for:
+
+* list active plans;
+* get active plan by code;
+* hidden plan lookup returning not found.
+
+29. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/in/plan/catalog/
+ListAvailablePlansUseCase.java
+GetAvailablePlanUseCase.java
+
+src/main/java/com/parazit/panel/application/plan/catalog/query/
+ListAvailablePlansQuery.java
+GetAvailablePlanByIdQuery.java
+GetAvailablePlanByCodeQuery.java
+
+src/main/java/com/parazit/panel/application/plan/catalog/result/
+AvailablePlanResult.java
+
+src/main/java/com/parazit/panel/application/plan/catalog/
+AvailablePlanResultMapper.java
+ListAvailablePlansService.java
+GetAvailablePlanService.java
+
+src/main/java/com/parazit/panel/api/plan/catalog/
+PlanCatalogController.java
+AvailablePlanResponse.java
+PlanCatalogApiMapper.java
+
+src/main/java/com/parazit/panel/common/exception/ or current exception package/
+AvailablePlanNotFoundException.java
+
+src/test/java/com/parazit/panel/application/plan/catalog/
+AvailablePlanResultMapperTest.java
+ListAvailablePlansServiceTest.java
+GetAvailablePlanServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/plan/
+AvailablePlanRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/plan/
+AvailablePlanCatalogIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/plan/catalog/
+PlanCatalogControllerTest.java
+
+docs/use-cases/
+available-plan-catalog.md
+
+Adapt names to current project conventions.
+
+30. Verification commands
+
+Run the appropriate commands.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with local profile and PostgreSQL.
+
+Manually verify:
+
+1. Create one DRAFT plan.
+2. Create one ACTIVE traffic-limited plan.
+3. Create one ACTIVE unlimited plan.
+4. Create one INACTIVE plan.
+5. Create one ARCHIVED plan.
+6. Call GET /api/plans.
+7. Filter by type.
+8. Get an ACTIVE plan by ID.
+9. Get an ACTIVE plan by lowercase code.
+10. Attempt to retrieve each hidden plan.
+
+Confirm:
+
+* all previous tests pass;
+* only ACTIVE plans are visible;
+* hidden plans return 404;
+* response contract is minimal;
+* admin DTOs are not reused;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* no selection, order, payment, Telegram, or 3x-ui logic was added;
+* no credentials were committed;
+* no tests were disabled.
+
+31. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Catalog visibility design
+3. Repository query changes
+4. Public response contract decision
+5. Caching decision
+6. Planned files to create
+7. Planned files to modify
+8. Risks and edge cases
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Visibility behavior
+5. API contract
+6. Repository behavior
+7. Test results
+8. Build result
+9. Commands executed
+10. Remaining issues
+11. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(plan): add active plan catalog for users
+
+Stop after completing Task 18.
+
+Do not start Task 19.
+

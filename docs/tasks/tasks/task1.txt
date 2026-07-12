@@ -1,0 +1,1153 @@
+You are a senior Java 21, Spring Boot, Git, repository-governance, and software-quality engineer.
+
+Continue preparing the existing project.
+
+# Task 1 — Repository Initialization and Project Governance
+
+## Goal
+
+Initialize the repository foundation for the VPN Automation Platform.
+
+This task must establish a clean, professional, and production-oriented repository before any Spring Boot application code or business logic is added.
+
+After this task, the repository must provide:
+
+* a clear project identity;
+* an explicit open-source license;
+* a professional README;
+* safe Git ignore rules;
+* consistent text formatting;
+* environment-variable documentation;
+* initial documentation structure;
+* basic contribution and commit conventions;
+* protection against accidentally committing secrets or generated files;
+* a clean initial Git commit.
+
+This task is only about repository initialization and governance.
+
+Do not implement:
+
+* Spring Boot application classes;
+* Gradle or Maven project generation;
+* business logic;
+* User entities;
+* Plan entities;
+* Payment entities;
+* Telegram Bot handlers;
+* Telegram Bot API integration;
+* 3x-ui integration;
+* PostgreSQL configuration;
+* Redis configuration;
+* Docker Compose;
+* REST APIs;
+* Spring Security;
+* database migrations;
+* CI/CD pipelines;
+* deployment;
+* production infrastructure.
+
+Stop after completing Task 1.
+
+Do not begin Task 2.
+
+---
+
+# 1. Important rules
+
+* Inspect the complete current repository before making changes.
+* Preserve any intentional existing repository content.
+* Do not delete existing useful files without explaining why.
+* Do not generate Spring Boot application code.
+* Do not create business packages or placeholder business classes.
+* Do not add dependencies.
+* Do not add build files unless they already exist and only require repository metadata updates.
+* Do not create fake implementation files for future features.
+* Do not commit credentials, tokens, passwords, private keys, certificates, database dumps, receipt files, or uploaded user files.
+* Do not include a real Telegram Bot token.
+* Do not include a real 3x-ui username or password.
+* Do not include a real Zarinpal merchant ID.
+* Do not include a real bank-card number.
+* Do not include production IP addresses or server credentials.
+* Do not create an `.env` file containing real values.
+* Create only `.env.example` with safe placeholders.
+* Use UTF-8.
+* Use LF line endings.
+* Do not add unnecessary tools or repository complexity.
+* Do not wait for additional approval after presenting the plan.
+* Complete and verify Task 1 fully.
+* Do not begin Task 2.
+
+---
+
+# 2. Current-state assessment
+
+Before making changes, inspect and report:
+
+* current repository files;
+* current Git status;
+* current branch;
+* existing README;
+* existing license;
+* existing `.gitignore`;
+* existing `.editorconfig`;
+* existing `.gitattributes`;
+* existing documentation directories;
+* existing build files, if any;
+* existing IDE files;
+* tracked generated files;
+* tracked secret-like files;
+* existing commit history, if available;
+* files that should be preserved;
+* files that should be removed from tracking;
+* project naming consistency.
+
+Before implementation provide:
+
+1. Current repository assessment
+2. Existing files to preserve
+3. Files that should be created
+4. Files that should be modified
+5. Files that should be removed from Git tracking
+6. Potential secret or generated-file risks
+7. License decision
+8. Documentation-structure decision
+9. Initial commit plan
+10. Risks and assumptions
+
+Do not make production-code changes during this assessment.
+
+---
+
+# 3. Project identity
+
+Use the following project identity unless the existing repository already uses another intentional official name:
+
+```text
+VPN Automation Platform
+```
+
+Recommended short description:
+
+```text
+Telegram Bot + Spring Boot + 3x-ui Automation
+```
+
+The repository must clearly explain that the project is under development.
+
+Recommended status:
+
+```text
+🚧 Under Development
+```
+
+Do not claim that unfinished features are production-ready.
+
+---
+
+# 4. License
+
+Create:
+
+```text
+LICENSE
+```
+
+Use the MIT License unless the repository already contains another intentionally selected license.
+
+Requirements:
+
+* Use the standard MIT License text.
+* Use the current year at the time of implementation.
+* Use the repository owner’s name if it is clearly available from Git configuration or repository metadata.
+* If the owner name cannot be determined safely, use a neutral project-owner placeholder and report it.
+* Do not invent a company name.
+* Do not use Apache 2.0 unless the repository already selected it.
+* Do not add multiple conflicting licenses.
+* Mention the selected license in README.
+
+The recommended license for this project is MIT because it allows broad use, modification, and distribution.
+
+---
+
+# 5. README.md
+
+Create or improve:
+
+```text
+README.md
+```
+
+The README must be professional but should not describe unimplemented technical details as completed.
+
+At minimum include:
+
+```markdown
+# VPN Automation Platform
+
+Telegram Bot + Spring Boot + 3x-ui Automation
+
+## Status
+
+🚧 Under Development
+
+## Overview
+
+A platform for automating VPN sales, user management, payment processing,
+3x-ui client provisioning, subscription delivery, and administrative operations.
+
+## Planned Features
+
+- Telegram Bot
+- User Registration
+- VPN Plan Catalog
+- VPN Purchase
+- Zarinpal Payment Gateway
+- Manual Card-to-Card Payment
+- Receipt Review
+- 3x-ui Integration
+- VPN Client Provisioning
+- Subscription Management
+- Usage and Expiration Tracking
+- Admin Operations
+- Docker-Based Deployment
+
+## Tech Stack
+
+- Java 21
+- Spring Boot
+- PostgreSQL
+- Redis
+- Docker
+- Telegram Bot API
+- 3x-ui
+```
+
+Also include the following sections.
+
+### Requirements
+
+State that the exact development requirements will be completed in later tasks.
+
+Initial expected tools:
+
+* Git
+* Java 21
+* Docker and Docker Compose
+* IntelliJ IDEA or another Java IDE
+
+Do not claim that Gradle or Maven is already configured unless it exists.
+
+### Repository Structure
+
+Explain the initial repository/documentation structure.
+
+### Development Roadmap
+
+Summarize the planned phases:
+
+* Foundation
+* User Management
+* Plan Management
+* 3x-ui Integration
+* Payment
+* Subscription Delivery
+* Automation and Deployment
+
+Do not include implementation details that belong to later tasks.
+
+### Security
+
+Include clear warnings:
+
+* never commit `.env`;
+* never commit Telegram tokens;
+* never commit 3x-ui credentials;
+* never commit payment credentials;
+* never commit private keys;
+* never commit real bank-card information;
+* never commit uploaded receipts.
+
+### License
+
+State that the project uses the MIT License.
+
+### Contributing
+
+Reference `CONTRIBUTING.md` if created.
+
+### Project status
+
+Make it clear that the application is not yet production-ready.
+
+---
+
+# 6. .gitignore
+
+Create or improve:
+
+```text
+.gitignore
+```
+
+It must support Java, Spring Boot, IntelliJ IDEA, Gradle, Maven, Docker-based local development, logs, uploads, and secrets.
+
+At minimum include:
+
+```gitignore
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# VS Code
+.vscode/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Maven
+target/
+.mvn/timing.properties
+
+# Java
+*.class
+hs_err_pid*
+replay_pid*
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+secrets/
+credentials/
+private/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Operating systems
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# Local databases and volumes
+data/
+postgres-data/
+redis-data/
+docker-data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded and generated application files
+uploads/
+storage/
+receipts/
+manual-payment-receipts/
+generated/
+qr-codes/
+subscriptions/
+downloads/
+
+# Test-generated files
+test-output/
+test-results/
+coverage/
+jacoco/
+*.exec
+
+# Local application configuration
+application-local.yml
+application-local.yaml
+application-secrets.yml
+application-secrets.yaml
+
+# Docker override files with local secrets
+docker-compose.override.yml
+compose.override.yml
+```
+
+Requirements:
+
+* Do not ignore source files.
+* Do not ignore Gradle Wrapper scripts.
+* Do not ignore Maven Wrapper scripts.
+* Do not ignore `.env.example`.
+* Do not ignore Flyway migrations.
+* Do not ignore documentation.
+* Do not ignore Docker Compose files that contain no secrets.
+* Review existing tracked files; `.gitignore` does not automatically remove already tracked files.
+* Report any tracked file that should be removed using `git rm --cached`.
+
+Do not execute destructive removal without verifying the file is generated or secret-related.
+
+---
+
+# 7. .editorconfig
+
+Create:
+
+```text
+.editorconfig
+```
+
+Recommended content:
+
+```ini
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{java,kt,kts,xml,yml,yaml,json,properties,sql,md}]
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+```
+
+Requirements:
+
+* Prefer four spaces for Java.
+* Prefer two spaces for YAML and JSON.
+* Use LF line endings.
+* Ensure final newline.
+* Do not introduce a formatter dependency in this task.
+
+---
+
+# 8. .gitattributes
+
+Create:
+
+```text
+.gitattributes
+```
+
+Recommended rules:
+
+```gitattributes
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.jar binary
+```
+
+Requirements:
+
+* Normalize text files to LF.
+* Preserve Windows-specific command files with CRLF.
+* Mark binary files correctly.
+* Do not apply text normalization to archives or images.
+
+---
+
+# 9. .env.example
+
+Create:
+
+```text
+.env.example
+```
+
+This file must contain placeholders only.
+
+Because later tasks will add real variables, Task 1 should include only a safe initial structure.
+
+Suggested content:
+
+```dotenv
+# Application
+APP_NAME=VPN Automation Platform
+APP_ENV=local
+
+# Database placeholders — configured in later tasks
+POSTGRES_DB=
+POSTGRES_USER=
+POSTGRES_PASSWORD=
+POSTGRES_PORT=
+
+# Redis placeholders — configured in later tasks
+REDIS_HOST=
+REDIS_PORT=
+REDIS_PASSWORD=
+
+# Telegram placeholders — configured in later tasks
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+
+# 3x-ui placeholders — configured in later tasks
+XUI_BASE_URL=
+XUI_USERNAME=
+XUI_PASSWORD=
+
+# Payment placeholders — configured in later tasks
+ZARINPAL_MERCHANT_ID=
+
+# Manual payment placeholders — configured in later tasks
+MANUAL_CARD_PAYMENT_ENABLED=false
+MANUAL_CARD_NUMBER=
+MANUAL_CARD_HOLDER_NAME=
+MANUAL_CARD_BANK_NAME=
+```
+
+Requirements:
+
+* No real values.
+* No example value that resembles a real secret.
+* Do not include production domains or IPs.
+* Mention in README that developers must copy it to `.env` later.
+* `.env` must remain ignored.
+
+---
+
+# 10. Documentation structure
+
+Create the initial documentation directories.
+
+Recommended structure:
+
+```text
+docs/
+├── 00-requirements/
+├── 01-architecture/
+├── 02-roadmap/
+├── 03-tasks/
+├── 04-backend/
+├── 05-telegram-bot/
+├── 06-xui/
+├── 07-payment/
+├── 08-deployment/
+├── 09-tests/
+└── 10-guides/
+```
+
+Git does not track empty directories.
+
+Therefore, create a small `README.md` inside each directory or use `.gitkeep`.
+
+Preferred:
+
+Use `README.md` because it explains the purpose of the folder.
+
+Example:
+
+```markdown
+# Architecture
+
+Architecture decisions and system-design documentation will be stored here.
+```
+
+Do not create fake technical documentation for features not yet implemented.
+
+---
+
+# 11. Initial roadmap
+
+Create:
+
+```text
+docs/02-roadmap/project-roadmap.md
+```
+
+Include the planned phases:
+
+## Phase 1 — Foundation
+
+* Task 1 — Repository Initialization
+* Task 2 — Spring Boot Project Skeleton
+* Task 3 — Local Infrastructure
+* Task 4 — Application Configuration
+* Task 5 — Logging and Error Handling
+* Task 6 — Database Foundation
+* Task 7 — Repository Pattern
+* Task 8 — Dependency Injection and Time Abstractions
+
+## Phase 2 — Users
+
+* User aggregate
+* registration
+* profile
+* language
+* settings
+* referral
+* quality gate
+
+## Phase 3 — Plans
+
+* Plan aggregate
+* admin management
+* catalog
+* Plan selection
+* quality gate
+
+## Phase 4 — 3x-ui
+
+* HTTP client foundation
+* authentication
+* inbound discovery
+* client provisioning
+* disable/delete
+* update/renew/reset
+* quality verification
+
+## Phase 5 — Payments
+
+* Payment foundation
+* Zarinpal
+* manual card-to-card
+* receipt upload
+* operator review
+* provisioning outbox
+* quality gate
+
+## Future phases
+
+* subscription generation;
+* QR Code;
+* Telegram Bot interaction;
+* notifications;
+* scheduled jobs;
+* admin dashboard;
+* deployment.
+
+Requirements:
+
+* Do not claim future phases are already implemented.
+* Keep descriptions high level.
+* Do not copy full task specifications into the roadmap.
+
+---
+
+# 12. Task template
+
+Create:
+
+```text
+docs/03-tasks/task-template.md
+```
+
+The template should help future tasks remain consistent.
+
+Include:
+
+```markdown
+# Task XX — Title
+
+## Goal
+
+## Important Rules
+
+## Current-State Assessment
+
+## Scope
+
+## Domain Model
+
+## Database Migration
+
+## Repository
+
+## Application Ports
+
+## Commands and Results
+
+## Service Implementation
+
+## Transaction Boundaries
+
+## Idempotency
+
+## Concurrency
+
+## Security
+
+## API Contract
+
+## Logging
+
+## Unit Tests
+
+## Integration Tests
+
+## Concurrency Tests
+
+## Controller Tests
+
+## Architecture Verification
+
+## Documentation
+
+## Expected File Structure
+
+## Verification Commands
+
+## Acceptance Criteria
+
+## Output Format
+```
+
+Do not create implementation-specific content inside this generic template.
+
+---
+
+# 13. CONTRIBUTING.md
+
+Create:
+
+```text
+CONTRIBUTING.md
+```
+
+Keep it simple.
+
+Include:
+
+* use feature branches;
+* write clear commit messages;
+* do not commit secrets;
+* run tests before committing;
+* preserve formatting;
+* update documentation;
+* keep commits focused;
+* do not mix unrelated refactors with features.
+
+Recommended commit style:
+
+```text
+type(scope): description
+```
+
+Examples:
+
+```text
+chore(repo): initialize repository
+feat(user): add user registration
+fix(payment): prevent duplicate approval
+test(xui): add provisioning concurrency tests
+docs(payment): document Zarinpal callback flow
+```
+
+Do not enforce a complex release process yet.
+
+---
+
+# 14. Commit message conventions
+
+Document recommended commit types:
+
+* `chore`
+* `feat`
+* `fix`
+* `test`
+* `docs`
+* `refactor`
+* `build`
+* `ci`
+* `perf`
+
+The first commit for this task should be:
+
+```text
+chore: initialize repository
+```
+
+If the repository already follows scoped conventional commits, this is also acceptable:
+
+```text
+chore(repo): initialize repository
+```
+
+Do not commit automatically unless the user explicitly wants Codex to create the commit.
+
+Codex should prepare the changes and provide the exact commit command.
+
+---
+
+# 15. Secret scan
+
+Before finishing, search the repository for likely secrets.
+
+Inspect:
+
+* `.env`;
+* Telegram Bot tokens;
+* strings containing `bot` token patterns;
+* passwords;
+* private keys;
+* PEM files;
+* JKS/P12/PFX files;
+* merchant IDs;
+* bank-card numbers;
+* server IP credentials;
+* database connection strings;
+* 3x-ui cookies;
+* access tokens.
+
+Do not print discovered secret values.
+
+Report only:
+
+* file path;
+* type of suspected secret;
+* required remediation.
+
+If a real secret is already tracked:
+
+* do not merely add it to `.gitignore`;
+* explain that it must be removed from Git tracking;
+* recommend rotating the secret;
+* do not rewrite Git history automatically.
+
+---
+
+# 16. Large and generated file review
+
+Inspect tracked files for:
+
+* ZIP archives;
+* JAR files;
+* build output;
+* IDE metadata;
+* logs;
+* database dumps;
+* uploaded receipts;
+* generated QR codes;
+* images containing personal data;
+* temporary files.
+
+Do not delete legitimate project assets.
+
+Report generated or sensitive files that should not be tracked.
+
+---
+
+# 17. Git repository validation
+
+Verify:
+
+```bash
+git status
+git branch --show-current
+git log --oneline --decorate -n 10
+git ls-files
+git check-ignore -v .env
+```
+
+If Git is not initialized, initialize it:
+
+```bash
+git init
+```
+
+But the user indicated that the Git repository already exists.
+
+Therefore:
+
+* preserve the repository;
+* do not reinitialize destructively;
+* do not change the default branch unless explicitly requested;
+* do not remove history.
+
+Verify that `.env` is ignored and `.env.example` is tracked.
+
+---
+
+# 18. README accuracy review
+
+After creating README, verify every claim.
+
+Examples:
+
+* Do not say the Spring Boot application runs if Task 2 has not been completed.
+* Do not show a Gradle command if no Gradle Wrapper exists.
+* Do not show a Maven command if no Maven Wrapper exists.
+* Do not claim Docker Compose exists before Task 3.
+* Do not claim PostgreSQL is connected.
+* Do not claim Telegram Bot is operational.
+* Do not claim payment is operational.
+* Do not claim 3x-ui provisioning works.
+
+Clearly distinguish:
+
+* planned features;
+* implemented features;
+* current status.
+
+---
+
+# 19. File-format validation
+
+Verify:
+
+* UTF-8;
+* LF line endings;
+* final newline;
+* no trailing whitespace where `.editorconfig` forbids it;
+* Markdown renders correctly;
+* no broken relative documentation links;
+* no malformed license text.
+
+---
+
+# 20. Tests and build
+
+Task 1 has no production code and therefore no business tests.
+
+Do not generate fake unit tests.
+
+Perform repository-level validation:
+
+* Git ignore validation;
+* secret scan;
+* file-structure validation;
+* Markdown link check where tools are already available;
+* line-ending inspection;
+* Git status review.
+
+Do not add a large testing dependency only for Task 1.
+
+If build files already exist, run their existing validation command only if it does not start Task 2 implementation.
+
+---
+
+# 21. Architecture verification
+
+Verify that Task 1 does not create:
+
+* `src/main/java` business classes;
+* JPA entities;
+* controllers;
+* repositories;
+* services;
+* configuration classes;
+* migrations;
+* Docker services;
+* Telegram handlers;
+* payment providers;
+* 3x-ui clients.
+
+The repository may contain pre-existing files, but Task 1 itself must not introduce these features.
+
+---
+
+# 22. Expected repository structure
+
+The final repository should look similar to:
+
+```text
+.
+├── .editorconfig
+├── .env.example
+├── .gitattributes
+├── .gitignore
+├── CONTRIBUTING.md
+├── LICENSE
+├── README.md
+└── docs/
+    ├── 00-requirements/
+    │   └── README.md
+    ├── 01-architecture/
+    │   └── README.md
+    ├── 02-roadmap/
+    │   ├── README.md
+    │   └── project-roadmap.md
+    ├── 03-tasks/
+    │   ├── README.md
+    │   └── task-template.md
+    ├── 04-backend/
+    │   └── README.md
+    ├── 05-telegram-bot/
+    │   └── README.md
+    ├── 06-xui/
+    │   └── README.md
+    ├── 07-payment/
+    │   └── README.md
+    ├── 08-deployment/
+    │   └── README.md
+    ├── 09-tests/
+    │   └── README.md
+    └── 10-guides/
+        └── README.md
+```
+
+Adapt the structure to existing intentional repository conventions.
+
+Do not move existing code unnecessarily.
+
+---
+
+# 23. Acceptance criteria
+
+Task 1 is complete only when all these conditions are verified:
+
+* Git repository exists.
+* Current repository state was inspected.
+* `LICENSE` exists.
+* MIT License is correctly written.
+* `README.md` exists and is accurate.
+* Planned features are clearly marked as planned.
+* Project status is marked under development.
+* `.gitignore` exists.
+* IntelliJ files are ignored.
+* Gradle/Maven generated files are ignored appropriately.
+* logs are ignored.
+* `.env` is ignored.
+* `.env.example` is tracked.
+* secret files are ignored.
+* receipt/upload/generated directories are ignored.
+* `.editorconfig` exists.
+* `.gitattributes` exists.
+* documentation structure exists.
+* roadmap exists.
+* task template exists.
+* contribution guide exists.
+* no real secret is committed.
+* no business logic was added.
+* no Spring Boot application code was added.
+* no database migration was added.
+* no Docker service was added.
+* no future task was implemented.
+* Git status is understandable and reported.
+* suggested first commit command is provided.
+
+---
+
+# 24. Verification commands
+
+Run applicable commands:
+
+```bash
+git status --short
+git branch --show-current
+git ls-files
+git check-ignore -v .env
+git check-ignore -v logs/application.log
+git check-ignore -v .idea/workspace.xml
+git diff --check
+```
+
+If `.env` does not exist, create a temporary test file only for ignore verification and remove it afterward.
+
+Do not leave temporary files behind.
+
+Optionally run:
+
+```bash
+find . -type f -name "*.log"
+find . -type f \( -name "*.pem" -o -name "*.key" -o -name "*.p12" -o -name "*.jks" \)
+```
+
+Do not print sensitive file contents.
+
+---
+
+# 25. Optional first commit
+
+Do not commit automatically unless explicitly requested.
+
+Provide these commands:
+
+```bash
+git add .
+git status
+git commit -m "chore: initialize repository"
+```
+
+Before suggesting commit, verify that no secret or generated file is staged.
+
+If existing unrelated changes are present, do not suggest blindly staging all files.
+
+Instead provide a safe targeted `git add` command.
+
+---
+
+# 26. Output format
+
+Before implementation provide:
+
+1. Current repository assessment
+2. Existing files
+3. Files to create
+4. Files to modify
+5. Files that should be untracked
+6. License decision
+7. README plan
+8. Git ignore plan
+9. Documentation plan
+10. Secret risks
+11. Assumptions
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Removed/untracked files
+5. License details
+6. README sections
+7. Git ignore coverage
+8. Documentation structure
+9. Secret-scan result
+10. Git validation result
+11. Commands executed
+12. Remaining risks
+13. Exact commit command
+14. Suggested commit message
+
+Use this commit message:
+
+```text
+chore: initialize repository
+```
+
+Stop after completing Task 1.
+
+Do not begin Task 2.
+

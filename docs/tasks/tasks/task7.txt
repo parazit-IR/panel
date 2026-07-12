@@ -1,0 +1,395 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 7 – Repository Pattern Foundation
+
+Goal:
+
+Create a clean repository abstraction that separates application/domain concerns from Spring Data JPA implementation details.
+
+Important rules:
+
+* Inspect the current project before changing anything.
+* Preserve the current package structure, configuration, logging, persistence foundation, Flyway setup, and tests.
+* Do not create business entities such as User, Plan, Payment, Order, Subscription, or Referral yet.
+* Do not implement Telegram, Payment, 3x-ui, or VPN logic.
+* Do not add unnecessary libraries.
+* Do not over-engineer the solution.
+* Do not create a generic service layer in this task.
+* Use Java 21 conventions.
+* Do not expose JpaRepository directly to application or domain layers.
+* Show the planned changes before applying them.
+* Run all tests and the full build after implementation.
+* Stop after completing Task 7.
+
+1. Architecture review
+
+Inspect the existing codebase and identify:
+
+* current package structure;
+* BaseEntity location;
+* persistence configuration;
+* test fixtures;
+* Spring Data repositories already present;
+* any architecture inconsistencies.
+
+Before implementation, provide:
+
+* current-state assessment;
+* files to create;
+* files to modify;
+* architecture concerns.
+
+2. Repository abstraction
+
+Create a generic repository abstraction outside the infrastructure layer.
+
+Suggested package:
+
+com.parazit.panel.domain.repository
+
+Create:
+
+BaseRepository<T, ID>
+
+Requirements:
+
+* Use generics.
+* Keep it independent from Spring Data.
+* Do not extend JpaRepository, CrudRepository, PagingAndSortingRepository, or any Spring interface.
+* Define only useful methods.
+
+Include:
+
+Optional<T> findById(ID id)
+
+List<T> findAll()
+
+T save(T entity)
+
+List<T> saveAll(Collection<T> entities)
+
+boolean existsById(ID id)
+
+long count()
+
+void delete(T entity)
+
+void deleteById(ID id)
+
+Do not add pagination, sorting, specifications, or query-by-example yet.
+
+Do not add methods that are not currently justified.
+
+3. UUID repository specialization
+
+Because project entities use UUID identifiers, create a specialization:
+
+UuidRepository<T>
+
+Suggested package:
+
+com.parazit.panel.domain.repository
+
+Requirements:
+
+* Extend BaseRepository<T, UUID>.
+* Do not duplicate methods.
+* Add no extra methods unless clearly justified.
+
+4. Spring Data infrastructure adapter
+
+Create an infrastructure abstraction that connects the domain repository to Spring Data JPA.
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.repository
+
+Create:
+
+SpringDataRepository<T, ID>
+
+Requirements:
+
+* Extend JpaRepository<T, ID>.
+* Mark it with @NoRepositoryBean.
+* Keep it internal to infrastructure.
+* Do not expose it to application or domain packages.
+
+Create:
+
+SpringDataUuidRepository<T>
+
+Requirements:
+
+* Extend SpringDataRepository<T, UUID>.
+* Mark it with @NoRepositoryBean.
+
+5. Generic repository adapter
+
+Create a reusable adapter implementation.
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.repository
+
+Create:
+
+JpaRepositoryAdapter<T, ID>
+
+Requirements:
+
+* Implement BaseRepository<T, ID>.
+* Delegate operations to SpringDataRepository<T, ID>.
+* Use constructor injection.
+* Do not use field injection.
+* Do not annotate the generic adapter with @Repository if doing so causes invalid generic bean registration.
+* Keep exception translation handled by Spring Data.
+* Do not catch generic exceptions unnecessarily.
+* Do not leak Spring Data types into domain interfaces.
+
+Implement all BaseRepository methods.
+
+For saveAll:
+
+* Accept Collection<T>.
+* Return List<T>.
+* Preserve expected behavior.
+* Do not silently ignore nulls.
+
+6. Test-only repository fixture
+
+Use the test-only entity created in Task 6.
+
+Under src/test/java create or update:
+
+TestPersistenceEntity
+TestPersistenceSpringDataRepository
+TestPersistenceRepository
+TestPersistenceRepositoryAdapter
+
+Suggested packages:
+
+com.parazit.panel.common.persistence.fixture
+
+and:
+
+com.parazit.panel.infrastructure.persistence.repository.fixture
+
+Requirements:
+
+* TestPersistenceRepository extends UuidRepository<TestPersistenceEntity>.
+* TestPersistenceSpringDataRepository extends SpringDataUuidRepository<TestPersistenceEntity>.
+* TestPersistenceRepositoryAdapter extends JpaRepositoryAdapter<TestPersistenceEntity, UUID>.
+* Annotate the concrete adapter appropriately so Spring can discover it in tests.
+* Do not add these classes to production source code.
+
+7. Integration tests
+
+Create repository integration tests using PostgreSQL Testcontainers.
+
+Test all repository methods:
+
+* save
+* findById
+* findAll
+* saveAll
+* existsById
+* count
+* delete
+* deleteById
+
+Also verify:
+
+* UUID generation still works;
+* auditing still works;
+* no Spring Data type is exposed by the domain repository;
+* the adapter delegates correctly;
+* database interaction uses real PostgreSQL;
+* tests do not depend on local PostgreSQL.
+
+Use focused tests where practical.
+
+Suggested annotations:
+
+@DataJpaTest
+@Testcontainers
+@Import
+
+Use:
+
+@DynamicPropertySource
+
+If the existing shared Testcontainers setup can be reused cleanly, reuse it instead of duplicating container configuration.
+
+8. Transaction behavior
+
+Document and verify transaction responsibilities.
+
+Rules:
+
+* Repository adapters should not define broad business transactions.
+* Transaction boundaries belong primarily in application services.
+* Repository methods may rely on Spring Data transactional behavior.
+* Do not add @Transactional to every method without justification.
+* Read-only transaction optimization may be discussed but should not be overused in this task.
+
+9. Null handling
+
+Define clear null behavior.
+
+Requirements:
+
+* Entity parameters must not be null.
+* Collection parameters must not be null.
+* Collection contents must not contain null elements.
+* Prefer Objects.requireNonNull or clear validation.
+* Do not return null.
+* Use Optional for findById.
+* Return empty lists where appropriate.
+
+Add tests for invalid null input if validation is implemented in the adapter.
+
+10. Documentation
+
+Create:
+
+docs/architecture/repository-pattern.md
+
+Document:
+
+* why repository abstraction exists;
+* difference between domain repository and Spring Data repository;
+* why JpaRepository is hidden from application/domain layers;
+* role of JpaRepositoryAdapter;
+* transaction boundary rules;
+* null-handling rules;
+* when to create a business-specific repository;
+* why generic repositories must remain small;
+* example future structure for UserRepository.
+
+Include an example such as:
+
+UserRepository extends UuidRepository<User>
+
+and:
+
+SpringDataUserRepository extends SpringDataUuidRepository<User>
+
+and:
+
+UserRepositoryAdapter extends JpaRepositoryAdapter<User, UUID>
+
+Do not implement UserRepository yet.
+
+11. Architecture dependency rules
+
+Ensure dependencies point in the correct direction:
+
+domain
+must not depend on infrastructure or Spring Data
+
+application
+may depend on domain repository interfaces
+
+infrastructure
+may depend on domain repository interfaces and Spring Data
+
+api
+must not directly depend on Spring Data repositories
+
+If ArchUnit is already present, add tests for these rules.
+
+If ArchUnit is not present, do not add it in this task unless clearly justified.
+
+12. Code quality
+
+Requirements:
+
+* Use clear generic type names.
+* Avoid raw types.
+* Avoid unchecked casts.
+* Do not use Lombok @Data.
+* Prefer constructor injection.
+* Keep interfaces small.
+* Add Javadoc only where it adds real value.
+* Avoid unnecessary annotations.
+* Do not create empty marker interfaces without purpose.
+
+13. Verification
+
+Run:
+
+* compile
+* unit tests
+* integration tests
+* full build
+
+Verify:
+
+* all previous Task 6 tests still pass;
+* repository integration tests pass;
+* Spring context starts;
+* no business entity has been created;
+* no JpaRepository is referenced from domain or application packages;
+* no database credentials are committed;
+* no unnecessary dependency was added.
+
+14. Expected file structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/repository/
+BaseRepository.java
+UuidRepository.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/repository/
+SpringDataRepository.java
+SpringDataUuidRepository.java
+JpaRepositoryAdapter.java
+
+src/test/java/com/parazit/panel/common/persistence/fixture/
+TestPersistenceEntity.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/repository/fixture/
+TestPersistenceRepository.java
+TestPersistenceSpringDataRepository.java
+TestPersistenceRepositoryAdapter.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/repository/
+JpaRepositoryAdapterIntegrationTest.java
+
+docs/architecture/
+repository-pattern.md
+
+Adapt names only when required by the existing repository structure.
+
+15. Output format
+
+Before implementation, provide:
+
+1. Current-state assessment
+2. Planned files to create
+3. Planned files to modify
+4. Architecture concerns
+
+After implementation, provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Test results
+5. Build result
+6. Commands executed
+7. Remaining issues
+8. Suggested commit message
+
+Use this commit message unless the repository uses another convention:
+
+feat(repository): add repository abstraction and JPA adapter
+
+Stop after Task 7.
+
+Do not start Task 8.
+

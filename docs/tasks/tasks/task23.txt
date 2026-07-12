@@ -1,0 +1,1309 @@
+You are a senior Java 21 and Spring Boot architect.
+
+Continue implementing the existing project.
+
+Task 23 – 3x-ui Inbound Discovery
+
+Goal:
+
+Implement authenticated retrieval, parsing, validation, and selection of 3x-ui inbound configurations.
+
+This task builds on Task 21 and Task 22.
+
+After this task, the application must be able to:
+
+* retrieve inbounds from 3x-ui;
+* map the remote response into internal models;
+* find an inbound by ID;
+* find an inbound by remark;
+* find an eligible inbound for future VPN client creation;
+* hide 3x-ui response details from application and domain layers.
+
+Do not implement:
+
+* create client;
+* update client;
+* delete client;
+* subscription generation;
+* VPN provisioning;
+* payment;
+* order;
+* Telegram Bot handlers;
+* admin dashboard.
+
+Stop after completing Task 23.
+
+Do not begin Task 24.
+
+1. Current-state assessment
+
+Inspect Task 21 and Task 22 implementations.
+
+Verify:
+
+* XuiClient port;
+* RestClient adapter;
+* authentication manager;
+* authenticated request executor;
+* session store;
+* retry handling;
+* timeout configuration;
+* exception hierarchy;
+* mock server support;
+* current package structure;
+* existing JSON mapping conventions.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. 3x-ui endpoint assumptions
+
+5. Response-shape risks
+
+6. Architecture decisions
+
+7. Verify the actual 3x-ui API contract
+
+Inspect the current 3x-ui version and existing endpoint conventions already configured in the project.
+
+Do not guess endpoint paths blindly.
+
+Support the actual inbound-list endpoint used by the configured 3x-ui panel.
+
+Typical panel APIs may use a path similar to:
+
+GET /panel/api/inbounds/list
+
+but the implementation must adapt to the actual current project configuration.
+
+Requirements:
+
+* Keep endpoint paths configurable if panel versions may differ.
+* Do not hardcode the full URL in services.
+* Add only the minimal endpoint-path properties needed.
+* Do not send requests to a real server during automated tests.
+* Document any API-version assumptions.
+
+3. Extend XuiProperties
+
+Add only the required inbound endpoint properties.
+
+Suggested fields:
+
+String inboundListPath
+
+Optional:
+
+String inboundByIdPathTemplate
+
+Suggested defaults only if verified against the target 3x-ui version.
+
+Environment variable examples:
+
+XUI_INBOUND_LIST_PATH=/panel/api/inbounds/list
+
+Requirements:
+
+* Keep values relative to baseUrl.
+* Validate nonblank paths.
+* Do not place credentials in endpoint properties.
+* Update .env.example.
+
+4. Refine XuiClient port
+
+Do not expose remote JSON DTOs through the port.
+
+Create or refine a focused outbound port.
+
+Preferred design:
+
+XuiInboundClient
+
+Suggested package:
+
+com.parazit.panel.application.port.out.xui
+
+Methods:
+
+List<XuiInboundSnapshot> getInbounds()
+
+Optional<XuiInboundSnapshot> getInboundById(long inboundId)
+
+Requirements:
+
+* Keep the port infrastructure-independent.
+* Do not expose RestClient response types.
+* Do not expose Map or JsonNode.
+* Do not expose raw 3x-ui DTOs.
+* Do not include create, update, or delete methods in this focused port.
+
+If XuiClient already contains getInbounds(), either:
+
+* return XuiInboundSnapshot cleanly;
+* or split authentication and inbound responsibilities into focused ports.
+
+Prefer focused interfaces if the current architecture supports it.
+
+Explain the choice.
+
+5. Internal application model
+
+Create:
+
+XuiInboundSnapshot
+
+Suggested package:
+
+com.parazit.panel.application.xui.model
+
+Prefer an immutable Java record.
+
+Fields:
+
+long id
+
+String remark
+
+String protocol
+
+int port
+
+boolean enabled
+
+String listenAddress
+
+long totalTrafficLimitBytes
+
+long uploadBytes
+
+long downloadBytes
+
+Instant expiryTime
+
+List<XuiClientSnapshot> clients
+
+Optional metadata needed for future Task 24:
+
+String streamNetwork
+
+String securityType
+
+String serverName
+
+String publicKey
+
+String shortId
+
+Requirements:
+
+* Include only fields required now or clearly required by Task 24.
+* Do not expose raw JSON strings when structured data can be parsed.
+* Optional fields may be nullable or Optional according to project conventions.
+* Do not include passwords, panel cookies, or session data.
+* Do not make the record a JPA entity.
+* Do not add Spring annotations.
+
+6. Client snapshot model
+
+Create:
+
+XuiClientSnapshot
+
+Suggested package:
+
+com.parazit.panel.application.xui.model
+
+Fields:
+
+String clientId
+
+String email
+
+boolean enabled
+
+long totalTrafficLimitBytes
+
+long uploadBytes
+
+long downloadBytes
+
+Instant expiryTime
+
+int ipLimit
+
+String subscriptionId
+
+Requirements:
+
+* This is read-only remote state.
+* Do not reuse future domain Subscription entities.
+* Do not expose raw settings JSON.
+* Keep fields minimal.
+* Handle missing values safely.
+
+7. Remote response DTOs
+
+Create infrastructure-only DTOs matching the actual 3x-ui response.
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.dto.inbound
+
+Possible classes/records:
+
+XuiApiResponse<T>
+
+XuiInboundListResponse
+
+XuiInboundRemoteDto
+
+XuiClientRemoteDto
+
+Requirements:
+
+* Keep them inside infrastructure.
+* Match the panel’s actual JSON contract.
+* Use Jackson annotations only where needed.
+* Tolerate unknown fields with existing Jackson configuration.
+* Do not leak these DTOs outside infrastructure.
+* Do not use JPA annotations.
+* Do not use Lombok @Data.
+
+8. Nested JSON parsing
+
+3x-ui often stores fields such as settings and streamSettings as JSON-encoded strings.
+
+Implement dedicated parsing.
+
+Create:
+
+XuiInboundPayloadParser
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.inbound
+
+Responsibilities:
+
+* parse inbound settings JSON;
+* parse client list;
+* parse streamSettings JSON;
+* extract protocol-specific metadata;
+* extract REALITY/TLS/network values where available;
+* handle blank or missing JSON safely;
+* throw a focused exception for malformed required data.
+
+Do not parse nested JSON manually using string splitting.
+
+Use Jackson ObjectMapper or JsonNode.
+
+Do not expose JsonNode outside infrastructure.
+
+9. Supported protocols
+
+For Task 23, support discovery of at least:
+
+VLESS
+
+Optionally tolerate:
+
+VMESS
+TROJAN
+SHADOWSOCKS
+
+Requirements:
+
+* VLESS must be parsed correctly.
+* Unsupported protocols should not crash the entire inbound list unless the response is fundamentally malformed.
+* Preserve protocol as a normalized lowercase or uppercase string consistently.
+* Do not implement protocol-specific VPN URI generation yet.
+* Do not implement client creation.
+
+10. REALITY and stream metadata
+
+For VLESS + REALITY inbounds, extract where available:
+
+network
+security
+serverName
+publicKey
+shortId
+
+Requirements:
+
+* Missing optional REALITY fields must not break generic inbound listing.
+* For future eligibility selection, REALITY requirements may be validated separately.
+* Do not derive or generate keys.
+* Do not expose private keys if the remote response contains them.
+* Never log privateKey.
+* Only retain public data required for future client configuration.
+
+11. Time conversion
+
+3x-ui may represent expiry timestamps as epoch milliseconds.
+
+Create one focused converter.
+
+Requirements:
+
+* zero or negative remote expiry may represent no expiration.
+* Map unlimited/no-expiry to null or Optional.empty consistently.
+* Convert positive epoch milliseconds to Instant.
+* Do not interpret seconds as milliseconds.
+* Add tests for:
+
+  * zero;
+  * positive milliseconds;
+  * boundary values;
+  * invalid negative values.
+
+12. Traffic conversion
+
+Use bytes as the canonical unit.
+
+Requirements:
+
+* Preserve exact long values.
+* Do not convert to GB in the client layer.
+* Handle missing values as zero only if the 3x-ui contract defines them that way.
+* Reject impossible negative traffic values if they indicate malformed data.
+* Do not calculate remaining traffic in Task 23.
+
+13. Inbound mapper
+
+Create:
+
+XuiInboundMapper
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.inbound
+
+Responsibilities:
+
+* convert remote DTOs into XuiInboundSnapshot;
+* use XuiInboundPayloadParser;
+* normalize remark/protocol/listen values;
+* map client snapshots;
+* map optional stream metadata;
+* never expose infrastructure DTOs.
+
+Keep mapping separate from HTTP execution.
+
+14. RestClient implementation
+
+Create or update:
+
+RestClientXuiInboundClient
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.inbound
+
+Requirements:
+
+* Implement XuiInboundClient.
+* Use AuthenticatedRequestExecutor.
+* Perform authenticated GET to the configured inbound-list endpoint.
+* Deserialize response into infrastructure DTOs.
+* Validate the response envelope.
+* Map to application snapshots.
+* Return an immutable list.
+* Never return null.
+* Do not perform business selection logic.
+* Do not cache unless explicitly justified.
+* Do not call a real server in automated tests.
+
+15. 3x-ui response envelope validation
+
+3x-ui responses may contain fields such as:
+
+success
+
+msg
+
+obj
+
+Requirements:
+
+* success=false must become a focused Xui response exception.
+* Missing obj for a successful list response should be handled consistently.
+* Empty obj list should return an empty list.
+* Authentication failures must remain XuiAuthenticationException.
+* 5xx must remain XuiServerException.
+* Malformed JSON must become XuiInvalidResponseException or equivalent.
+* Do not expose raw panel messages directly to external API users.
+* Server logs may include a sanitized panel message.
+
+Create:
+
+XuiInvalidResponseException
+
+only if the existing exception hierarchy does not already cover this case.
+
+16. Inbound lookup use cases
+
+Create focused application input ports.
+
+Suggested package:
+
+com.parazit.panel.application.port.in.xui.inbound
+
+Create:
+
+ListXuiInboundsUseCase
+
+Method:
+
+List<XuiInboundResult> list()
+
+Create:
+
+GetXuiInboundUseCase
+
+Methods:
+
+XuiInboundResult getById(GetXuiInboundByIdQuery query)
+
+XuiInboundResult getByRemark(GetXuiInboundByRemarkQuery query)
+
+Create:
+
+FindEligibleXuiInboundUseCase
+
+Method:
+
+XuiInboundResult findEligible(FindEligibleXuiInboundQuery query)
+
+Requirements:
+
+* Keep application services separate from HTTP details.
+* Do not expose XuiInboundSnapshot directly to API if current architecture uses result models.
+* Do not add write operations.
+* Do not implement Task 24 client creation.
+
+17. Query models
+
+Create:
+
+GetXuiInboundByIdQuery
+
+Field:
+
+long inboundId
+
+Create:
+
+GetXuiInboundByRemarkQuery
+
+Field:
+
+String remark
+
+Create:
+
+FindEligibleXuiInboundQuery
+
+Suggested fields:
+
+String protocol
+
+String securityType
+
+String streamNetwork
+
+Boolean requireEnabled
+
+Requirements:
+
+* Prefer minimal criteria.
+* For the current project, a default eligibility query for VLESS + REALITY may be enough.
+* Do not add plan, payment, or subscription fields.
+* Normalize text case-insensitively.
+* Keep queries infrastructure-independent.
+
+18. Application result model
+
+Create:
+
+XuiInboundResult
+
+Suggested package:
+
+com.parazit.panel.application.xui.inbound.result
+
+Fields:
+
+long id
+
+String remark
+
+String protocol
+
+int port
+
+boolean enabled
+
+String listenAddress
+
+long totalTrafficLimitBytes
+
+long uploadBytes
+
+long downloadBytes
+
+Instant expiryTime
+
+int clientCount
+
+String streamNetwork
+
+String securityType
+
+String serverName
+
+String publicKey
+
+List<String> shortIds
+
+Requirements:
+
+* Immutable.
+* Do not include raw client details in general API results unless required.
+* Do not expose private keys.
+* Do not expose remote settings JSON.
+* clientCount is sufficient for discovery endpoints.
+* Preserve canonical traffic/time values.
+
+19. Application mapper
+
+Create:
+
+XuiInboundResultMapper
+
+Requirements:
+
+* map XuiInboundSnapshot to XuiInboundResult;
+* no infrastructure DTO dependency;
+* no API DTO mapping;
+* no repository or network access;
+* explicit mapping.
+
+20. ListXuiInboundsService
+
+Create:
+
+ListXuiInboundsService
+
+Requirements:
+
+* Implement ListXuiInboundsUseCase.
+* Depend on XuiInboundClient.
+* Use constructor injection.
+* No transaction.
+* Return all mapped inbounds.
+* Preserve deterministic remote order unless a documented sort is required.
+* Do not mutate state.
+* Do not cache.
+
+21. GetXuiInboundService
+
+Create:
+
+GetXuiInboundService
+
+Requirements:
+
+* Implement GetXuiInboundUseCase.
+* Depend on XuiInboundClient.
+* Get by ID.
+* Get by case-insensitive normalized remark.
+* Throw XuiInboundNotFoundException when absent.
+* If duplicate remarks exist, do not silently choose one.
+
+For duplicate remarks:
+
+* throw XuiInboundAmbiguousException;
+* or require lookup by ID.
+
+Preferred:
+
+Throw conflict-like XuiInboundAmbiguousException.
+
+22. Eligible inbound policy
+
+Create:
+
+XuiInboundEligibilityPolicy
+
+Suggested package:
+
+com.parazit.panel.application.xui.inbound
+
+Default eligibility for future Task 24:
+
+* enabled=true;
+* protocol=VLESS;
+* securityType=REALITY;
+* valid port between 1 and 65535;
+* publicKey present;
+* at least one shortId present;
+* serverName present if required by the current panel configuration.
+
+Requirements:
+
+* Keep policy infrastructure-independent.
+* Do not choose based on current number of clients unless explicitly required.
+* Do not make network calls.
+* Return a boolean or validation result.
+* Explain required and optional criteria.
+
+23. FindEligibleXuiInboundService
+
+Create:
+
+FindEligibleXuiInboundService
+
+Requirements:
+
+* Implement FindEligibleXuiInboundUseCase.
+* Depend on XuiInboundClient and XuiInboundEligibilityPolicy.
+* Filter inbounds by query criteria.
+* Apply eligibility policy.
+* Define deterministic selection.
+
+Recommended deterministic order:
+
+1. lowest configured display/priority if such metadata exists;
+2. otherwise lowest inbound ID.
+
+Do not select randomly.
+
+If no eligible inbound:
+
+* throw XuiEligibleInboundNotFoundException.
+
+If multiple exist:
+
+* deterministically select one and document the rule.
+
+Do not persist the selection yet.
+
+24. Exceptions
+
+Create focused exceptions as needed:
+
+XuiInboundNotFoundException
+
+XuiInboundAmbiguousException
+
+XuiEligibleInboundNotFoundException
+
+XuiInvalidResponseException
+
+Requirements:
+
+* Safe messages.
+* No cookies.
+* No credentials.
+* No raw nested JSON.
+* No private keys.
+* If internal verification APIs expose them:
+
+  * not found → 404;
+  * ambiguous → 409;
+  * invalid remote response → 502;
+  * panel unavailable → 503;
+  * timeout → 504 where current exception conventions support it.
+
+25. Internal verification API
+
+Create an internal controller only for verification.
+
+Suggested:
+
+XuiInboundController
+
+Suggested package:
+
+com.parazit.panel.api.internal.xui.inbound
+
+Base path:
+
+/internal/xui/inbounds
+
+Endpoints:
+
+GET /internal/xui/inbounds
+
+GET /internal/xui/inbounds/{inboundId}
+
+GET /internal/xui/inbounds/by-remark/{remark}
+
+GET /internal/xui/inbounds/eligible
+
+Optional query parameters for eligible:
+
+protocol
+security
+network
+
+Requirements:
+
+* Controller depends on input ports.
+* Use dedicated response DTOs.
+* Do not expose raw remote DTOs.
+* Do not expose client UUIDs, emails, private keys, cookies, or settings JSON.
+* No authentication implementation in this task.
+* Mark endpoint as internal and temporary.
+* Do not implement POST/PUT/DELETE.
+
+26. API response DTO
+
+Create:
+
+XuiInboundResponse
+
+Fields:
+
+long id
+
+String remark
+
+String protocol
+
+int port
+
+boolean enabled
+
+String listenAddress
+
+long totalTrafficLimitBytes
+
+long uploadBytes
+
+long downloadBytes
+
+Instant expiryTime
+
+int clientCount
+
+String streamNetwork
+
+String securityType
+
+String serverName
+
+String publicKey
+
+List<String> shortIds
+
+Requirements:
+
+* Prefer Java record.
+* Do not expose private key.
+* Do not expose raw client list.
+* Do not expose session state.
+* Keep nullable optional fields consistent.
+
+27. API mapper
+
+Create:
+
+XuiInboundApiMapper
+
+Requirements:
+
+* Convert application results to responses.
+* Convert path/query input into query models.
+* Manual explicit mapping.
+* No infrastructure DTO dependency.
+* No network access.
+* Keep controller thin.
+
+28. HTTP behavior
+
+GET list:
+
+* 200 with array.
+* Empty remote list → 200 with [].
+
+GET by ID:
+
+* 200 when found.
+* 404 when absent.
+* invalid ID → 400.
+
+GET by remark:
+
+* 200 when exactly one match.
+* 404 when none.
+* 409 when duplicate remarks make lookup ambiguous.
+
+GET eligible:
+
+* 200 with one deterministic eligible inbound.
+* 404 when none eligible.
+
+Remote failures:
+
+* authentication failure → mapped using existing Xui authentication policy.
+* connection failure → 503.
+* timeout → 504 if supported.
+* invalid remote response → 502.
+* remote 5xx → 502 or 503 according to current conventions.
+
+All error responses must contain traceId and no secrets.
+
+29. Logging
+
+Log at appropriate levels:
+
+DEBUG:
+
+* inbound list request start/completion;
+* number of inbounds received;
+* lookup by ID/remark;
+* eligibility filtering summary.
+
+INFO:
+
+* eligible inbound selected, if useful.
+
+WARN:
+
+* malformed optional inbound entry skipped;
+* ambiguous remark;
+* no eligible inbound.
+
+ERROR:
+
+* invalid required response structure.
+
+Include:
+
+inboundId when known
+remark when safe
+protocol
+status code
+duration
+retry count
+traceId
+
+Never log:
+
+username
+password
+cookies
+session ID
+privateKey
+full settings JSON
+client identifiers in bulk
+subscription IDs
+
+30. Resilience behavior
+
+Use the retry and authentication infrastructure from Tasks 21 and 22.
+
+Requirements:
+
+* Authentication is ensured automatically.
+* 401/403 triggers at most one re-login flow.
+* Transient 502/503/504 may use configured retries.
+* Invalid JSON must not be retried unless the retry policy explicitly classifies it as transient.
+* 4xx client errors must not be retried.
+* No infinite retry.
+* No duplicate login storm.
+
+31. Unit tests: payload parser
+
+Test:
+
+* valid VLESS settings JSON;
+* multiple clients;
+* blank clients list;
+* missing optional fields;
+* malformed settings JSON;
+* valid REALITY stream settings;
+* TLS stream settings tolerated;
+* missing stream settings;
+* public key extracted;
+* private key ignored;
+* short IDs parsed;
+* epoch milliseconds converted;
+* zero expiry converted to empty;
+* exact traffic byte values;
+* unknown fields ignored.
+
+32. Unit tests: mapper
+
+Test:
+
+* remote DTO maps to snapshot;
+* protocol normalization;
+* remark trimming;
+* empty listen address handling;
+* client count;
+* optional REALITY fields;
+* private key absent from output;
+* malformed required values rejected.
+
+33. Unit tests: eligibility policy
+
+Test:
+
+* enabled VLESS REALITY inbound accepted;
+* disabled rejected;
+* VMESS rejected for default policy;
+* missing public key rejected;
+* missing short ID rejected;
+* invalid port rejected;
+* missing serverName behavior matches documented rule;
+* matching is case-insensitive;
+* policy does not mutate inbound.
+
+34. Unit tests: application services
+
+List service:
+
+* returns mapped list;
+* empty list;
+* client called once;
+* no mutation.
+
+Get service:
+
+* by ID found;
+* by ID absent;
+* by normalized remark;
+* duplicate remark conflict;
+* blank remark rejected.
+
+Eligible service:
+
+* one eligible;
+* multiple eligible deterministic choice;
+* none eligible;
+* query filters;
+* disabled inbound excluded;
+* exact selection rule verified.
+
+35. HTTP client integration tests
+
+Using WireMock or MockWebServer, simulate:
+
+* successful authenticated list response;
+* empty list;
+* success=false envelope;
+* malformed JSON;
+* nested malformed settings;
+* 401 followed by successful re-login and retry;
+* 403 followed by successful re-login and retry;
+* 500/502/503/504 behavior;
+* timeout;
+* connection failure if test infrastructure supports it;
+* unknown fields;
+* cookie reuse.
+
+Verify:
+
+* correct endpoint called;
+* correct HTTP method;
+* session cookie attached;
+* login not repeated unnecessarily;
+* retries bounded;
+* returned snapshots correct;
+* secrets not present in logs where testable.
+
+36. Realistic 3x-ui fixture
+
+Create sanitized JSON fixtures representing the actual target 3x-ui response shape.
+
+Suggested location:
+
+src/test/resources/xui/inbounds/
+
+Files:
+
+list-inbounds-success.json
+
+list-inbounds-empty.json
+
+list-inbounds-vless-reality.json
+
+list-inbounds-malformed-settings.json
+
+list-inbounds-failure.json
+
+Requirements:
+
+* No real credentials.
+* No real server IP.
+* No real private keys.
+* Use fake public values.
+* Keep fixtures representative.
+
+37. Controller tests
+
+GET list:
+
+* 200;
+* array contract;
+* no privateKey field;
+* no raw settings field;
+* no client list field;
+* JSON content type.
+
+GET by ID:
+
+* success;
+* not found;
+* invalid ID.
+
+GET by remark:
+
+* success;
+* not found;
+* ambiguous conflict.
+
+GET eligible:
+
+* success;
+* no eligible inbound.
+
+Remote error mappings:
+
+* invalid response;
+* unavailable panel;
+* timeout;
+* authentication failure.
+
+Verify standard error response:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No stack trace.
+No cookie.
+No credentials.
+No private key.
+
+38. Architecture rules
+
+Verify:
+
+* application port does not depend on infrastructure;
+* application result/model does not import Jackson or RestClient;
+* infrastructure DTOs remain infrastructure-only;
+* controller depends on input ports;
+* no controller injects RestClient;
+* no raw JSON leaves infrastructure;
+* no client creation logic exists;
+* no payment/order/subscription/Telegram code exists;
+* no field injection;
+* no service locator;
+* no real server call in automated tests.
+
+Extend architecture tests if already present.
+
+39. Documentation
+
+Create:
+
+docs/xui/inbound-discovery.md
+
+Document:
+
+* API endpoint assumption;
+* authentication reuse;
+* response envelope;
+* nested settings parsing;
+* supported protocols;
+* VLESS + REALITY metadata;
+* time conversion;
+* traffic units;
+* eligibility policy;
+* deterministic selection;
+* internal verification endpoints;
+* exception mapping;
+* logging and secret redaction;
+* limitations;
+* work deferred to Task 24.
+
+Include Mermaid sequence diagrams for:
+
+* list inbounds;
+* expired session with re-login;
+* find inbound by remark;
+* select eligible inbound.
+
+Update:
+
+docs/xui/client-architecture.md
+
+docs/xui/authentication.md
+
+only where Task 23 clarifies the authenticated request flow.
+
+40. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/out/xui/
+XuiInboundClient.java
+
+src/main/java/com/parazit/panel/application/xui/model/
+XuiInboundSnapshot.java
+XuiClientSnapshot.java
+
+src/main/java/com/parazit/panel/application/port/in/xui/inbound/
+ListXuiInboundsUseCase.java
+GetXuiInboundUseCase.java
+FindEligibleXuiInboundUseCase.java
+
+src/main/java/com/parazit/panel/application/xui/inbound/query/
+GetXuiInboundByIdQuery.java
+GetXuiInboundByRemarkQuery.java
+FindEligibleXuiInboundQuery.java
+
+src/main/java/com/parazit/panel/application/xui/inbound/result/
+XuiInboundResult.java
+
+src/main/java/com/parazit/panel/application/xui/inbound/
+XuiInboundResultMapper.java
+XuiInboundEligibilityPolicy.java
+ListXuiInboundsService.java
+GetXuiInboundService.java
+FindEligibleXuiInboundService.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/dto/inbound/
+XuiApiResponse.java
+XuiInboundRemoteDto.java
+XuiClientRemoteDto.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/inbound/
+RestClientXuiInboundClient.java
+XuiInboundPayloadParser.java
+XuiInboundMapper.java
+
+src/main/java/com/parazit/panel/api/internal/xui/inbound/
+XuiInboundController.java
+XuiInboundResponse.java
+XuiInboundApiMapper.java
+
+src/test/resources/xui/inbounds/
+list-inbounds-success.json
+list-inbounds-empty.json
+list-inbounds-vless-reality.json
+list-inbounds-malformed-settings.json
+list-inbounds-failure.json
+
+src/test/java/com/parazit/panel/infrastructure/xui/inbound/
+XuiInboundPayloadParserTest.java
+XuiInboundMapperTest.java
+RestClientXuiInboundClientIntegrationTest.java
+
+src/test/java/com/parazit/panel/application/xui/inbound/
+XuiInboundEligibilityPolicyTest.java
+ListXuiInboundsServiceTest.java
+GetXuiInboundServiceTest.java
+FindEligibleXuiInboundServiceTest.java
+
+src/test/java/com/parazit/panel/api/internal/xui/inbound/
+XuiInboundControllerTest.java
+
+docs/xui/
+inbound-discovery.md
+
+Adapt names to the existing project conventions.
+
+41. Verification commands
+
+Run the commands appropriate to the current build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* inbound parser tests pass;
+* HTTP mock integration tests pass;
+* authentication and re-login tests still pass;
+* controller tests pass;
+* application starts;
+* no real 3x-ui server is called;
+* no create/update/delete client logic exists;
+* no payment, order, subscription, Telegram, or VPN provisioning logic exists;
+* no credentials or real panel data are committed;
+* no tests are disabled.
+
+42. Optional manual verification against a real panel
+
+Do not run automatically.
+
+Only if local secure configuration is available:
+
+* enable the 3x-ui integration;
+* use environment-provided credentials;
+* call the internal inbound-list endpoint;
+* verify sanitized fields;
+* verify no private key or cookie is exposed;
+* verify an eligible VLESS + REALITY inbound is found.
+
+Do not commit output containing real server details or keys.
+
+43. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified 3x-ui endpoint contract
+3. Port design decision
+4. Nested JSON parsing strategy
+5. Eligibility policy
+6. Planned files to create
+7. Planned files to modify
+8. Risks and compatibility concerns
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Endpoint and response assumptions
+5. Parsing behavior
+6. Eligibility behavior
+7. Error and retry behavior
+8. Internal API contract
+9. Test results
+10. Build result
+11. Commands executed
+12. Remaining issues
+13. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(xui): add authenticated inbound discovery
+
+Stop after completing Task 23.
+
+Do not begin Task 24.
+

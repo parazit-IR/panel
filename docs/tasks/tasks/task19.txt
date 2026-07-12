@@ -1,0 +1,1453 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 19 – User Plan Selection
+
+Goal:
+
+Implement a user plan-selection use case that allows a registered user to select one currently ACTIVE plan and persist a temporary selection snapshot for the next order/payment phase.
+
+This task must not create an Order, Payment, Subscription, VPN client, 3x-ui client, or Telegram handler.
+
+Important rules:
+
+* Inspect the existing repository before making changes.
+* Preserve all working code and architecture from Tasks 1–18.
+* Reuse User, UserRepository, Plan, PlanRepository, BaseEntity, repository abstractions, Flyway, SystemClockPort, logging, exception handling, traceId, validation, dependency injection, Testcontainers support, and existing architecture conventions.
+* Do not expose JPA entities through APIs.
+* Do not reuse admin Plan DTOs.
+* Do not allow selection of DRAFT, INACTIVE, or ARCHIVED plans.
+* Do not implement payment or order logic.
+* Do not implement subscription provisioning.
+* Do not implement 3x-ui integration.
+* Do not implement Telegram Bot handlers.
+* Do not add unnecessary dependencies.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Use Java 21.
+* Use PostgreSQL and Flyway.
+* Stop after completing Task 19.
+* Do not begin Task 20.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* User aggregate and UserRepository;
+* Plan aggregate and PlanRepository;
+* active-plan catalog behavior;
+* BaseEntity and auditing;
+* current Flyway versions;
+* repository adapter conventions;
+* command/query/result conventions;
+* transaction boundaries;
+* exception mappings;
+* test support and database cleanup;
+* any existing selection, cart, checkout, order, or session code.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Selection model decision
+
+3. Snapshot strategy
+
+4. Expiration strategy
+
+5. Planned files to create
+
+6. Planned files to modify
+
+7. Database migration risks
+
+8. Concurrency and idempotency risks
+
+9. Scope and terminology
+
+A PlanSelection represents a user's current temporary intent to purchase a plan.
+
+It is not:
+
+* an Order;
+* a Payment;
+* a Subscription;
+* a reservation of inventory;
+* a guarantee that the price will remain valid forever.
+
+Implement:
+
+* select an ACTIVE plan;
+* retrieve the current selection;
+* replace the current selection with another ACTIVE plan;
+* clear the current selection.
+
+Do not implement:
+
+* checkout;
+* payment URL creation;
+* discount or coupon;
+* quantity;
+* multiple cart items;
+* historical list of selections;
+* automatic order creation.
+
+3. PlanSelection aggregate
+
+Create:
+
+PlanSelection
+
+Suggested package:
+
+com.parazit.panel.domain.plan.selection
+
+The entity must extend BaseEntity.
+
+Fields:
+
+UUID id inherited from BaseEntity
+
+UUID userId
+
+UUID planId
+
+String planCodeSnapshot
+
+String planNameSnapshot
+
+PlanType planTypeSnapshot
+
+long priceAmountSnapshot
+
+CurrencyCode currencySnapshot
+
+int durationDaysSnapshot
+
+Long trafficLimitBytesSnapshot
+
+Integer maxDevicesSnapshot
+
+PlanSelectionStatus status
+
+Instant selectedAt
+
+Instant expiresAt
+
+Instant createdAt inherited from BaseEntity
+
+Instant updatedAt inherited from BaseEntity
+
+Design rules:
+
+* Store userId and planId as scalar UUIDs.
+* Do not use bidirectional relationships.
+* Snapshot plan fields required by the future order phase.
+* Snapshot protects the selection from later plan edits.
+* One user may have at most one current selection.
+* Do not store payment gateway data.
+* Do not store subscription dates.
+* Do not store 3x-ui inbound/client data.
+* Do not store Telegram-specific data.
+* Keep the aggregate focused.
+
+4. Selection status
+
+Create:
+
+PlanSelectionStatus
+
+Initial values:
+
+ACTIVE
+CLEARED
+EXPIRED
+CONSUMED
+
+Persist with EnumType.STRING.
+
+Semantics:
+
+ACTIVE:
+The selection may be used to create an order later.
+
+CLEARED:
+The user explicitly cleared the selection.
+
+EXPIRED:
+The selection passed expiresAt.
+
+CONSUMED:
+A future order flow has consumed the selection.
+
+Task 19 behavior:
+
+* Create ACTIVE selections.
+* Allow clear operation.
+* Detect and mark expiration when selection is loaded or replaced.
+* Do not implement CONSUMED transitions from an Order yet.
+* A future task may consume it.
+
+Do not physically delete selections merely because they were cleared or expired unless the selected architecture explicitly chooses a simpler current-selection table.
+
+5. Current-selection storage design
+
+Choose one clean design.
+
+Preferred design:
+
+Maintain historical selection records, but enforce only one ACTIVE selection per user using a PostgreSQL partial unique index:
+
+UNIQUE (user_id) WHERE status = 'ACTIVE'
+
+Benefits:
+
+* preserves history;
+* supports future audit/debugging;
+* allows replace by clearing the current row and creating a new row;
+* prevents multiple active selections under concurrency.
+
+Alternative:
+
+One mutable row per user with a unique user_id.
+
+Choose the simpler option if the current project strongly avoids history.
+
+Preferred final design for this task:
+
+Historical rows with exactly one ACTIVE row per user.
+
+Explain the decision before implementation.
+
+6. Selection expiration
+
+Selections must expire.
+
+Add configuration:
+
+PlanSelectionProperties
+
+Suggested package:
+
+com.parazit.panel.config.properties
+
+Prefix:
+
+app.plan-selection
+
+Field:
+
+Duration ttl
+
+Default:
+
+30 minutes
+
+Environment variable:
+
+PLAN_SELECTION_TTL=PT30M
+
+Requirements:
+
+* TTL must be positive.
+* Use ISO-8601 Duration.
+* Do not hardcode expiration in services.
+* Do not implement a scheduled cleanup job yet.
+* Expiration is evaluated when the current selection is accessed or replaced.
+* Cron cleanup belongs to Task 38.
+
+7. Controlled creation
+
+Create a factory such as:
+
+PlanSelection.create(
+UUID userId,
+Plan plan,
+Instant selectedAt,
+Duration ttl
+)
+
+Requirements:
+
+* userId required;
+* plan required;
+* plan must be ACTIVE;
+* selectedAt required;
+* TTL positive;
+* copy all snapshot fields from Plan;
+* status initially ACTIVE;
+* expiresAt = selectedAt + ttl;
+* do not retain an object reference to Plan;
+* protect all invariants.
+
+8. Domain methods
+
+Create focused behavior:
+
+boolean isExpiredAt(Instant now)
+
+void expire(Instant now)
+
+void clear(Instant now)
+
+void consume(Instant now)
+
+Requirements:
+
+* expire only when ACTIVE and expiresAt is not after now;
+* clear an ACTIVE selection;
+* same clear operation may be idempotent if consistent with project conventions;
+* consume is created for lifecycle completeness but not used by Task 19;
+* CLEARED, EXPIRED, and CONSUMED selections cannot return to ACTIVE;
+* timestamps must not be null;
+* no generic status setter;
+* no public setters.
+
+If a dedicated terminal timestamp is useful, add:
+
+Instant closedAt
+
+Only add it if it meaningfully clarifies lifecycle.
+
+Otherwise rely on updatedAt and document the limitation.
+
+9. Snapshot invariants
+
+Validate snapshot values:
+
+* planCodeSnapshot required;
+* planNameSnapshot required;
+* planTypeSnapshot required;
+* priceAmountSnapshot >= 0;
+* currencySnapshot required;
+* durationDaysSnapshot > 0;
+* limited plans require positive traffic bytes;
+* unlimited plans require null traffic bytes;
+* maxDevices positive when present;
+* expiresAt must be after selectedAt.
+
+The snapshot must remain immutable after creation.
+
+Only status may transition.
+
+10. JPA mapping
+
+Map PlanSelection to:
+
+plan_selections
+
+Requirements:
+
+* UUID primary key;
+* snake_case columns;
+* enums stored as strings;
+* user_id not null;
+* plan_id not null;
+* all snapshot fields mapped explicitly;
+* selected_at TIMESTAMPTZ;
+* expires_at TIMESTAMPTZ;
+* created_at TIMESTAMPTZ;
+* updated_at TIMESTAMPTZ;
+* no entity relationships;
+* no eager associations.
+
+Add indexes for:
+
+user_id
+plan_id
+status
+expires_at
+selected_at
+
+Add foreign keys:
+
+user_id -> users(id)
+
+plan_id -> plans(id)
+
+Delete behavior:
+
+Prefer RESTRICT/NO ACTION.
+
+Do not silently delete selection history if a plan or user deletion is attempted.
+
+11. Flyway migration
+
+Create the next migration based on actual history.
+
+Suggested name:
+
+V6__create_plan_selections_table.sql
+
+Adjust the version if necessary.
+
+Migration requirements:
+
+* create plan_selections;
+* define all fields;
+* add user and plan foreign keys;
+* add lifecycle and snapshot check constraints;
+* add indexes;
+* add partial unique index for one ACTIVE selection per user if using the preferred design;
+* remain compatible with Hibernate validation.
+
+Recommended checks:
+
+price_amount_snapshot >= 0
+
+duration_days_snapshot > 0
+
+max_devices_snapshot IS NULL OR max_devices_snapshot > 0
+
+expires_at > selected_at
+
+status IN (
+'ACTIVE',
+'CLEARED',
+'EXPIRED',
+'CONSUMED'
+)
+
+traffic consistency:
+
+(
+plan_type_snapshot = 'UNLIMITED'
+AND traffic_limit_bytes_snapshot IS NULL
+)
+OR
+(
+plan_type_snapshot = 'TRAFFIC_LIMITED'
+AND traffic_limit_bytes_snapshot > 0
+)
+
+Partial unique index example conceptually:
+
+CREATE UNIQUE INDEX ... ON plan_selections(user_id)
+WHERE status = 'ACTIVE';
+
+Use the actual SQL style consistent with the project.
+
+12. Repository abstraction
+
+Create:
+
+PlanSelectionRepository
+
+Suggested package:
+
+com.parazit.panel.domain.plan.selection.repository
+
+Extend:
+
+UuidRepository<PlanSelection>
+
+Add:
+
+Optional<PlanSelection> findActiveByUserId(UUID userId)
+
+List<PlanSelection> findAllByUserIdOrderBySelectedAtDesc(UUID userId)
+
+boolean existsActiveByUserId(UUID userId)
+
+Requirements:
+
+* independent from Spring Data;
+* no Pageable;
+* no JpaRepository;
+* no future payment/order queries;
+* methods never return null.
+
+The history query is optional if not needed in Task 19.
+
+Do not expose a history API in this task.
+
+13. Spring Data repository
+
+Create:
+
+SpringDataPlanSelectionRepository
+
+Suggested package:
+
+com.parazit.panel.infrastructure.persistence.plan.selection
+
+Extend:
+
+SpringDataUuidRepository<PlanSelection>
+
+Implement matching derived or explicit queries.
+
+For ACTIVE lookup, use a status-constrained query.
+
+Use deterministic ordering for history if present.
+
+14. Repository adapter
+
+Create:
+
+PlanSelectionRepositoryAdapter
+
+Requirements:
+
+* extend JpaRepositoryAdapter<PlanSelection, UUID>;
+* implement PlanSelectionRepository;
+* use constructor injection;
+* delegate repository-specific methods;
+* contain no business logic;
+* do not catch generic exceptions.
+
+15. Input ports
+
+Suggested package:
+
+com.parazit.panel.application.port.in.plan.selection
+
+Create:
+
+SelectPlanUseCase
+
+Method:
+
+PlanSelectionResult select(SelectPlanCommand command)
+
+Create:
+
+GetCurrentPlanSelectionUseCase
+
+Method:
+
+PlanSelectionResult getCurrent(GetCurrentPlanSelectionQuery query)
+
+Create:
+
+ClearPlanSelectionUseCase
+
+Method:
+
+PlanSelectionResult clear(ClearPlanSelectionCommand command)
+
+Requirements:
+
+* infrastructure-independent;
+* no Spring Data types;
+* no entity exposure;
+* focused interfaces.
+
+16. Commands and queries
+
+Create:
+
+SelectPlanCommand
+
+Fields:
+
+Long telegramUserId
+
+UUID planId
+
+Create:
+
+GetCurrentPlanSelectionQuery
+
+Field:
+
+Long telegramUserId
+
+Create:
+
+ClearPlanSelectionCommand
+
+Field:
+
+Long telegramUserId
+
+Suggested packages:
+
+com.parazit.panel.application.plan.selection.command
+
+com.parazit.panel.application.plan.selection.query
+
+Prefer Java records.
+
+Requirements:
+
+* Telegram ID positive;
+* plan ID required;
+* no API/JPA annotations;
+* no Telegram SDK classes.
+
+17. Result model
+
+Create:
+
+PlanSelectionResult
+
+Suggested package:
+
+com.parazit.panel.application.plan.selection.result
+
+Fields:
+
+UUID selectionId
+
+UUID userId
+
+Long telegramUserId
+
+UUID planId
+
+String planCode
+
+String planName
+
+PlanType planType
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+PlanSelectionStatus status
+
+Instant selectedAt
+
+Instant expiresAt
+
+boolean newlySelected
+
+Requirements:
+
+* immutable;
+* do not expose entity;
+* use snapshot fields, not current Plan values;
+* newlySelected=true for a newly created/replaced selection;
+* newlySelected=false when selecting the same still-valid plan idempotently;
+* do not include order, payment, or subscription fields.
+
+18. Result mapper
+
+Create:
+
+PlanSelectionResultMapper
+
+Requirements:
+
+* map User and PlanSelection into PlanSelectionResult;
+* explicit manual mapping;
+* no API mapping;
+* no repository access;
+* stateless.
+
+19. SelectPlanService
+
+Create:
+
+SelectPlanService
+
+Suggested package:
+
+com.parazit.panel.application.plan.selection
+
+Dependencies:
+
+UserRepository
+PlanRepository
+PlanSelectionRepository
+SystemClockPort
+PlanSelectionProperties
+
+Requirements:
+
+* implement SelectPlanUseCase;
+* constructor injection;
+* @Transactional;
+* validate command;
+* find User by telegramUserId;
+* throw UserNotFoundException if absent;
+* find Plan by ID and ACTIVE status;
+* throw AvailablePlanNotFoundException if missing or hidden;
+* load current ACTIVE selection by userId;
+* evaluate expiration using SystemClockPort.
+
+Algorithm:
+
+1. Load user.
+2. Load ACTIVE plan.
+3. Load current ACTIVE selection.
+4. If current selection is expired:
+
+   * mark EXPIRED;
+   * persist;
+   * treat as no active selection.
+5. If current non-expired selection references the same plan:
+
+   * return it;
+   * newlySelected=false;
+   * do not create another row.
+6. If current non-expired selection references a different plan:
+
+   * clear it;
+   * persist transition.
+7. Create a new snapshot selection using current Plan data.
+8. Save it.
+9. Return newlySelected=true.
+
+Requirements:
+
+* selecting the same plan is idempotent;
+* selecting a different plan replaces the current selection;
+* Plan updates after selection do not alter old snapshot data;
+* blocked/suspended behavior must be explicitly decided.
+
+Recommended:
+
+Blocked users cannot select a plan.
+Suspended users cannot select a plan.
+Inactive users cannot select a plan.
+
+Create or reuse a safe exception mapped to 403 or 409.
+
+Choose behavior consistent with current User semantics and document it.
+
+20. User eligibility policy
+
+Create a focused policy if it improves design:
+
+PlanSelectionEligibilityPolicy
+
+Possible rules:
+
+* blocked user → not allowed;
+* UserStatus.SUSPENDED → not allowed;
+* UserStatus.INACTIVE → not allowed;
+* UserStatus.ACTIVE and not blocked → allowed.
+
+Requirements:
+
+* keep policy independent from infrastructure;
+* do not add security authentication;
+* safe exception message;
+* do not modify user status.
+
+Possible exception:
+
+UserNotEligibleForPlanSelectionException
+
+Suggested HTTP mapping:
+
+403 Forbidden
+
+or:
+
+409 Conflict
+
+Preferred:
+
+403 because the user is known but not permitted.
+
+21. GetCurrentPlanSelectionService
+
+Create:
+
+GetCurrentPlanSelectionService
+
+Requirements:
+
+* implement GetCurrentPlanSelectionUseCase;
+* depend on UserRepository, PlanSelectionRepository, SystemClockPort;
+* transaction may write because expiration can be detected;
+* find user;
+* find active selection;
+* if none, throw PlanSelectionNotFoundException;
+* if expired:
+
+  * mark EXPIRED;
+  * persist;
+  * throw PlanSelectionNotFoundException;
+* return snapshot result;
+* do not load current Plan merely to render the selection;
+* do not refresh snapshot values.
+
+22. ClearPlanSelectionService
+
+Create:
+
+ClearPlanSelectionService
+
+Requirements:
+
+* implement ClearPlanSelectionUseCase;
+* use @Transactional;
+* find user;
+* find current ACTIVE selection;
+* if none or expired, define clear behavior.
+
+Preferred behavior:
+
+No current selection → PlanSelectionNotFoundException.
+
+Alternative idempotent behavior:
+
+Return 204.
+
+Choose one and keep API consistent.
+
+Recommended for this use case:
+
+Return 404 when no current selection exists.
+
+* clear active selection through domain method;
+* save transition;
+* return result with status CLEARED;
+* do not physically delete;
+* do not modify Plan or User.
+
+23. Selection exceptions
+
+Create focused exceptions as needed:
+
+PlanSelectionNotFoundException
+
+UserNotEligibleForPlanSelectionException
+
+PlanSelectionConflictException only if needed
+
+Requirements:
+
+* safe messages;
+* no SQL details;
+* mappings:
+
+PlanSelectionNotFoundException → 404
+
+UserNotEligibleForPlanSelectionException → 403
+
+Unexpected database conflict → 409 or recovered transparently
+
+* no stack traces in API responses.
+
+24. Concurrency strategy
+
+Handle concurrent selection requests for the same user.
+
+Scenarios:
+
+Same user selects the same plan concurrently:
+
+* exactly one ACTIVE selection;
+* both requests should ideally return the same active selection;
+* no raw database exception escapes.
+
+Same user selects different plans concurrently:
+
+* exactly one ACTIVE selection remains;
+* one selection wins deterministically according to transaction completion;
+* the other request may return conflict or recover by reloading the winner.
+
+Choose and document one behavior.
+
+Recommended:
+
+* database partial unique index is final authority;
+* on active-selection uniqueness conflict, reload current active selection;
+* if it matches requested plan, return idempotently;
+* if it differs, return PlanSelectionConflictException mapped to 409.
+
+Do not use synchronized or JVM locks.
+
+Be careful with rollback-only transaction state after a persistence exception.
+
+Use a correct strategy such as a separate transaction boundary or focused insert component.
+
+25. Internal/user API
+
+Create:
+
+PlanSelectionController
+
+Suggested package:
+
+com.parazit.panel.api.plan.selection
+
+Base path:
+
+/api/users/{telegramUserId}/plan-selection
+
+Endpoints:
+
+PUT /api/users/{telegramUserId}/plan-selection
+
+GET /api/users/{telegramUserId}/plan-selection
+
+DELETE /api/users/{telegramUserId}/plan-selection
+
+PUT request:
+
+{
+"planId": "uuid"
+}
+
+Requirements:
+
+* PUT is idempotent and replaces current selection.
+* GET returns current valid selection.
+* DELETE clears current selection.
+* Use dedicated DTOs.
+* Do not expose entity.
+* Do not implement authentication yet.
+* Do not create an Order.
+* Do not call Payment or 3x-ui.
+
+26. Request and response DTOs
+
+Create:
+
+SelectPlanRequest
+
+Field:
+
+UUID planId
+
+Validation:
+
+@NotNull
+
+Create:
+
+PlanSelectionResponse
+
+Fields matching PlanSelectionResult, except include only user-facing values:
+
+UUID selectionId
+
+UUID planId
+
+String planCode
+
+String planName
+
+PlanType planType
+
+long priceAmount
+
+CurrencyCode currency
+
+int durationDays
+
+Long trafficLimitBytes
+
+Integer maxDevices
+
+PlanSelectionStatus status
+
+Instant selectedAt
+
+Instant expiresAt
+
+boolean newlySelected
+
+Do not expose:
+
+userId
+telegramUserId
+createdAt
+updatedAt
+
+unless existing API conventions require them.
+
+Prefer a minimal response.
+
+27. API mapper
+
+Create:
+
+PlanSelectionApiMapper
+
+Requirements:
+
+* convert path and request to SelectPlanCommand;
+* convert path to get/clear models;
+* convert result to response;
+* manual explicit mapping;
+* no entity mapping;
+* no MapStruct unless already used.
+
+28. HTTP behavior
+
+PUT:
+
+* first selection → 201 or 200.
+
+Preferred:
+
+200 for idempotent PUT.
+
+* same plan repeated → 200, newlySelected=false.
+* different active plan → 200, newlySelected=true.
+* hidden plan → 404.
+* missing user → 404.
+* ineligible user → 403.
+* concurrency conflict → 409 if not recoverable.
+
+GET:
+
+* active valid selection → 200.
+* none → 404.
+* expired → mark expired and return 404.
+
+DELETE:
+
+Preferred:
+
+* active selection cleared → 200 with CLEARED response.
+* none → 404.
+
+Invalid UUID/body:
+
+* 400.
+
+Use standard error response with traceId.
+
+29. Logging
+
+Requirements:
+
+* INFO when a user selects a plan;
+* INFO when a selection is replaced;
+* INFO or DEBUG when cleared;
+* DEBUG for same-plan idempotent selection;
+* DEBUG when expiration is detected;
+* WARN for concurrency conflicts.
+
+Include:
+
+selectionId
+userId
+planId
+planCode
+oldSelectionId when replaced
+newlySelected
+traceId through MDC
+
+Do not log names.
+Do not log request bodies.
+Do not log secrets.
+
+30. Domain unit tests
+
+Create pure tests for PlanSelection:
+
+* successful limited snapshot creation;
+* successful unlimited snapshot creation;
+* ACTIVE initial status;
+* correct expiresAt;
+* snapshot values copied;
+* null user rejected;
+* null plan rejected;
+* non-ACTIVE plan rejected;
+* invalid TTL rejected;
+* expiration detection before boundary;
+* expiration at exact boundary;
+* expire transition;
+* clear transition;
+* consume transition if implemented;
+* terminal statuses cannot reactivate;
+* snapshot fields remain immutable;
+* traffic invariants enforced.
+
+No Spring context.
+
+31. Eligibility policy tests
+
+Test:
+
+* active, unblocked user allowed;
+* blocked user denied;
+* suspended user denied;
+* inactive user denied;
+* policy does not mutate User.
+
+32. SelectPlanService unit tests
+
+Test:
+
+* first selection;
+* same plan idempotent;
+* different plan replaces selection;
+* expired current selection is expired then replaced;
+* missing user;
+* missing/hidden plan;
+* blocked user;
+* suspended user;
+* inactive user;
+* fixed clock used;
+* TTL used;
+* snapshot uses current plan values;
+* repository interactions correct;
+* no order/payment/subscription call exists.
+
+33. GetCurrentPlanSelectionService unit tests
+
+Test:
+
+* valid current selection;
+* no selection;
+* expired selection marked EXPIRED then not found;
+* snapshot returned without loading current Plan;
+* missing user;
+* no unrelated mutation.
+
+34. ClearPlanSelectionService unit tests
+
+Test:
+
+* active selection cleared;
+* missing selection;
+* expired selection behavior;
+* missing user;
+* status becomes CLEARED;
+* row is not deleted;
+* repository interactions correct.
+
+35. Repository integration tests
+
+Use PostgreSQL Testcontainers.
+
+Verify:
+
+* save selection;
+* UUID and auditing;
+* find ACTIVE by userId;
+* historical ordering if implemented;
+* one ACTIVE selection per user constraint;
+* multiple terminal historical rows allowed;
+* foreign keys;
+* status persistence;
+* snapshot persistence;
+* expiration constraint;
+* traffic consistency;
+* plan/user delete restriction;
+* Flyway migration;
+* Hibernate validation.
+
+36. Snapshot integration tests
+
+Verify:
+
+1. Create ACTIVE Plan A.
+2. Select Plan A.
+3. Update Plan A price/name/duration.
+4. Reload selection.
+5. Selection still contains old snapshot values.
+6. Plan catalog shows new Plan values.
+
+This behavior is critical.
+
+37. Selection integration tests
+
+Use real PostgreSQL.
+
+Test:
+
+* first selection;
+* same selection idempotency;
+* replace with another plan;
+* old selection becomes CLEARED;
+* exactly one ACTIVE selection;
+* expired selection becomes EXPIRED;
+* GET expired selection returns not found;
+* clear operation;
+* hidden plan rejected;
+* ineligible user rejected;
+* User/Plan remain unchanged;
+* no order or payment row created.
+
+38. Concurrency integration tests
+
+Use deterministic coordination.
+
+Scenario 1: same user, same plan
+
+* two concurrent PUT-equivalent service calls;
+* exactly one ACTIVE selection;
+* both succeed or one recovers idempotently;
+* both point to same selection.
+
+Scenario 2: same user, different plans
+
+* two concurrent calls;
+* exactly one ACTIVE row;
+* one result succeeds;
+* second either returns 409 or returns the winner according to documented behavior;
+* no raw DataIntegrityViolationException escapes.
+
+Requirements:
+
+* real PostgreSQL;
+* separate transactions;
+* ExecutorService;
+* synchronization primitives;
+* no Thread.sleep;
+* shutdown executor;
+* timeouts.
+
+39. Controller tests
+
+PUT:
+
+* valid first selection → 200;
+* same plan → 200 and newlySelected=false;
+* replacement → 200;
+* missing plan → 404;
+* inactive plan → 404;
+* missing user → 404;
+* blocked user → 403;
+* null planId → 400;
+* malformed UUID/JSON → 400;
+* concurrency conflict mapping → 409 where applicable.
+
+GET:
+
+* current selection → 200;
+* none → 404;
+* expired → 404;
+* response contains snapshot values;
+* response excludes entity/audit/internal user fields.
+
+DELETE:
+
+* active selection → 200;
+* none → 404;
+* malformed user ID → 400.
+
+All errors include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+40. Architecture rules
+
+Verify:
+
+* PlanSelection domain does not depend on API or infrastructure.
+* Application services depend on UserRepository, PlanRepository, and PlanSelectionRepository interfaces.
+* API depends on input ports.
+* No controller injects Spring Data.
+* No entity is exposed.
+* No Order, Payment, Subscription, Telegram, VPN, or 3x-ui logic is added.
+* No user authentication implementation is added.
+* No field injection exists.
+* Snapshot does not reference mutable Plan entity.
+
+Extend existing architecture tests if present.
+
+41. Documentation
+
+Create:
+
+docs/use-cases/user-plan-selection.md
+
+Document:
+
+* purpose;
+* distinction from Order;
+* current-selection design;
+* snapshot strategy;
+* expiration TTL;
+* replacement behavior;
+* same-plan idempotency;
+* eligibility rules;
+* hidden Plan behavior;
+* clear behavior;
+* database constraints;
+* concurrency strategy;
+* API contracts;
+* HTTP status codes;
+* no scheduled cleanup yet;
+* no payment/order/subscription behavior yet;
+* Task 20 testing scope;
+* future Task 31 Order integration.
+
+Include Mermaid diagrams for:
+
+* first selection;
+* same-plan idempotent selection;
+* replacing selection;
+* expired selection lookup;
+* concurrent selection conflict.
+
+Update `.env.example`:
+
+PLAN_SELECTION_TTL=PT30M
+
+42. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/plan/selection/
+PlanSelection.java
+PlanSelectionStatus.java
+
+src/main/java/com/parazit/panel/domain/plan/selection/repository/
+PlanSelectionRepository.java
+
+src/main/java/com/parazit/panel/config/properties/
+PlanSelectionProperties.java
+
+src/main/java/com/parazit/panel/application/port/in/plan/selection/
+SelectPlanUseCase.java
+GetCurrentPlanSelectionUseCase.java
+ClearPlanSelectionUseCase.java
+
+src/main/java/com/parazit/panel/application/plan/selection/command/
+SelectPlanCommand.java
+ClearPlanSelectionCommand.java
+
+src/main/java/com/parazit/panel/application/plan/selection/query/
+GetCurrentPlanSelectionQuery.java
+
+src/main/java/com/parazit/panel/application/plan/selection/result/
+PlanSelectionResult.java
+
+src/main/java/com/parazit/panel/application/plan/selection/
+PlanSelectionResultMapper.java
+PlanSelectionEligibilityPolicy.java
+SelectPlanService.java
+GetCurrentPlanSelectionService.java
+ClearPlanSelectionService.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/plan/selection/
+SpringDataPlanSelectionRepository.java
+PlanSelectionRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/plan/selection/
+PlanSelectionController.java
+SelectPlanRequest.java
+PlanSelectionResponse.java
+PlanSelectionApiMapper.java
+
+src/main/resources/db/migration/
+V6__create_plan_selections_table.sql
+
+src/test/java/com/parazit/panel/domain/plan/selection/
+PlanSelectionTest.java
+
+src/test/java/com/parazit/panel/application/plan/selection/
+PlanSelectionEligibilityPolicyTest.java
+SelectPlanServiceTest.java
+GetCurrentPlanSelectionServiceTest.java
+ClearPlanSelectionServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/plan/selection/
+PlanSelectionRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/plan/selection/
+PlanSelectionIntegrationTest.java
+PlanSelectionSnapshotIntegrationTest.java
+ConcurrentPlanSelectionIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/plan/selection/
+PlanSelectionControllerTest.java
+
+docs/use-cases/
+user-plan-selection.md
+
+Adapt names and migration version to existing conventions.
+
+43. Verification commands
+
+Run commands appropriate to the existing build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile and PostgreSQL.
+
+Manual verification:
+
+1. Register a valid user.
+2. Create and activate Plan A.
+3. Create and activate Plan B.
+4. Select Plan A.
+5. Select Plan A again.
+6. Change Plan A price using admin API.
+7. GET current selection and verify old snapshot.
+8. Select Plan B and verify replacement.
+9. Clear selection.
+10. Try selecting an inactive plan.
+11. Try selecting as a blocked user.
+12. Use a short TTL in test profile and verify expiration.
+
+Confirm:
+
+* all previous tests pass;
+* one ACTIVE selection per user;
+* snapshots remain stable;
+* hidden plans cannot be selected;
+* idempotency works;
+* concurrency behavior matches documentation;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* no Order/Payment/Subscription/Telegram/3x-ui logic was added;
+* no credentials were committed;
+* no tests were disabled.
+
+44. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Selection persistence design
+3. Snapshot decision
+4. Expiration decision
+5. User eligibility decision
+6. Concurrency strategy
+7. Planned files to create
+8. Planned files to modify
+9. Risks and edge cases
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Snapshot behavior
+6. Expiration behavior
+7. Replacement and idempotency behavior
+8. Eligibility behavior
+9. API contract
+10. Test results
+11. Concurrency-test results
+12. Build result
+13. Commands executed
+14. Remaining issues
+15. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(plan): add temporary user plan selection
+
+Stop after completing Task 19.
+
+Do not start Task 20.
+

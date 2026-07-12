@@ -1,0 +1,479 @@
+You are a senior Java 21 and Spring Boot software architect.
+
+Continue implementing the existing project.
+
+# Task 27 — Payment Foundation & Strategy Architecture
+
+## Goal
+
+Implement the complete payment foundation of the project.
+
+This task must NOT implement any payment gateway.
+
+Instead, it must create a clean architecture that allows multiple payment providers to be plugged in later.
+
+This is the first task of Phase 5.
+
+Supported payment methods that must be designed from the beginning:
+
+* Zarinpal
+* Manual Card-To-Card Transfer
+
+Future methods should be easy to add without changing business logic.
+
+Do NOT begin Task 28.
+
+---
+
+# Objectives
+
+Implement:
+
+* Payment Aggregate
+* Payment Repository
+* Payment Strategy Interface
+* Payment Method Enum
+* Payment Status Enum
+* Payment Operation History
+* Order → Payment relationship
+* Payment API
+* Payment Domain Validation
+* Integration Tests
+
+Do NOT implement:
+
+* Zarinpal
+* Callback
+* Verify
+* Manual receipt upload
+* Operator approval
+* Telegram Bot
+* Subscription generation
+* VPN provisioning
+
+---
+
+# Payment Methods
+
+Create:
+
+PaymentMethod
+
+Values:
+
+ZARINPAL
+
+CARD_TO_CARD
+
+Future-compatible.
+
+---
+
+# Payment Status
+
+Create:
+
+PaymentStatus
+
+Values:
+
+CREATED
+
+WAITING_FOR_PAYMENT
+
+PROCESSING
+
+APPROVED
+
+REJECTED
+
+EXPIRED
+
+FAILED
+
+CANCELLED
+
+Requirements:
+
+Use EnumType.STRING.
+
+No generic setter.
+
+Implement domain transition methods.
+
+---
+
+# Payment Aggregate
+
+Create:
+
+Payment
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id
+
+UUID orderId
+
+UUID userId
+
+PaymentMethod method
+
+PaymentStatus status
+
+long baseAmount
+
+long payableAmount
+
+String currency
+
+Instant expiresAt
+
+Instant paidAt
+
+Instant approvedAt
+
+Instant rejectedAt
+
+String gatewayTransactionId
+
+String gatewayAuthority
+
+String rejectionReason
+
+Instant createdAt
+
+Instant updatedAt
+
+Rules:
+
+payableAmount >= baseAmount
+
+Currency required
+
+Status starts with CREATED
+
+No setters
+
+Factory methods only
+
+Domain methods:
+
+markWaitingForPayment()
+
+markApproved()
+
+markRejected()
+
+markExpired()
+
+markCancelled()
+
+markFailed()
+
+Validate all transitions.
+
+---
+
+# Payment Repository
+
+Create:
+
+PaymentRepository
+
+Methods:
+
+save
+
+findById
+
+findByOrderId
+
+findByUserId
+
+findWaitingPayments
+
+existsApprovedPaymentForOrder
+
+Infrastructure implementation:
+
+Spring Data
+
+Repository Adapter
+
+---
+
+# Payment Strategy
+
+Create interface:
+
+PaymentProcessor
+
+Methods:
+
+PaymentMethod supportedMethod()
+
+PaymentInitializationResult initiate(
+PaymentInitializationCommand command
+)
+
+PaymentVerificationResult verify(
+PaymentVerificationCommand command
+)
+
+Each provider implements this interface.
+
+---
+
+# Payment Service
+
+Create:
+
+PaymentService
+
+Responsibilities:
+
+Select correct PaymentProcessor.
+
+Never use switch statements inside business logic.
+
+Use Strategy Pattern.
+
+Processor selection should happen automatically.
+
+---
+
+# Payment Factory
+
+Create:
+
+PaymentFactory
+
+Responsibilities:
+
+Create new Payment aggregate.
+
+Calculate payable amount.
+
+Assign expiration.
+
+Initial status:
+
+CREATED
+
+---
+
+# Payment Commands
+
+Create:
+
+CreatePaymentCommand
+
+Fields:
+
+orderId
+
+userId
+
+paymentMethod
+
+amount
+
+currency
+
+Create:
+
+PaymentInitializationCommand
+
+Create:
+
+PaymentVerificationCommand
+
+---
+
+# Payment Result Models
+
+Create:
+
+PaymentInitializationResult
+
+PaymentVerificationResult
+
+PaymentResult
+
+Immutable records.
+
+---
+
+# Order Validation
+
+Payment cannot exist without Order.
+
+Only one APPROVED payment per Order.
+
+Multiple CREATED payments are allowed.
+
+---
+
+# REST API
+
+Create:
+
+POST /internal/payments
+
+GET /internal/payments/{id}
+
+GET /internal/orders/{id}/payments
+
+Internal only.
+
+No gateway logic.
+
+---
+
+# Database
+
+Create Flyway migration.
+
+Table:
+
+payments
+
+Columns:
+
+id
+
+order_id
+
+user_id
+
+method
+
+status
+
+base_amount
+
+payable_amount
+
+currency
+
+expires_at
+
+paid_at
+
+approved_at
+
+rejected_at
+
+gateway_transaction_id
+
+gateway_authority
+
+rejection_reason
+
+created_at
+
+updated_at
+
+Indexes:
+
+order_id
+
+user_id
+
+status
+
+method
+
+Unique:
+
+Only one APPROVED payment for each order.
+
+---
+
+# Tests
+
+Create:
+
+Aggregate Tests
+
+Repository Tests
+
+REST Tests
+
+Integration Tests
+
+Verify:
+
+Payment lifecycle
+
+Repository
+
+Flyway
+
+Hibernate
+
+Architecture
+
+No provider implemented.
+
+---
+
+# Documentation
+
+Create:
+
+docs/payment/payment-foundation.md
+
+Include:
+
+Architecture
+
+Strategy Pattern
+
+State Machine
+
+Mermaid diagrams
+
+Future providers
+
+No implementation details for Zarinpal.
+
+---
+
+# Expected Packages
+
+domain/payment
+
+application/payment
+
+infrastructure/payment
+
+api/payment
+
+docs/payment
+
+---
+
+# Build Verification
+
+Run:
+
+./gradlew clean test
+
+./gradlew build
+
+Verify all previous tests still pass.
+
+---
+
+# Commit Message
+
+feat(payment): implement payment foundation and strategy architecture
+
+Stop after completing Task 27.
+
+Do NOT begin Task 28.
+

@@ -1,0 +1,2019 @@
+You are a senior Java 21, Spring Boot, payment-system, concurrency, and financial-workflow engineer.
+
+Continue implementing the existing project.
+
+# Task 29 — Manual Card-to-Card Payment with Unique Payable Amount
+
+## Goal
+
+Implement the manual card-to-card payment initiation flow.
+
+After this task, the application must be able to:
+
+* create a manual card-transfer payment instruction;
+* generate a temporary unique payable amount;
+* reserve that amount for one active Payment;
+* display safe bank-card information;
+* expire unused payment instructions;
+* recreate or reissue an instruction safely;
+* prevent two active users from receiving the same payable amount;
+* preserve the original Plan and Order amount;
+* remain idempotent under repeated and concurrent requests.
+
+Example:
+
+Base plan amount:
+
+100,000 IRT
+
+Generated unique suffix:
+
+1,638 IRT
+
+Final payable amount:
+
+101,638 IRT
+
+This unique amount is only a matching aid.
+
+It is not proof of payment.
+
+Do not implement:
+
+* receipt upload;
+* file storage;
+* OCR;
+* operator approval;
+* operator rejection;
+* automatic bank-account verification;
+* bank API integration;
+* Payment approval;
+* VPN provisioning;
+* PaymentApproved event;
+* Telegram Bot handlers;
+* reminder jobs;
+* Zarinpal changes;
+* subscription generation;
+* QR Code generation.
+
+Stop after completing Task 29.
+
+Do not begin Task 30.
+
+---
+
+# 1. Important rules
+
+* Inspect the full repository before making changes.
+* Preserve all behavior from Tasks 1–28.
+* Reuse the Payment aggregate and multi-provider strategy architecture.
+* Reuse User, Order, PaymentRepository, BaseEntity, SystemClockPort, exception handling, traceId, logging, Testcontainers support, and transaction conventions.
+* Use Java 21 and the existing Spring Boot version.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into application services or controllers.
+* Do not accept payableAmount or suffix from the external caller.
+* Do not approve Payment merely because an instruction is created.
+* Do not store full sensitive bank-account information unless explicitly required.
+* Never store CVV2, card PIN, OTP, or internet-bank credentials.
+* Do not use floating-point numbers for money.
+* Do not use a JVM-only lock as the correctness mechanism.
+* Do not keep expired reservations active.
+* Do not log full card numbers.
+* Do not log full payment instructions.
+* Do not add unrelated dependencies.
+* Do not call any real bank service.
+* Do not begin receipt handling.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* Payment aggregate and statuses;
+* PaymentMethod enum;
+* CARD_TO_CARD or CARD_TO_CARD naming;
+* generic PaymentProcessor contract;
+* Payment creation flow;
+* Order and User ownership validation;
+* Payment amount and currency representation;
+* existing expiration behavior;
+* existing Payment uniqueness constraints;
+* transaction conventions;
+* current migration history;
+* current configuration-properties style;
+* current internal API conventions;
+* Zarinpal implementation from Task 28;
+* any existing manual-payment code.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Manual payment aggregate design
+3. Unique amount reservation strategy
+4. Suffix-generation strategy
+5. Expiration strategy
+6. Idempotency strategy
+7. Concurrency strategy
+8. Sensitive card-data strategy
+9. Planned files to create
+10. Planned files to modify
+11. Migration risks
+12. Security and accounting risks
+
+---
+
+# 3. Payment method naming
+
+Use one clear enum value.
+
+Preferred:
+
+CARD_TO_CARD
+
+Alternative:
+
+CARD_TO_CARD
+
+Choose the value already established in Task 27.
+
+Do not create two equivalent values.
+
+Document that this method requires:
+
+* user transfer;
+* receipt submission;
+* operator review;
+* explicit approval.
+
+The Payment must never become APPROVED in Task 29.
+
+---
+
+# 4. Manual payment instruction aggregate
+
+Create:
+
+ManualCardPaymentInstruction
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited
+
+UUID paymentId
+
+UUID instructionRequestId
+
+ManualPaymentInstructionStatus status
+
+long baseAmount
+
+long uniqueSuffixAmount
+
+long payableAmount
+
+String currency
+
+String cardHolderNameSnapshot
+
+String cardNumberMaskedSnapshot
+
+String cardNumberEncrypted
+
+String bankNameSnapshot
+
+Instant issuedAt
+
+Instant expiresAt
+
+Instant paidClaimedAt
+
+Instant cancelledAt
+
+Instant expiredAt
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Design rules:
+
+* One Payment may have instruction history.
+* At most one active instruction per Payment.
+* At most one active instruction may reserve a given payableAmount.
+* instructionRequestId provides initiation idempotency.
+* baseAmount must equal persisted Payment.payableAmount before manual suffix.
+* payableAmount = baseAmount + uniqueSuffixAmount.
+* Store the exact final amount.
+* Do not recompute final amount later.
+* Store display snapshots to preserve what the user was shown.
+* Do not store raw receipt data in this entity.
+* Do not approve the Payment.
+* Do not store the full card number as plaintext.
+* If encrypted storage is not available, prefer storing:
+
+  * a secure configuration reference;
+  * masked card number snapshot;
+  * card destination identifier.
+* Never persist CVV2, expiration date, OTP, PIN, or password.
+
+---
+
+# 5. Manual instruction status
+
+Create:
+
+ManualPaymentInstructionStatus
+
+Values:
+
+CREATED
+
+ACTIVE
+
+RECEIPT_PENDING
+
+EXPIRED
+
+CANCELLED
+
+COMPLETED
+
+Suggested Task 29 usage:
+
+CREATED
+
+ACTIVE
+
+EXPIRED
+
+CANCELLED
+
+Future tasks:
+
+RECEIPT_PENDING
+
+COMPLETED
+
+Rules:
+
+* CREATED -> ACTIVE
+* ACTIVE -> EXPIRED
+* ACTIVE -> CANCELLED
+* ACTIVE -> RECEIPT_PENDING in Task 30
+* RECEIPT_PENDING -> COMPLETED in Task 31
+* EXPIRED and CANCELLED are terminal
+* COMPLETED is terminal
+* No generic status setter
+* Same-state calls deterministic
+
+Do not use COMPLETED to mean Payment approved in this task.
+
+---
+
+# 6. Controlled instruction creation
+
+Create factory:
+
+ManualCardPaymentInstruction.create(
+UUID paymentId,
+UUID instructionRequestId,
+long baseAmount,
+long uniqueSuffixAmount,
+String currency,
+ManualPaymentDestination destination,
+Instant issuedAt,
+Duration ttl
+)
+
+Requirements:
+
+* paymentId required;
+* request ID required;
+* baseAmount positive;
+* suffix positive;
+* payableAmount calculated with Math.addExact;
+* currency required;
+* destination required;
+* TTL positive;
+* expiresAt after issuedAt;
+* initial status CREATED;
+* card display snapshot stored safely;
+* full card number not exposed by aggregate getters unless strictly internal and encrypted;
+* validate all length limits.
+
+Create methods:
+
+activate()
+
+expire(Instant now)
+
+cancel(Instant now)
+
+markReceiptPending(Instant submittedAt)
+
+markCompleted(Instant completedAt)
+
+Task 29 may implement future methods but must not invoke receipt/completion behavior.
+
+---
+
+# 7. Payment destination model
+
+Create a secure immutable model:
+
+ManualPaymentDestination
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual
+
+Fields:
+
+String destinationId
+
+String bankName
+
+String cardHolderName
+
+String maskedCardNumber
+
+String encryptedCardNumber
+
+boolean active
+
+int displayOrder
+
+Requirements:
+
+* destinationId is stable and non-sensitive.
+* Full card number must not be exposed through ordinary logs or API mappers.
+* Prefer loading full card number from secure configuration or secret storage.
+* If encrypted persistence is not implemented, do not persist plaintext card number in instruction.
+* API may display the full card number only from a controlled secrets provider at response time.
+* Card number validation must be supported.
+* Card number must contain only digits after normalization.
+* Persian/Arabic digits should be normalized if current utilities support it.
+* Never store or expose CVV2.
+
+Preferred architecture:
+
+ManualPaymentDestinationProvider
+
+returns configured active destinations.
+
+Do not create a database CRUD system for cards in this task unless already required.
+
+---
+
+# 8. Destination configuration
+
+Create:
+
+ManualPaymentProperties
+
+Suggested package:
+
+com.parazit.panel.config.properties
+
+Prefix:
+
+app.payment.manual-card
+
+Fields:
+
+boolean enabled
+
+Duration instructionTtl
+
+long minimumSuffix
+
+long maximumSuffix
+
+int maxGenerationAttempts
+
+String destinationId
+
+String bankName
+
+String cardHolderName
+
+String cardNumber
+
+boolean allowInstructionReissue
+
+Duration reissueCooldown
+
+Requirements:
+
+* Disabled by default unless project requirements explicitly enable it.
+* Card number required only when enabled.
+* TTL positive.
+* minimumSuffix positive.
+* maximumSuffix >= minimumSuffix.
+* max attempts bounded.
+* Card number must be validated.
+* Card number must be excluded from toString.
+* Do not expose properties through actuator.
+* Do not log configuration values.
+* Prefer a secret environment variable for the card number.
+
+Environment variables:
+
+MANUAL_CARD_PAYMENT_ENABLED=false
+
+MANUAL_CARD_PAYMENT_TTL=PT30M
+
+MANUAL_CARD_SUFFIX_MIN=101
+
+MANUAL_CARD_SUFFIX_MAX=4999
+
+MANUAL_CARD_SUFFIX_MAX_ATTEMPTS=20
+
+MANUAL_CARD_DESTINATION_ID=PRIMARY_CARD
+
+MANUAL_CARD_BANK_NAME=
+
+MANUAL_CARD_HOLDER_NAME=
+
+MANUAL_CARD_NUMBER=
+
+MANUAL_CARD_ALLOW_REISSUE=true
+
+MANUAL_CARD_REISSUE_COOLDOWN=PT2M
+
+Update `.env.example` with placeholders only.
+
+---
+
+# 9. Card-number validation and masking
+
+Create:
+
+BankCardNumber
+
+or:
+
+IranianBankCardNumber
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual
+
+Responsibilities:
+
+* normalize spaces and dashes;
+* normalize supported Persian/Arabic digits if needed;
+* validate exact digit count;
+* validate Iranian bank-card checksum if intentionally supported;
+* expose masked representation;
+* expose formatted display value only through controlled methods;
+* never include full number in toString.
+
+Suggested mask:
+
+6037-****-****-1234
+
+Create tests for:
+
+* valid card;
+* invalid length;
+* invalid characters;
+* invalid checksum if implemented;
+* normalization;
+* masking;
+* toString secrecy.
+
+Do not store CVV2 or expiry date.
+
+---
+
+# 10. Suffix generator port
+
+Create:
+
+ManualPaymentSuffixGenerator
+
+Suggested package:
+
+com.parazit.panel.application.port.out.payment.manual
+
+Method:
+
+long generate(long minimumInclusive, long maximumInclusive)
+
+Requirements:
+
+* Infrastructure-independent.
+* No repository access.
+* No Payment logic.
+* Return values only in configured range.
+
+Infrastructure implementation:
+
+SecureManualPaymentSuffixGenerator
+
+Requirements:
+
+* Use SecureRandom.
+* Avoid predictable sequential suffixes.
+* Uniform enough for the small range.
+* Constructor injection for SecureRandom where testability helps.
+* No static mutable random state.
+* No logging of generated amounts at INFO.
+
+Do not rely on randomness for uniqueness.
+
+Database constraints are the final authority.
+
+---
+
+# 11. Active amount reservation design
+
+The unique payable amount must be unique only among active, non-expired manual instructions.
+
+Preferred PostgreSQL design:
+
+A partial unique index on:
+
+payable_amount
+
+for active/reserved statuses, such as:
+
+status IN ('CREATED', 'ACTIVE', 'RECEIPT_PENDING')
+
+Requirements:
+
+* Expired and cancelled instructions may reuse the amount later.
+* COMPLETED instructions no longer need active reservation, but historical value remains stored.
+* Do not create global uniqueness across all historical rows.
+* Do not rely only on repository existence checks.
+* The partial unique index is the correctness authority.
+
+If currency may expand later, use:
+
+(currency, payable_amount)
+
+for uniqueness.
+
+Preferred:
+
+unique active reservation by currency and payable amount.
+
+---
+
+# 12. Database migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V11__create_manual_card_payment_instructions.sql
+
+Adjust version based on actual history.
+
+Table:
+
+manual_card_payment_instructions
+
+Columns:
+
+id UUID primary key
+
+payment_id UUID not null
+
+instruction_request_id UUID not null
+
+status VARCHAR(32) not null
+
+base_amount BIGINT not null
+
+unique_suffix_amount BIGINT not null
+
+payable_amount BIGINT not null
+
+currency VARCHAR(8) not null
+
+destination_id VARCHAR(64) not null
+
+bank_name_snapshot VARCHAR(128) not null
+
+card_holder_name_snapshot VARCHAR(128) not null
+
+card_number_masked_snapshot VARCHAR(32) not null
+
+issued_at TIMESTAMPTZ not null
+
+expires_at TIMESTAMPTZ not null
+
+paid_claimed_at TIMESTAMPTZ null
+
+cancelled_at TIMESTAMPTZ null
+
+expired_at TIMESTAMPTZ null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Do not add `card_number_encrypted` unless encryption is correctly implemented.
+
+Constraints:
+
+* unique instruction_request_id;
+* foreign key payment_id -> payments(id);
+* base_amount > 0;
+* unique_suffix_amount > 0;
+* payable_amount = base_amount + unique_suffix_amount if safe as a check;
+* expires_at > issued_at;
+* valid status;
+* EXPIRED requires expired_at;
+* CANCELLED requires cancelled_at;
+* field lengths.
+
+Indexes:
+
+payment_id
+
+instruction_request_id
+
+status
+
+expires_at
+
+payable_amount
+
+currency
+
+Partial unique index:
+
+(currency, payable_amount)
+
+for active reservation statuses.
+
+Optional partial unique index:
+
+payment_id
+
+for active instruction statuses.
+
+This ensures at most one active instruction per Payment.
+
+Use RESTRICT or NO ACTION delete behavior.
+
+Do not edit prior migrations.
+
+---
+
+# 13. Instruction repository
+
+Create:
+
+ManualCardPaymentInstructionRepository
+
+Suggested package:
+
+com.parazit.panel.domain.payment.manual.repository
+
+Extend:
+
+UuidRepository<ManualCardPaymentInstruction>
+
+Add:
+
+Optional<ManualCardPaymentInstruction> findByInstructionRequestId(
+UUID instructionRequestId
+)
+
+Optional<ManualCardPaymentInstruction> findActiveByPaymentId(
+UUID paymentId
+)
+
+Optional<ManualCardPaymentInstruction> findActiveByCurrencyAndPayableAmount(
+String currency,
+long payableAmount
+)
+
+List<ManualCardPaymentInstruction> findAllByPaymentIdOrderByCreatedAtDesc(
+UUID paymentId
+)
+
+boolean existsActiveByPaymentId(UUID paymentId)
+
+Requirements:
+
+* Independent from Spring Data.
+* No Pageable unless already standardized.
+* Methods never return null.
+
+Create:
+
+SpringDataManualCardPaymentInstructionRepository
+
+ManualCardPaymentInstructionRepositoryAdapter
+
+Follow existing repository patterns.
+
+---
+
+# 14. Expiration service
+
+Create:
+
+ExpireManualPaymentInstructionService
+
+Responsibilities:
+
+* detect expired ACTIVE/CREATED instructions;
+* mark them EXPIRED;
+* preserve history;
+* free the partial unique reservation;
+* update Payment state only according to documented rules.
+
+Task 29 does not require a scheduler.
+
+Expiration occurs lazily when:
+
+* retrieving instruction;
+* creating/reissuing instruction;
+* checking active reservation.
+
+Task 38 may add scheduled cleanup.
+
+Do not physically delete expired instructions.
+
+---
+
+# 15. Payment status behavior
+
+When a manual instruction becomes ACTIVE:
+
+Payment should become:
+
+WAITING_FOR_PAYMENT
+
+When instruction expires:
+
+Choose one clear behavior.
+
+Recommended:
+
+* If no other active payment attempt exists and Payment is still WAITING_FOR_PAYMENT:
+  mark Payment EXPIRED only if the Payment itself has also reached its expiry policy.
+* Otherwise leave Payment retryable and permit reissue.
+
+Simpler acceptable Task 29 behavior:
+
+* instruction EXPIRED;
+* Payment remains CREATED or WAITING_FOR_PAYMENT and can be reissued.
+
+Preferred for user experience:
+
+Keep Payment reusable until its own `expiresAt`.
+
+Do not automatically APPROVE, REJECT, or FAIL Payment.
+
+Document the distinction between:
+
+Payment expiry
+
+Manual instruction expiry
+
+---
+
+# 16. Manual PaymentProcessor implementation
+
+Create:
+
+ManualCardPaymentProcessor
+
+Implement the generic provider strategy from Task 27.
+
+supportedMethod():
+
+CARD_TO_CARD
+
+Responsibilities:
+
+* delegate initiation to the manual-instruction service;
+* do not implement automatic Verify;
+* reject generic gateway verification calls if the interface requires them;
+* or refactor the Payment strategy into capabilities.
+
+Preferred interface refinement:
+
+PaymentInitiationProcessor
+
+Method:
+
+PaymentInitializationResult initiate(...)
+
+OnlinePaymentVerificationProcessor
+
+for Zarinpal only.
+
+ManualPaymentReviewProcessor
+
+will be added in Task 31.
+
+Do not force manual payments to implement meaningless online verification.
+
+Explain and perform only the minimal refactor necessary.
+
+---
+
+# 17. Initialization command
+
+Create:
+
+InitializeManualCardPaymentCommand
+
+Fields:
+
+UUID instructionRequestId
+
+UUID paymentId
+
+Long telegramUserId
+
+Requirements:
+
+* request ID required.
+* Payment ID required.
+* Telegram user ID positive.
+* Do not accept:
+
+  * base amount;
+  * suffix;
+  * payable amount;
+  * card number;
+  * TTL;
+  * currency;
+  * destination ID.
+* All trusted values come from persisted Payment and configuration.
+
+---
+
+# 18. Initialization result
+
+Create:
+
+InitializeManualCardPaymentResult
+
+Fields:
+
+UUID paymentId
+
+UUID instructionId
+
+UUID instructionRequestId
+
+PaymentStatus paymentStatus
+
+ManualPaymentInstructionStatus instructionStatus
+
+long baseAmount
+
+long uniqueSuffixAmount
+
+long payableAmount
+
+String currency
+
+String bankName
+
+String cardHolderName
+
+String cardNumber
+
+String cardNumberMasked
+
+Instant issuedAt
+
+Instant expiresAt
+
+boolean newlyInitialized
+
+Requirements:
+
+* Immutable.
+* Full card number may be returned only through this controlled result.
+* Never persist or log the full number through result `toString`.
+* Prefer a custom safe record/class if Java record toString would expose card number.
+* Do not use a default record containing the full card number unless toString risk is mitigated.
+
+Preferred:
+
+Create a response model with a `@JsonIgnore`-safe internal secret wrapper or explicit class with redacted toString.
+
+Do not expose configuration object itself.
+
+---
+
+# 19. Initialization service
+
+Create:
+
+InitializeManualCardPaymentService
+
+Suggested package:
+
+com.parazit.panel.application.payment.manual
+
+Dependencies:
+
+PaymentRepository
+
+OrderRepository
+
+UserRepository
+
+ManualCardPaymentInstructionRepository
+
+ManualPaymentSuffixGenerator
+
+ManualPaymentDestinationProvider
+
+ManualPaymentProperties
+
+SystemClockPort
+
+Requirements:
+
+* Use constructor injection.
+* Do not hold a long transaction unnecessarily.
+* No network call exists, so one short transaction is acceptable.
+* Validate Payment, User, Order, method, amount, currency, and status.
+* Expire old instruction if needed.
+* Handle instructionRequestId idempotency.
+* Reuse current valid active instruction when appropriate.
+* Generate unique suffix with bounded attempts.
+* Persist instruction.
+* Mark instruction ACTIVE.
+* Mark Payment WAITING_FOR_PAYMENT.
+* Return safe result.
+
+---
+
+# 20. Eligibility validation
+
+Initialization requires:
+
+* User exists.
+* Payment exists.
+* Payment belongs to User.
+* Order exists and belongs to User.
+* Payment method is CARD_TO_CARD.
+* Payment is not APPROVED.
+* Payment is not CANCELLED, REJECTED, or permanently EXPIRED.
+* Payment amount is positive.
+* Currency is supported.
+* No other approved Payment exists for the Order.
+* Manual payment provider is enabled.
+* Destination is active.
+* Current time is before Payment expiry if Payment expiry is enforced.
+
+Do not recreate amount from Plan.
+
+Use persisted Payment amount.
+
+---
+
+# 21. Idempotency behavior
+
+Same instructionRequestId and same Payment:
+
+* Return the same instruction.
+* Do not generate a new suffix.
+* newlyInitialized=false.
+
+Same instructionRequestId for another Payment:
+
+* Throw conflict.
+
+Existing valid active instruction for Payment with a new request ID:
+
+Choose one policy.
+
+Recommended:
+
+Return existing active instruction with newlyInitialized=false.
+
+Reason:
+
+Avoid multiple simultaneous amounts for one Payment.
+
+If explicit reissue is required:
+
+* old instruction must first be cancelled or expired;
+* enforce cooldown;
+* create a new instruction only when allowed.
+
+Do not silently create multiple active instructions.
+
+---
+
+# 22. Suffix generation algorithm
+
+Algorithm:
+
+1. Load Payment base amount.
+2. Generate suffix in configured range.
+3. Compute payableAmount using Math.addExact.
+4. Attempt insert.
+5. If partial unique constraint conflicts:
+
+   * generate another suffix;
+   * retry up to maxGenerationAttempts.
+6. If all attempts fail:
+
+   * throw ManualPaymentAmountReservationException.
+7. Never fall back to a predictable suffix.
+8. Never loop forever.
+
+Do not rely only on:
+
+existsByPayableAmount
+
+A pre-check may reduce conflicts but does not ensure correctness.
+
+Catch only the relevant integrity violation.
+
+Be careful with rollback-only transaction state.
+
+Preferred:
+
+Each reservation attempt should use a technically correct new transaction or a database-native insert/claim method.
+
+Explain the chosen strategy.
+
+---
+
+# 23. Concurrent initiation safety
+
+Scenario:
+
+Many users initialize manual payments for the same base amount concurrently.
+
+Requirements:
+
+* Each active instruction receives a distinct payable amount within the configured range.
+* No raw unique-constraint error escapes.
+* No duplicate active reservation.
+* Bounded retry.
+* Stable result per request ID.
+* Correct across multiple application instances.
+* Database partial unique index is authoritative.
+
+Scenario:
+
+Same Payment initialized concurrently:
+
+* exactly one active instruction;
+* same final payable amount returned;
+* no duplicate history row for same request ID;
+* no conflicting Payment state.
+
+Do not rely solely on synchronized or ReentrantLock.
+
+---
+
+# 24. Reissue policy
+
+Create a focused use case only if needed:
+
+ReissueManualCardPaymentInstructionUseCase
+
+Preferred Task 29 implementation:
+
+Include reissue behavior inside initialization with a new request ID.
+
+Rules:
+
+* Valid active instruction is returned, not replaced.
+* Expired instruction may be replaced.
+* Cancelled instruction may be replaced.
+* Reissue must respect configured cooldown.
+* New suffix generated.
+* Old instruction history preserved.
+* Old payable amount reservation freed by terminal status.
+* Payment amount snapshot unchanged.
+* Reissue does not reset receipt state because receipt does not exist yet.
+
+Do not allow reissue after Payment approval.
+
+---
+
+# 25. Get active instruction use case
+
+Create:
+
+GetManualCardPaymentInstructionUseCase
+
+Method:
+
+ManualCardPaymentInstructionResult getCurrent(
+GetManualCardPaymentInstructionQuery query
+)
+
+Query:
+
+Long telegramUserId
+
+UUID paymentId
+
+Behavior:
+
+* validate ownership;
+* load active instruction;
+* lazily expire if needed;
+* if expired and no active instruction remains:
+  return not found;
+* return full display information safely;
+* no new suffix generated.
+
+Do not expose all history publicly in this task.
+
+---
+
+# 26. Cancel instruction use case
+
+Create:
+
+CancelManualCardPaymentInstructionUseCase
+
+Command:
+
+UUID paymentId
+
+Long telegramUserId
+
+Behavior:
+
+* validate ownership;
+* cancel active instruction;
+* free reservation;
+* preserve history;
+* Payment remains retryable unless domain policy says otherwise;
+* idempotent cancellation where practical;
+* cannot cancel after receipt submission in future Task 30;
+* cannot cancel approved Payment.
+
+Do not physically delete the row.
+
+---
+
+# 27. Exceptions
+
+Create focused exceptions:
+
+ManualCardPaymentDisabledException
+
+ManualCardPaymentNotAllowedException
+
+ManualPaymentInstructionNotFoundException
+
+ManualPaymentInstructionConflictException
+
+ManualPaymentRequestIdConflictException
+
+ManualPaymentAmountReservationException
+
+ManualPaymentReissueNotAllowedException
+
+ManualPaymentDestinationUnavailableException
+
+InvalidBankCardNumberException
+
+Requirements:
+
+* Safe messages.
+* No full card number.
+* No suffix pool internals.
+* No SQL details.
+* No stack traces in API.
+* No sensitive configuration values.
+
+Suggested mappings:
+
+disabled/provider unavailable -> 503
+
+missing Payment/instruction -> 404
+
+ownership mismatch -> 404
+
+invalid lifecycle -> 409
+
+request ID conflict -> 409
+
+reservation exhaustion -> 503
+
+invalid configuration/input -> 400 or 500 depending on source
+
+---
+
+# 28. Internal API
+
+Create:
+
+ManualCardPaymentController
+
+Suggested package:
+
+com.parazit.panel.api.payment.manual
+
+Endpoints:
+
+POST /internal/payments/{paymentId}/manual-card/initialize
+
+GET /internal/payments/{paymentId}/manual-card
+
+POST /internal/payments/{paymentId}/manual-card/cancel
+
+Initialization request:
+
+{
+"instructionRequestId": "uuid",
+"telegramUserId": 123456789
+}
+
+Cancel request:
+
+{
+"telegramUserId": 123456789
+}
+
+Response example:
+
+{
+"paymentId": "uuid",
+"instructionId": "uuid",
+"instructionRequestId": "uuid",
+"paymentStatus": "WAITING_FOR_PAYMENT",
+"instructionStatus": "ACTIVE",
+"baseAmount": 100000,
+"uniqueSuffixAmount": 1638,
+"payableAmount": 101638,
+"currency": "IRT",
+"bankName": "Example Bank",
+"cardHolderName": "Example Name",
+"cardNumber": "6037997512345678",
+"cardNumberFormatted": "6037-9975-1234-5678",
+"cardNumberMasked": "6037-****-****-5678",
+"issuedAt": "...",
+"expiresAt": "...",
+"newlyInitialized": true
+}
+
+Requirements:
+
+* Internal and temporary.
+* Controller depends on input ports.
+* No repository injection.
+* No Payment approval.
+* No receipt upload.
+* No operator action.
+* No Telegram implementation.
+* Use dedicated DTOs.
+* Do not include config object.
+* Ensure card number is never present in error responses or logs.
+
+HTTP behavior:
+
+new instruction -> 201
+
+idempotent/existing instruction -> 200
+
+get current -> 200
+
+cancel -> 200
+
+missing -> 404
+
+invalid state -> 409
+
+provider disabled -> 503
+
+reservation exhaustion -> 503
+
+invalid request -> 400
+
+---
+
+# 29. API DTO security
+
+Create explicit DTO classes rather than records containing full card number if default toString may leak it.
+
+Create:
+
+InitializeManualCardPaymentRequest
+
+ManualCardPaymentResponse
+
+CancelManualCardPaymentRequest
+
+Create:
+
+ManualCardPaymentApiMapper
+
+Requirements:
+
+* response `toString()` must redact card number;
+* no Lombok @Data;
+* no full card number in equals/hashCode if avoidable;
+* no logs of DTO body;
+* use Jackson serialization intentionally;
+* no persistence entity mapping;
+* no infrastructure DTO dependency.
+
+Consider a dedicated value object:
+
+SensitiveCardNumberView
+
+which serializes full display value but redacts toString.
+
+Do not overcomplicate if explicit safe DTO is sufficient.
+
+---
+
+# 30. User-facing message model
+
+Create an application presentation result that Telegram can use later.
+
+Suggested:
+
+ManualPaymentDisplayInstructions
+
+Fields:
+
+String title
+
+long baseAmount
+
+long suffixAmount
+
+long payableAmount
+
+String currency
+
+String bankName
+
+String cardHolderName
+
+String formattedCardNumber
+
+Instant expiresAt
+
+List<String> warnings
+
+Warnings should include concepts such as:
+
+* Transfer the exact payable amount.
+* Uploading a receipt does not automatically confirm payment.
+* Payment must be reviewed by an operator.
+* Do not reuse an expired instruction.
+
+Do not hardcode Persian UI copy inside the domain.
+
+A message-localization layer may use these fields later.
+
+---
+
+# 31. Logging
+
+INFO:
+
+* manual instruction created;
+* instruction returned idempotently;
+* instruction expired;
+* instruction cancelled;
+* instruction reissued.
+
+DEBUG:
+
+* suffix-generation attempt count;
+* reservation conflict;
+* request ID replay;
+* cooldown evaluation.
+
+WARN:
+
+* reservation range exhausted;
+* invalid destination configuration;
+* concurrent instruction conflict.
+
+Include:
+
+paymentId
+
+orderId
+
+userId
+
+instructionId
+
+instructionRequestId
+
+baseAmount
+
+payableAmount only if current financial logging policy permits
+
+status
+
+attempt count
+
+traceId
+
+Never log:
+
+full card number
+
+configuration card number
+
+card holder plus full card
+
+request/response body
+
+future receipt contents
+
+bank credentials
+
+---
+
+# 32. Domain unit tests
+
+Test ManualCardPaymentInstruction:
+
+* valid creation;
+* amount calculation;
+* exact suffix;
+* Math.addExact overflow;
+* expiry;
+* initial status;
+* activate;
+* expire;
+* cancel;
+* terminal transitions;
+* receipt/completion transitions not invoked in Task 29;
+* invalid TTL;
+* invalid amounts;
+* invalid currency;
+* destination snapshot;
+* no full card number persisted if chosen design excludes it;
+* same-state behavior.
+
+Test BankCardNumber:
+
+* normalization;
+* formatted display;
+* masked display;
+* invalid input;
+* checksum if supported;
+* safe toString.
+
+---
+
+# 33. Configuration tests
+
+Verify:
+
+* disabled by default;
+* card number required only when enabled;
+* card number valid;
+* suffix range valid;
+* max attempts bounded;
+* TTL positive;
+* reissue cooldown valid;
+* card number and holder name absent from toString/log output;
+* destination fields validated.
+
+---
+
+# 34. Suffix generator tests
+
+Test:
+
+* values always within range;
+* minimum equals maximum;
+* invalid range rejected;
+* no predictable test assertion based on exact SecureRandom output;
+* deterministic fake generator can be injected for service tests.
+
+Do not generate millions of samples.
+
+---
+
+# 35. Application service unit tests
+
+Initialize service:
+
+* successful instruction;
+* exact base amount from Payment;
+* suffix generated;
+* exact payable amount;
+* Payment becomes WAITING_FOR_PAYMENT;
+* method must be manual card;
+* provider disabled;
+* missing Payment;
+* missing User;
+* ownership mismatch;
+* wrong method;
+* approved Payment rejected;
+* expired Payment rejected;
+* existing active instruction returned;
+* same request ID returned;
+* request ID conflict;
+* expired instruction replaced;
+* cooldown enforced;
+* reservation conflict retries;
+* retry exhaustion;
+* overflow;
+* destination unavailable;
+* no approval;
+* no receipt creation.
+
+Get service:
+
+* current active instruction;
+* expired instruction marked expired then not found;
+* ownership validation;
+* safe card display;
+* no new suffix.
+
+Cancel service:
+
+* active cancellation;
+* repeated cancellation;
+* missing instruction;
+* invalid Payment state;
+* reservation released through status transition;
+* no row deletion.
+
+Use fixed Instants and deterministic fake suffix generator.
+
+---
+
+# 36. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+* save instruction;
+* auditing;
+* unique request ID;
+* one active instruction per Payment;
+* active payable amount uniqueness;
+* same amount reusable after EXPIRED;
+* same amount reusable after CANCELLED;
+* historical rows retained;
+* find active by Payment;
+* find by request ID;
+* history ordering;
+* amount check constraints;
+* expiry constraint;
+* status/timestamp constraints;
+* Payment foreign key;
+* Flyway success;
+* Hibernate validation.
+
+Flush to trigger constraints.
+
+Do not assert complete PostgreSQL messages.
+
+---
+
+# 37. Full integration tests
+
+Use real PostgreSQL.
+
+Successful flow:
+
+1. Create User and Order.
+2. Create CARD_TO_CARD Payment for 100,000 IRT.
+3. Initialize with deterministic suffix 1,638.
+4. Verify payableAmount 101,638.
+5. Verify active instruction.
+6. Verify Payment WAITING_FOR_PAYMENT.
+7. Repeat same request ID.
+8. Verify same instruction and amount.
+9. Verify no receipt or approval exists.
+
+Existing active instruction:
+
+* initialize with new request ID;
+* same current instruction returned according to policy;
+* no second active reservation.
+
+Expiry/reissue:
+
+* advance test clock;
+* old instruction EXPIRED;
+* initialize again;
+* new instruction and suffix;
+* old history retained.
+
+---
+
+# 38. Concurrent reservation integration tests
+
+Scenario A:
+
+Many Payments with the same base amount initialize concurrently.
+
+Use deterministic generator collisions where possible.
+
+Verify:
+
+* all successful active instructions have unique payable amounts;
+* conflicts retry;
+* no duplicate reservation;
+* bounded failures when range is exhausted;
+* no raw persistence exception.
+
+Scenario B:
+
+Same Payment initialized concurrently.
+
+Verify:
+
+* exactly one active instruction;
+* one stable payable amount;
+* callers converge;
+* no duplicate active row.
+
+Scenario C:
+
+Two application-instance simulation paths use the same request ID.
+
+Verify:
+
+* one instruction;
+* idempotent result.
+
+Requirements:
+
+* real PostgreSQL;
+* separate transactions;
+* deterministic synchronization;
+* no Thread.sleep;
+* ExecutorService shutdown;
+* timeouts.
+
+---
+
+# 39. Controller tests
+
+Initialize:
+
+* success -> 201;
+* existing/idempotent -> 200;
+* exact response fields;
+* full formatted card number returned;
+* response toString/log not exposing number;
+* missing Payment -> 404;
+* ownership mismatch -> 404;
+* wrong method -> 409;
+* approved Payment -> 409;
+* disabled provider -> 503;
+* reservation exhausted -> 503;
+* invalid request -> 400;
+* malformed JSON -> 400.
+
+Get:
+
+* active -> 200;
+* missing -> 404;
+* expired -> 404.
+
+Cancel:
+
+* success -> 200;
+* repeated behavior documented;
+* missing -> 404;
+* invalid state -> 409.
+
+All internal errors include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No error contains:
+
+card number
+
+card holder details
+
+suffix range configuration
+
+SQL
+
+stack trace
+
+---
+
+# 40. Architecture verification
+
+Verify:
+
+* manual payment domain does not depend on API or infrastructure;
+* suffix generator is an outbound port;
+* services depend on repositories and ports;
+* controller depends on input ports;
+* no controller injects repository;
+* no full card number persisted as plaintext unless explicit encrypted design exists;
+* no card number appears in logs;
+* no receipt/upload code exists;
+* no operator approval exists;
+* no Payment approval exists;
+* no VPN provisioning/event exists;
+* no bank API exists;
+* no OCR exists;
+* no field injection;
+* no service locator;
+* no JVM-only correctness lock;
+* partial unique index protects active amounts.
+
+Extend architecture tests if present.
+
+---
+
+# 41. Documentation
+
+Create:
+
+docs/payment/manual-card-payment.md
+
+Document:
+
+* purpose;
+* distinction from online gateway;
+* unique amount matching concept;
+* why unique amount is not proof of payment;
+* base amount;
+* suffix;
+* payable amount;
+* canonical currency;
+* instruction lifecycle;
+* Payment lifecycle;
+* expiration;
+* reissue;
+* amount reservation;
+* partial unique index;
+* concurrency;
+* idempotency;
+* destination-card security;
+* masking;
+* API contracts;
+* operator review deferred;
+* receipt upload deferred;
+* no automatic approval;
+* Telegram presentation deferred to later task.
+
+Include Mermaid diagrams for:
+
+* instruction creation;
+* suffix collision retry;
+* idempotent replay;
+* expiration and reissue;
+* concurrent reservations;
+* cancellation.
+
+Update:
+
+docs/payment/payment-foundation.md
+
+only where provider capability separation was refined.
+
+---
+
+# 42. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/payment/manual/
+ManualCardPaymentInstruction.java
+ManualPaymentInstructionStatus.java
+ManualPaymentDestination.java
+BankCardNumber.java
+
+src/main/java/com/parazit/panel/domain/payment/manual/repository/
+ManualCardPaymentInstructionRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/payment/manual/
+ManualPaymentSuffixGenerator.java
+ManualPaymentDestinationProvider.java
+
+src/main/java/com/parazit/panel/application/port/in/payment/manual/
+InitializeManualCardPaymentUseCase.java
+GetManualCardPaymentInstructionUseCase.java
+CancelManualCardPaymentInstructionUseCase.java
+
+src/main/java/com/parazit/panel/application/payment/manual/command/
+InitializeManualCardPaymentCommand.java
+CancelManualCardPaymentInstructionCommand.java
+
+src/main/java/com/parazit/panel/application/payment/manual/query/
+GetManualCardPaymentInstructionQuery.java
+
+src/main/java/com/parazit/panel/application/payment/manual/result/
+InitializeManualCardPaymentResult.java
+ManualCardPaymentInstructionResult.java
+ManualPaymentDisplayInstructions.java
+
+src/main/java/com/parazit/panel/application/payment/manual/
+ManualCardPaymentProcessor.java
+InitializeManualCardPaymentService.java
+GetManualCardPaymentInstructionService.java
+CancelManualCardPaymentInstructionService.java
+ExpireManualPaymentInstructionService.java
+ManualCardPaymentResultMapper.java
+
+src/main/java/com/parazit/panel/infrastructure/payment/manual/
+SecureManualPaymentSuffixGenerator.java
+ConfiguredManualPaymentDestinationProvider.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/payment/manual/
+SpringDataManualCardPaymentInstructionRepository.java
+ManualCardPaymentInstructionRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/payment/manual/
+ManualCardPaymentController.java
+InitializeManualCardPaymentRequest.java
+CancelManualCardPaymentRequest.java
+ManualCardPaymentResponse.java
+ManualCardPaymentApiMapper.java
+
+src/main/java/com/parazit/panel/config/properties/
+ManualPaymentProperties.java
+
+src/main/resources/db/migration/
+V11__create_manual_card_payment_instructions.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/payment/manual/
+ManualCardPaymentInstructionTest.java
+BankCardNumberTest.java
+
+src/test/java/com/parazit/panel/application/payment/manual/
+InitializeManualCardPaymentServiceTest.java
+GetManualCardPaymentInstructionServiceTest.java
+CancelManualCardPaymentInstructionServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/payment/manual/
+SecureManualPaymentSuffixGeneratorTest.java
+ConfiguredManualPaymentDestinationProviderTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/payment/manual/
+ManualCardPaymentInstructionRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/payment/manual/
+ManualCardPaymentFlowIntegrationTest.java
+ManualCardPaymentReissueIntegrationTest.java
+ConcurrentManualAmountReservationIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/payment/manual/
+ManualCardPaymentControllerTest.java
+
+docs/payment/
+manual-card-payment.md
+
+Adapt package names and migration version to existing conventions.
+
+---
+
+# 43. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* aggregate tests pass;
+* card-number tests pass;
+* configuration tests pass;
+* suffix-generator tests pass;
+* service tests pass;
+* repository tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts with manual payment disabled;
+* application starts with valid test configuration;
+* no duplicate active payable amount exists;
+* same request ID is idempotent;
+* same Payment has at most one active instruction;
+* expired reservation can be reused;
+* Payment is never approved;
+* no receipt is stored;
+* no operator workflow exists;
+* no VPN provisioning occurs;
+* no real card number is committed;
+* no sensitive card data appears in logs;
+* no tests are disabled.
+
+---
+
+# 44. Optional manual verification
+
+Do not execute automatically.
+
+Use only a non-sensitive test configuration or an explicitly approved destination card.
+
+Manual flow:
+
+1. Create a manual Payment for 100,000 IRT.
+2. Initialize instruction.
+3. Verify:
+
+   * base amount;
+   * suffix;
+   * exact final amount;
+   * card display;
+   * expiry time.
+4. Repeat same request ID.
+5. Confirm same instruction.
+6. Attempt new request ID while active.
+7. Confirm existing active instruction is returned.
+8. Expire using test configuration or controlled clock.
+9. Reissue.
+10. Confirm new suffix and preserved history.
+11. Cancel.
+12. Confirm amount reservation is released.
+13. Confirm Payment is not APPROVED.
+
+Do not use or commit a real card number during development fixtures.
+
+---
+
+# 45. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Payment-method naming decision
+3. Manual instruction aggregate design
+4. Destination card security decision
+5. Amount and suffix strategy
+6. Active reservation/index strategy
+7. Instruction expiry and reissue policy
+8. Idempotency strategy
+9. Concurrency strategy
+10. Payment status behavior
+11. Planned files to create
+12. Planned files to modify
+13. Migration and security risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Configuration contract
+6. Card-data security behavior
+7. Amount-generation behavior
+8. Reservation and concurrency behavior
+9. Expiration and reissue behavior
+10. Payment status behavior
+11. Internal API contract
+12. Unit-test results
+13. Integration-test results
+14. Concurrency-test results
+15. Flyway and Hibernate results
+16. Build result
+17. Commands executed
+18. Remaining issues
+19. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(payment): add manual card payment instructions with unique amounts
+
+Stop after completing Task 29.
+
+Do not begin Task 30.
+

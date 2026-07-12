@@ -1,0 +1,79 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the project.
+
+Task 5 – Logging and Global Exception Handling
+
+Requirements:
+
+1. Configure Logback for production-ready logging.
+
+2. Create separate logging profiles for:
+
+   * local
+   * dev
+   * prod
+
+3. Configure:
+
+   * Console logging
+   * Rolling file logging
+   * Daily log rotation
+   * Maximum history
+   * Log size limits
+
+4. Store log files under:
+
+logs/
+
+5. Create a package:
+
+com.parazit.panel.common.exception
+
+6. Create a standard API error response model.
+
+Fields:
+
+* timestamp
+* status
+* error
+* message
+* path
+* traceId
+
+7. Create GlobalExceptionHandler using @RestControllerAdvice.
+
+Handle at least:
+
+* Exception
+* RuntimeException
+* IllegalArgumentException
+* MethodArgumentNotValidException
+* ConstraintViolationException
+* NoSuchElementException
+* AccessDeniedException
+
+8. Return proper HTTP status codes.
+
+9. Never expose stack traces in API responses.
+
+10. Log every unexpected exception.
+
+11. Generate a traceId for every request and include it in logs and API error responses.
+
+12. Add a servlet filter or interceptor to populate MDC with the traceId.
+
+13. Create a sample controller that intentionally throws exceptions to verify the handler.
+
+14. Verify:
+
+* Errors are logged.
+* Responses follow the standard format.
+* traceId appears in both logs and responses.
+
+15. Do not implement business logic.
+
+16. Show every created or modified file before applying changes.
+
+17. Wait for approval before continuing.
+

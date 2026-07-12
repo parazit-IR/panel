@@ -1,0 +1,1726 @@
+You are a senior Java 21, Spring Boot, Xray, and 3x-ui integration engineer.
+
+Continue implementing the existing project.
+
+# Task 25 — Disable and Delete 3x-ui Client
+
+## Goal
+
+Implement safe, idempotent disable and permanent-delete operations for a previously provisioned 3x-ui client.
+
+This task builds on:
+
+* Task 21: 3x-ui client foundation
+* Task 22: authentication and session management
+* Task 23: inbound discovery
+* Task 24: client provisioning and local XuiClientProvision persistence
+
+After this task, the application must be able to:
+
+* disable an ACTIVE remote client;
+* permanently delete a remote client when explicitly requested;
+* preserve accurate local lifecycle state;
+* handle already-disabled or already-deleted clients idempotently;
+* reconcile uncertain remote outcomes;
+* avoid deleting the wrong client;
+* remain safe under concurrent requests.
+
+Do not implement:
+
+* client renewal;
+* traffic reset;
+* traffic-limit updates;
+* expiry updates;
+* subscription URI generation;
+* QR Code generation;
+* payment;
+* order processing;
+* Telegram handlers;
+* reminder jobs.
+
+Stop after completing Task 25.
+
+Do not begin Task 26.
+
+---
+
+# 1. Important rules
+
+* Inspect the existing repository before making changes.
+* Preserve all working behavior from Tasks 1–24.
+* Use Java 21.
+* Use Spring Boot 3.x.
+* Use the existing RestClient, authentication, session, retry, reconciliation, and logging infrastructure.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not expose infrastructure DTOs outside infrastructure.
+* Do not inject Spring Data repositories into controllers or application services.
+* Do not perform blind retries for destructive operations.
+* Do not delete a remote client by email alone when a stable client ID is available.
+* Do not physically delete the local provisioning record.
+* Do not log cookies, credentials, raw request bodies, subscription IDs, or private keys.
+* Do not call a real 3x-ui panel during automated tests.
+* Do not add unrelated dependencies.
+* Do not start Task 26.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* XuiClientProvision aggregate;
+* current XuiProvisionStatus values;
+* provisioning transaction boundaries;
+* XuiClientManagementClient;
+* remote client lookup/reconciliation support;
+* inbound client snapshots;
+* authentication and retry flow;
+* existing exception hierarchy;
+* Flyway migration history;
+* repository methods;
+* Testcontainers support;
+* mock 3x-ui server fixtures;
+* internal provisioning API;
+* any existing disable/delete functionality.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified 3x-ui disable/delete API contract
+3. Local lifecycle decision
+4. Soft-disable versus hard-delete behavior
+5. Idempotency strategy
+6. Uncertain-result reconciliation strategy
+7. Concurrency strategy
+8. Planned files to create
+9. Planned files to modify
+10. Compatibility risks
+
+---
+
+# 3. Verify actual 3x-ui API contracts
+
+Do not guess endpoint paths or payloads.
+
+Verify the target 3x-ui version for:
+
+* disabling a client;
+* enabling a client if required by payload semantics;
+* deleting a client;
+* lookup behavior after disable/delete;
+* whether delete uses:
+
+  * inbound ID plus client UUID;
+  * inbound ID plus email;
+  * path parameters;
+  * request body;
+* response envelope;
+* not-found response;
+* already-disabled behavior;
+* already-deleted behavior;
+* timeout behavior.
+
+Typical paths may resemble concepts such as:
+
+POST /panel/api/inbounds/updateClient/{clientId}
+
+POST /panel/api/inbounds/{inboundId}/delClient/{clientId}
+
+But implementation must follow the verified API.
+
+Add configurable relative paths such as:
+
+app.xui.client-update-path-template
+app.xui.client-delete-path-template
+
+Environment variables:
+
+XUI_CLIENT_UPDATE_PATH_TEMPLATE
+XUI_CLIENT_DELETE_PATH_TEMPLATE
+
+Do not hardcode full URLs.
+
+---
+
+# 4. Local lifecycle model
+
+Review XuiProvisionStatus.
+
+Task 24 currently may contain:
+
+PENDING
+PROVISIONING
+ACTIVE
+FAILED
+UNKNOWN
+
+Extend it only as required.
+
+Recommended additional statuses:
+
+DISABLING
+DISABLED
+DELETING
+DELETED
+
+Final recommended status set:
+
+PENDING
+PROVISIONING
+ACTIVE
+FAILED
+UNKNOWN
+DISABLING
+DISABLED
+DELETING
+DELETED
+
+Semantics:
+
+DISABLING:
+A disable request is in progress.
+
+DISABLED:
+The remote client is confirmed to exist but is disabled.
+
+DELETING:
+A permanent-delete request is in progress.
+
+DELETED:
+The remote client is confirmed absent or the panel confirms deletion.
+
+Rules:
+
+* ACTIVE -> DISABLING -> DISABLED
+* DISABLED -> DELETING -> DELETED
+* ACTIVE -> DELETING -> DELETED may be allowed for explicit force delete
+* DISABLED may later return to ACTIVE in Task 26
+* DELETED is terminal
+* FAILED and UNKNOWN require reconciliation before destructive continuation
+* Do not use generic status setters
+* Same-state operations should be idempotent where appropriate
+
+Explain any alternative state-machine decision.
+
+---
+
+# 5. Local aggregate changes
+
+Extend:
+
+XuiClientProvision
+
+Add optional fields if useful:
+
+Instant disabledAt
+
+Instant deletedAt
+
+String lastOperation
+
+String lastOperationFailureCode
+
+String lastOperationFailureMessage
+
+Preferred simpler design:
+
+Reuse:
+
+failureCode
+failureMessage
+lastSynchronizedAt
+
+and add only:
+
+Instant disabledAt
+Instant deletedAt
+
+Requirements:
+
+* disabledAt populated only when DISABLED is confirmed.
+* deletedAt populated only when DELETED is confirmed.
+* ACTIVE must have provisionedAt.
+* DELETED retains remote identifiers for audit history.
+* Do not clear remoteClientId, remoteEmail, or inboundId after deletion.
+* Do not store raw remote response.
+* Do not store stack traces.
+
+Create focused domain methods:
+
+markDisabling()
+
+markDisabled(Instant disabledAt)
+
+markDeleting()
+
+markDeleted(Instant deletedAt)
+
+markOperationUnknown(String code, String safeMessage)
+
+markOperationFailed(String code, String safeMessage)
+
+Requirements:
+
+* Validate transitions.
+* Preserve idempotency.
+* Prevent deletion of already DELETED records from causing failure.
+* Prevent invalid transition from PENDING to DISABLED.
+* Do not reactivate in this task.
+* Do not mutate PlanSelection, User, or Plan data.
+
+---
+
+# 6. Corrective Flyway migration
+
+Create the next migration.
+
+Suggested:
+
+V8__extend_xui_client_provision_lifecycle.sql
+
+Adjust version according to actual history.
+
+Migration requirements:
+
+* update status check constraint;
+* add disabled_at TIMESTAMPTZ nullable;
+* add deleted_at TIMESTAMPTZ nullable;
+* add any required lifecycle checks;
+* preserve existing rows;
+* remain compatible with Hibernate validation.
+
+Recommended checks:
+
+status = 'DISABLED' implies disabled_at is not null
+
+status = 'DELETED' implies deleted_at is not null
+
+deleted_at is null or disabled_at is null or deleted_at >= disabled_at
+
+Do not rewrite old migration files if they may already have been applied.
+
+Use a corrective migration.
+
+---
+
+# 7. Remote operation models
+
+Create application-layer models.
+
+Suggested package:
+
+com.parazit.panel.application.xui.client.model
+
+Create:
+
+DisableXuiClientRequest
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+Create:
+
+DisableXuiClientResponse
+
+Fields:
+
+long inboundId
+
+String clientId
+
+boolean disabled
+
+boolean alreadyDisabled
+
+String remoteMessage
+
+Create:
+
+DeleteXuiClientRequest
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+Create:
+
+DeleteXuiClientResponse
+
+Fields:
+
+long inboundId
+
+String clientId
+
+boolean deleted
+
+boolean alreadyAbsent
+
+String remoteMessage
+
+Requirements:
+
+* Immutable Java records.
+* No Jackson annotations.
+* No RestClient types.
+* No raw JSON.
+* Remote message must be sanitized.
+* Client ID is the primary identity.
+* Email is only secondary verification/fallback if required by panel API.
+
+---
+
+# 8. Outbound management port
+
+Extend or split:
+
+XuiClientManagementClient
+
+Preferred methods:
+
+CreateXuiClientResponse createClient(CreateXuiClientRequest request)
+
+DisableXuiClientResponse disableClient(DisableXuiClientRequest request)
+
+DeleteXuiClientResponse deleteClient(DeleteXuiClientRequest request)
+
+Requirements:
+
+* Infrastructure-independent.
+* No raw request body.
+* No session details.
+* No remote DTO leakage.
+* Keep update/renew/reset operations for Task 26.
+
+---
+
+# 9. Remote DTOs and payload builders
+
+Create infrastructure-only DTOs for disable and delete operations.
+
+Suggested package:
+
+com.parazit.panel.infrastructure.xui.dto.client
+
+Possible classes:
+
+XuiUpdateClientRemoteRequest
+
+XuiDeleteClientRemoteResponse
+
+XuiUpdateClientRemoteResponse
+
+Create:
+
+XuiDisableClientPayloadBuilder
+
+Responsibilities:
+
+* Build the verified update payload.
+* Preserve all required existing remote client fields.
+* Change only enable=false.
+* Avoid accidentally resetting:
+
+  * traffic;
+  * expiry;
+  * flow;
+  * IP limit;
+  * subscription ID;
+  * email;
+  * UUID.
+
+Important:
+
+Some 3x-ui versions require a complete client payload for updates.
+
+If so:
+
+1. Retrieve the existing remote client.
+2. Copy current values.
+3. Set enable=false.
+4. Submit the full verified payload.
+
+Do not send an incomplete update payload that clears fields.
+
+For delete:
+
+Create payload/path builder only if the API requires it.
+
+Do not use raw string concatenation for JSON.
+
+---
+
+# 10. Remote client lookup before destructive operations
+
+Before disable or delete:
+
+* retrieve the target inbound;
+* locate the client by remoteClientId;
+* verify the remote email matches when available;
+* reject ambiguous or mismatched identities.
+
+Create or extend focused lookup:
+
+XuiRemoteClientLookupService
+
+Methods conceptually:
+
+Optional<XuiClientSnapshot> find(
+long inboundId,
+String clientId
+)
+
+Requirements:
+
+* Client UUID is authoritative.
+* Email mismatch should be logged and treated safely.
+* Never disable/delete a different client merely because email matches.
+* If the target client does not exist:
+
+  * disable may reconcile as already absent only according to documented policy;
+  * delete should return alreadyAbsent=true.
+
+---
+
+# 11. Disable behavior
+
+Disable operation rules:
+
+ACTIVE provision:
+
+* verify remote client;
+* mark DISABLING locally;
+* send remote disable request;
+* confirm remote state;
+* mark DISABLED.
+
+DISABLED provision:
+
+* return idempotent result;
+* no remote update required unless optional reconciliation detects inconsistency.
+
+DELETED provision:
+
+* do not fail as a server error.
+* Return a safe already-absent/deleted result or conflict based on API semantics.
+
+Recommended:
+
+Disable on DELETED returns 409 because a deleted client cannot be disabled.
+
+UNKNOWN/FAILED provision:
+
+* reconcile remote existence and enabled state before continuing.
+
+Remote client already disabled:
+
+* mark local DISABLED if needed;
+* return idempotently.
+
+Remote client absent:
+
+Choose documented behavior.
+
+Recommended:
+
+* mark local UNKNOWN unless deletion was previously requested;
+* return a safe conflict/not-found rather than pretending disable succeeded.
+
+---
+
+# 12. Delete behavior
+
+Permanent deletion must require an explicit operation.
+
+Rules:
+
+ACTIVE:
+
+* direct delete may be allowed.
+* Mark DELETING.
+* Delete remotely.
+* Confirm absence.
+* Mark DELETED.
+
+DISABLED:
+
+* preferred normal path to deletion.
+* Mark DELETING.
+* Delete remotely.
+* Confirm absence.
+* Mark DELETED.
+
+DELETED:
+
+* idempotent.
+* Return existing DELETED state.
+* No remote call required except optional reconciliation.
+
+Remote already absent:
+
+* mark DELETED.
+* Return idempotently.
+
+PENDING/PROVISIONING:
+
+* deletion must fail with conflict.
+* Do not delete a provisioning operation in progress.
+
+UNKNOWN:
+
+* reconcile before delete.
+* If found, continue delete.
+* If absent, mark DELETED.
+* If still uncertain, keep UNKNOWN and return safe failure.
+
+Do not physically delete the local database row.
+
+---
+
+# 13. Application use-case ports
+
+Create:
+
+DisableVpnClientUseCase
+
+DeleteVpnClientUseCase
+
+Suggested package:
+
+com.parazit.panel.application.port.in.xui.client
+
+Methods:
+
+XuiClientLifecycleResult disable(DisableVpnClientCommand command)
+
+XuiClientLifecycleResult delete(DeleteVpnClientCommand command)
+
+---
+
+# 14. Commands
+
+Create:
+
+DisableVpnClientCommand
+
+Fields:
+
+Long telegramUserId
+
+UUID provisionId
+
+Create:
+
+DeleteVpnClientCommand
+
+Fields:
+
+Long telegramUserId
+
+UUID provisionId
+
+boolean force
+
+Requirements:
+
+* Telegram user ID required and positive.
+* provisionId required.
+* `force` permits ACTIVE -> DELETING directly if explicitly supported.
+* Do not accept inboundId, remoteClientId, or email from the external caller.
+* Trusted remote identifiers must come from the local provisioning record.
+* No API annotations.
+* No Telegram SDK types.
+
+---
+
+# 15. Result model
+
+Create:
+
+XuiClientLifecycleResult
+
+Fields:
+
+UUID provisionId
+
+UUID userId
+
+long inboundId
+
+String remoteClientId
+
+String remoteEmail
+
+XuiProvisionStatus status
+
+Instant provisionedAt
+
+Instant disabledAt
+
+Instant deletedAt
+
+boolean changed
+
+boolean remoteClientPresent
+
+Requirements:
+
+* Immutable.
+* Do not expose cookies.
+* Do not expose subscription ID.
+* Do not expose raw remote messages.
+* `changed=false` for idempotent replay.
+* Keep output safe and minimal.
+
+---
+
+# 16. Ownership and authorization-like validation
+
+These internal use cases must validate:
+
+* User exists.
+* Provision exists.
+* Provision belongs to the User.
+* User Telegram ID maps to the same userId.
+* Provision is in a valid state.
+* The remote identifiers come only from the provision.
+
+Do not implement Spring Security in this task.
+
+Use application-level ownership checks only.
+
+Create a focused exception:
+
+XuiProvisionOwnershipException
+
+Map to 403 or 404 according to current privacy policy.
+
+Preferred:
+
+404 to avoid revealing another user’s provision existence.
+
+Document the choice.
+
+---
+
+# 17. Transaction boundaries
+
+Do not hold a database transaction open during remote HTTP operations.
+
+Use the same orchestration principle as Task 24.
+
+Preferred flow for disable:
+
+Phase A — short local transaction:
+
+* validate ownership;
+* return idempotently if already DISABLED;
+* claim transition ACTIVE -> DISABLING;
+* commit.
+
+Phase B — remote operation:
+
+* lookup remote client;
+* send disable request;
+* verify disabled state.
+
+Phase C — short local transaction:
+
+* mark DISABLED, FAILED, or UNKNOWN.
+
+Preferred flow for delete:
+
+Phase A:
+
+* validate ownership and state;
+* claim DELETING;
+* commit.
+
+Phase B:
+
+* lookup;
+* delete;
+* verify absence.
+
+Phase C:
+
+* mark DELETED, FAILED, or UNKNOWN.
+
+Use focused transactional components such as:
+
+PrepareDisableXuiClientTransaction
+
+CompleteDisableXuiClientTransaction
+
+PrepareDeleteXuiClientTransaction
+
+CompleteDeleteXuiClientTransaction
+
+Do not rely on self-invocation of @Transactional methods.
+
+---
+
+# 18. Idempotency
+
+Disable idempotency key:
+
+provisionId
+
+Delete idempotency key:
+
+provisionId
+
+Disable repeated when DISABLED:
+
+* return same record;
+* changed=false;
+* no duplicate remote update.
+
+Delete repeated when DELETED:
+
+* return same record;
+* changed=false;
+* no duplicate remote delete required.
+
+If local state says DISABLING or DELETING:
+
+* reconcile rather than generate another destructive request blindly.
+
+Database state is the final local authority.
+
+---
+
+# 19. Concurrency
+
+Concurrent disable requests:
+
+* exactly one operation claims DISABLING;
+* at most one remote disable request where possible;
+* all callers converge on DISABLED;
+* no raw optimistic/persistence exception escapes.
+
+Concurrent delete requests:
+
+* exactly one operation claims DELETING;
+* at most one remote delete request where possible;
+* all callers converge on DELETED.
+
+Disable racing with delete:
+
+Choose deterministic behavior.
+
+Recommended:
+
+* DELETING has precedence.
+* If delete claims first, disable returns conflict or final DELETED state.
+* If disable claims first, delete may wait/reconcile and continue after DISABLED.
+* Never leave an impossible state.
+* Never re-enable the client.
+
+Do not rely solely on synchronized or JVM locks.
+
+Use database transition claims and reconciliation.
+
+---
+
+# 20. Uncertain-result reconciliation
+
+Disable timeout:
+
+1. Mark UNKNOWN.
+2. Retrieve remote inbound/client.
+3. If client exists and enabled=false:
+
+   * mark DISABLED.
+4. If client exists and enabled=true:
+
+   * one bounded retry may occur after confirmed state.
+5. If lookup unavailable:
+
+   * remain UNKNOWN.
+6. Do not repeatedly submit disable blindly.
+
+Delete timeout:
+
+1. Mark UNKNOWN.
+2. Retrieve remote client.
+3. If absent:
+
+   * mark DELETED.
+4. If present:
+
+   * one bounded retry may occur.
+5. If lookup remains unavailable:
+
+   * remain UNKNOWN.
+6. Do not repeatedly submit delete blindly.
+
+Use configured bounded reconciliation attempts and delays from Task 24 where appropriate.
+
+---
+
+# 21. Exceptions
+
+Create or reuse:
+
+XuiClientProvisionNotFoundException
+
+XuiClientDisableNotAllowedException
+
+XuiClientDeleteNotAllowedException
+
+XuiClientDisableFailedException
+
+XuiClientDeleteFailedException
+
+XuiClientOperationUnknownException
+
+XuiRemoteClientIdentityMismatchException
+
+Requirements:
+
+* Safe messages.
+* No SQL details.
+* No cookies.
+* No raw panel messages.
+* No stack trace in API.
+* No personal details.
+
+Suggested mappings:
+
+missing provision/user -> 404
+
+ownership mismatch -> 404
+
+invalid lifecycle transition -> 409
+
+identity mismatch -> 409
+
+panel unavailable -> 503
+
+timeout -> 504
+
+uncertain outcome -> 503
+
+confirmed remote rejection -> 502 or 409 depending on cause
+
+---
+
+# 22. Internal API
+
+Extend or create:
+
+XuiClientProvisionController
+
+Base path:
+
+/internal/xui/clients
+
+Endpoints:
+
+POST /internal/xui/clients/{provisionId}/disable
+
+DELETE /internal/xui/clients/{provisionId}
+
+Request parameters/body:
+
+For disable:
+
+{
+"telegramUserId": 123456789
+}
+
+For delete:
+
+{
+"telegramUserId": 123456789,
+"force": false
+}
+
+Alternative route design using user path is acceptable if consistent with existing API conventions.
+
+Requirements:
+
+* Dedicated DTOs.
+* Controller depends on input ports.
+* No repository injection.
+* No remote IDs accepted from client.
+* No update/renew/reset behavior.
+* No Spring Security in this task.
+
+HTTP behavior:
+
+Disable new change:
+
+* 200
+
+Disable idempotent:
+
+* 200 with changed=false
+
+Delete confirmed:
+
+* 200
+
+Delete idempotent:
+
+* 200 with changed=false
+
+Missing provision:
+
+* 404
+
+Invalid state:
+
+* 409
+
+Ownership mismatch:
+
+* 404
+
+Remote uncertain:
+
+* 503
+
+Timeout:
+
+* 504
+
+Malformed request:
+
+* 400
+
+---
+
+# 23. API DTOs
+
+Create:
+
+DisableXuiClientRequestDto
+
+Field:
+
+Long telegramUserId
+
+Create:
+
+DeleteXuiClientRequestDto
+
+Fields:
+
+Long telegramUserId
+
+Boolean force
+
+Validation:
+
+telegramUserId:
+
+@NotNull
+@Positive
+
+force:
+
+@NotNull or default false according to project conventions.
+
+Create:
+
+XuiClientLifecycleResponse
+
+Fields:
+
+UUID provisionId
+
+long inboundId
+
+String remoteClientId
+
+String remoteEmail
+
+XuiProvisionStatus status
+
+Instant provisionedAt
+
+Instant disabledAt
+
+Instant deletedAt
+
+boolean changed
+
+boolean remoteClientPresent
+
+Do not expose:
+
+userId
+planId
+planSelectionId
+subscriptionId
+failureMessage
+cookies
+raw remote response
+
+---
+
+# 24. API mapper
+
+Create:
+
+XuiClientLifecycleApiMapper
+
+Responsibilities:
+
+* path/request to command;
+* result to response;
+* explicit manual mapping;
+* no entity mapping;
+* no infrastructure DTOs;
+* no network access.
+
+---
+
+# 25. Logging
+
+INFO:
+
+* disable operation started;
+* client disabled;
+* delete operation started;
+* client deleted;
+* idempotent operation returned.
+
+DEBUG:
+
+* reconciliation lookup;
+* already-disabled detection;
+* already-absent detection;
+* state-claim results.
+
+WARN:
+
+* uncertain remote result;
+* identity mismatch;
+* concurrent lifecycle contention;
+* invalid transition.
+
+ERROR:
+
+* unrecoverable remote failure with stack trace in server logs only.
+
+Include:
+
+provisionId
+userId
+inboundId
+operation
+oldStatus
+newStatus
+attempt
+duration
+traceId
+
+Never log:
+
+password
+cookie
+session ID
+subscription ID
+raw remote body
+private key
+full inbound settings
+personal names
+
+---
+
+# 26. Test fixtures
+
+Create sanitized fixtures:
+
+src/test/resources/xui/clients/
+
+disable-client-success.json
+
+disable-client-failure.json
+
+delete-client-success.json
+
+delete-client-not-found.json
+
+delete-client-failure.json
+
+inbound-with-enabled-client.json
+
+inbound-with-disabled-client.json
+
+inbound-without-client.json
+
+Requirements:
+
+* Match verified 3x-ui contract.
+* No real identifiers.
+* No production server data.
+* No credentials.
+* No private keys.
+* No real subscription ID.
+
+---
+
+# 27. Domain unit tests
+
+Extend XuiClientProvisionTest.
+
+Test:
+
+* ACTIVE -> DISABLING;
+* DISABLING -> DISABLED;
+* DISABLED -> DELETING;
+* ACTIVE -> DELETING when force allowed by application flow;
+* DELETING -> DELETED;
+* disabledAt required for DISABLED;
+* deletedAt required for DELETED;
+* DELETED terminal;
+* repeated DISABLED behavior;
+* repeated DELETED behavior;
+* invalid transitions from PENDING;
+* invalid transitions from PROVISIONING;
+* UNKNOWN handling;
+* failure message sanitization;
+* timestamps validated;
+* remote identifiers preserved after deletion.
+
+No Spring context.
+
+---
+
+# 28. Payload builder tests
+
+Disable payload:
+
+* current client ID preserved;
+* email preserved;
+* flow preserved;
+* expiry preserved;
+* traffic preserved;
+* IP limit preserved;
+* subscription ID preserved if required;
+* only enabled changes to false;
+* nested settings encoded once;
+* no omitted required fields;
+* no secret fields added.
+
+Delete request:
+
+* correct path;
+* correct inbound ID;
+* correct client UUID;
+* no email-only deletion unless verified.
+
+---
+
+# 29. Remote adapter integration tests
+
+Using WireMock or MockWebServer:
+
+Disable:
+
+* successful authenticated disable;
+* already disabled;
+* client missing;
+* success=false;
+* malformed response;
+* 401 then re-login;
+* timeout;
+* 502/503/504 bounded retry;
+* identity mismatch prevented before request.
+
+Delete:
+
+* successful delete;
+* already absent;
+* not-found response treated idempotently where appropriate;
+* malformed response;
+* authentication refresh;
+* timeout;
+* network interruption;
+* correct endpoint and method.
+
+Verify:
+
+* no blind repeated destructive request;
+* cookies reused;
+* login bounded;
+* payload exact;
+* no sensitive logging where testable.
+
+---
+
+# 30. Application service unit tests
+
+DisableVpnClientService:
+
+* successful ACTIVE disable;
+* already DISABLED idempotent;
+* DELETED rejected;
+* missing user;
+* missing provision;
+* ownership mismatch;
+* remote already disabled reconciled;
+* remote missing behavior;
+* timeout reconciled to DISABLED;
+* timeout remains UNKNOWN;
+* confirmed rejection marks FAILED;
+* no unrelated entity mutation.
+
+DeleteVpnClientService:
+
+* successful delete from DISABLED;
+* force delete from ACTIVE;
+* non-force delete from ACTIVE rejected if that is the chosen rule;
+* already DELETED idempotent;
+* remote already absent marks DELETED;
+* PENDING rejected;
+* PROVISIONING rejected;
+* ownership mismatch;
+* timeout reconciled to DELETED;
+* persistent uncertainty remains UNKNOWN;
+* no physical local delete.
+
+Use fixed Instants.
+
+---
+
+# 31. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+* new statuses persist;
+* disabledAt persists;
+* deletedAt persists;
+* status/timestamp constraints;
+* remote identifiers remain after DELETED;
+* existing unique constraints preserved;
+* history row not deleted;
+* Flyway succeeds;
+* Hibernate validation succeeds.
+
+Flush when testing constraints.
+
+Do not assert full PostgreSQL messages.
+
+---
+
+# 32. Full integration tests
+
+Use:
+
+* PostgreSQL Testcontainers;
+* mock 3x-ui;
+* real application services/adapters where practical.
+
+Disable flow:
+
+1. Register user.
+2. Create Plan and selection.
+3. Provision ACTIVE client.
+4. Mock enabled remote client.
+5. Disable.
+6. Verify:
+
+   * remote update sent once;
+   * local status DISABLED;
+   * disabledAt set;
+   * remote IDs unchanged.
+7. Repeat disable.
+8. Verify no duplicate remote update.
+
+Delete flow:
+
+1. Start from DISABLED.
+2. Delete.
+3. Verify remote delete.
+4. Verify local DELETED.
+5. Verify deletedAt.
+6. Repeat delete.
+7. Verify no duplicate remote delete required.
+
+---
+
+# 33. Uncertain-result integration tests
+
+Disable timeout but remote disabled:
+
+* update times out;
+* lookup shows disabled;
+* local becomes DISABLED;
+* no extra update.
+
+Disable timeout and remote still enabled:
+
+* lookup confirms enabled;
+* one bounded retry;
+* then DISABLED or UNKNOWN according to fixture.
+
+Delete timeout but remote absent:
+
+* local becomes DELETED.
+
+Delete timeout and remote present:
+
+* one bounded retry.
+
+Persistent lookup failure:
+
+* local remains UNKNOWN;
+* API receives safe 503;
+* no uncontrolled request loop.
+
+---
+
+# 34. Concurrency integration tests
+
+Scenario A: concurrent disable
+
+* one provision;
+* multiple callers;
+* one remote disable call where claim works;
+* final DISABLED;
+* all callers converge or receive documented transient result.
+
+Scenario B: concurrent delete
+
+* one remote delete;
+* final DELETED;
+* no raw database error.
+
+Scenario C: disable and delete race
+
+* deterministic final state;
+* preferred final state DELETED;
+* no impossible transition;
+* no client re-enabled;
+* no duplicate destructive calls beyond documented bounded behavior.
+
+Requirements:
+
+* real PostgreSQL;
+* mock server;
+* separate transactions;
+* deterministic synchronization;
+* no Thread.sleep;
+* executor shutdown;
+* timeout.
+
+---
+
+# 35. Controller tests
+
+Disable endpoint:
+
+* success -> 200;
+* idempotent -> 200 changed=false;
+* missing provision -> 404;
+* ownership mismatch -> 404;
+* deleted provision -> 409;
+* panel unavailable -> 503;
+* timeout -> 504;
+* uncertain -> 503;
+* invalid body -> 400.
+
+Delete endpoint:
+
+* success -> 200;
+* idempotent deleted -> 200 changed=false;
+* active without force -> 409 if chosen;
+* active with force -> 200;
+* provisioning state -> 409;
+* missing provision -> 404;
+* ownership mismatch -> 404;
+* panel unavailable -> 503;
+* malformed body -> 400.
+
+Verify standard error fields:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+No:
+
+stackTrace
+SQL
+cookie
+sessionId
+subscriptionId
+raw remote message
+
+---
+
+# 36. Architecture verification
+
+Verify:
+
+* lifecycle services depend on ports and repositories;
+* no controller injects repository or RestClient;
+* remote DTOs remain infrastructure-only;
+* domain does not depend on API/infrastructure;
+* no physical local deletion;
+* no payment/order/subscription/Telegram behavior;
+* no Task 26 update/renew/reset behavior;
+* no field injection;
+* no long transaction around network calls;
+* no blind destructive retry;
+* no ApplicationContext service locator.
+
+Extend existing architecture tests if present.
+
+---
+
+# 37. Documentation
+
+Create:
+
+docs/xui/client-disable-delete.md
+
+Document:
+
+* disable versus delete;
+* verified 3x-ui endpoints;
+* lifecycle state machine;
+* ownership validation;
+* remote identity verification;
+* idempotency;
+* transaction boundaries;
+* concurrency;
+* uncertain-result reconciliation;
+* force-delete policy;
+* HTTP contracts;
+* error mapping;
+* secret redaction;
+* why local records are retained;
+* work deferred to Task 26.
+
+Include Mermaid diagrams for:
+
+* successful disable;
+* idempotent disable;
+* successful delete;
+* already-absent delete;
+* timeout reconciliation;
+* disable/delete race.
+
+Update:
+
+docs/xui/client-provisioning.md
+
+only where lifecycle references need expansion.
+
+---
+
+# 38. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/in/xui/client/
+DisableVpnClientUseCase.java
+DeleteVpnClientUseCase.java
+
+src/main/java/com/parazit/panel/application/xui/client/command/
+DisableVpnClientCommand.java
+DeleteVpnClientCommand.java
+
+src/main/java/com/parazit/panel/application/xui/client/result/
+XuiClientLifecycleResult.java
+
+src/main/java/com/parazit/panel/application/xui/client/model/
+DisableXuiClientRequest.java
+DisableXuiClientResponse.java
+DeleteXuiClientRequest.java
+DeleteXuiClientResponse.java
+
+src/main/java/com/parazit/panel/application/xui/client/
+DisableVpnClientService.java
+DeleteVpnClientService.java
+XuiRemoteClientLookupService.java
+PrepareDisableXuiClientTransaction.java
+CompleteDisableXuiClientTransaction.java
+PrepareDeleteXuiClientTransaction.java
+CompleteDeleteXuiClientTransaction.java
+XuiClientLifecycleResultMapper.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/client/
+XuiDisableClientPayloadBuilder.java
+RestClientXuiClientManagementClient.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/dto/client/
+XuiUpdateClientRemoteRequest.java
+XuiUpdateClientRemoteResponse.java
+XuiDeleteClientRemoteResponse.java
+
+src/main/java/com/parazit/panel/api/internal/xui/client/
+DisableXuiClientRequestDto.java
+DeleteXuiClientRequestDto.java
+XuiClientLifecycleResponse.java
+XuiClientLifecycleApiMapper.java
+
+src/main/resources/db/migration/
+V8__extend_xui_client_provision_lifecycle.sql
+
+src/test/resources/xui/clients/
+disable-client-success.json
+disable-client-failure.json
+delete-client-success.json
+delete-client-not-found.json
+delete-client-failure.json
+inbound-with-enabled-client.json
+inbound-with-disabled-client.json
+inbound-without-client.json
+
+src/test/java/com/parazit/panel/application/xui/client/
+DisableVpnClientServiceTest.java
+DeleteVpnClientServiceTest.java
+
+src/test/java/com/parazit/panel/infrastructure/xui/client/
+XuiDisableClientPayloadBuilderTest.java
+RestClientXuiClientLifecycleIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/xui/client/
+XuiClientDisableIntegrationTest.java
+XuiClientDeleteIntegrationTest.java
+XuiClientLifecycleUncertainResultIntegrationTest.java
+ConcurrentXuiClientLifecycleIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/xui/client/
+XuiClientLifecycleControllerTest.java
+
+docs/xui/
+client-disable-delete.md
+
+Adapt names and migration version to existing conventions.
+
+---
+
+# 39. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+./gradlew check
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* new Flyway migration passes;
+* Hibernate validation passes;
+* disable tests pass;
+* delete tests pass;
+* uncertain-result tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts;
+* no real panel called automatically;
+* local provisioning rows are retained;
+* no duplicate destructive operation on idempotent replay;
+* no blind retry;
+* no Task 26 behavior implemented;
+* no secrets or production fixtures committed;
+* no tests disabled.
+
+---
+
+# 40. Optional manual verification
+
+Do not run automatically.
+
+Use only a dedicated test client on a non-production inbound.
+
+Manual flow:
+
+1. Provision a test client.
+2. Disable it.
+3. Verify in 3x-ui:
+
+   * client still exists;
+   * enable=false;
+   * UUID, email, traffic, expiry, and IP limit preserved.
+4. Repeat disable.
+5. Confirm no corruption.
+6. Delete the disabled test client.
+7. Verify it no longer exists remotely.
+8. Repeat delete.
+9. Confirm idempotent local result.
+10. Verify local audit record remains.
+
+Do not test permanent deletion on a production user.
+
+Do not commit real responses, URLs, cookies, client IDs, or keys.
+
+---
+
+# 41. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified remote API contracts
+3. Lifecycle state-machine decision
+4. Disable-versus-delete policy
+5. Force-delete decision
+6. Identity verification strategy
+7. Transaction-boundary design
+8. Idempotency strategy
+9. Concurrency strategy
+10. Uncertain-result reconciliation strategy
+11. Planned files to create
+12. Planned files to modify
+13. Risks and compatibility concerns
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Lifecycle behavior
+6. Disable flow
+7. Delete flow
+8. Identity verification
+9. Transaction boundaries
+10. Idempotency behavior
+11. Concurrency behavior
+12. Uncertain-result handling
+13. Internal API contract
+14. Unit-test results
+15. Integration-test results
+16. Concurrency-test results
+17. Build result
+18. Commands executed
+19. Remaining issues
+20. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(xui): add safe client disable and deletion
+
+Stop after completing Task 25.
+
+Do not begin Task 26.
+

@@ -1,0 +1,836 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 15 – User Module Test Consolidation and Quality Gate
+
+Goal:
+
+Complete Phase 2 by consolidating, expanding, and hardening all tests for the user-related modules implemented in Tasks 9–14.
+
+This task is a quality gate.
+
+Do not add new business features unless a small refactor is strictly required to make the existing user, profile, language, settings, registration, or referral behavior testable and correct.
+
+Important rules:
+
+* Inspect the entire repository before changing anything.
+* Preserve all working functionality from Tasks 1–14.
+* Do not implement Plan, Payment, Order, Subscription, 3x-ui, Telegram Bot handlers, VPN provisioning, Admin Dashboard, or reminder jobs.
+* Do not add new business entities unless required to fix an existing design defect.
+* Do not change public or internal API contracts without documenting the reason.
+* Do not weaken tests merely to make the build pass.
+* Do not disable failing tests.
+* Do not use @Disabled.
+* Do not replace integration tests with mocks.
+* Do not remove database constraints.
+* Do not expose JPA entities.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not add unnecessary dependencies.
+* Use Java 21.
+* Use the existing build tool.
+* Stop after completing Task 15.
+* Do not begin Task 16.
+
+1. Current-state assessment
+
+Inspect all code and tests related to:
+
+* User aggregate
+* User registration
+* User profile
+* User language
+* User settings
+* Referral code generation
+* Referral assignment
+* repository abstractions
+* Flyway migrations
+* GlobalExceptionHandler
+* traceId propagation
+* Testcontainers infrastructure
+* controller tests
+* transaction and concurrency behavior
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Existing test inventory
+
+3. Missing test coverage
+
+4. Flaky or duplicated tests
+
+5. Architecture inconsistencies
+
+6. Migration concerns
+
+7. Planned files to create
+
+8. Planned files to modify
+
+9. Test inventory
+
+Create a clear inventory of the current tests grouped by type:
+
+* Domain unit tests
+* Application service unit tests
+* Repository integration tests
+* Use-case integration tests
+* Concurrency tests
+* Controller tests
+* Architecture tests
+* Application context tests
+
+Identify which user-module behaviors are already covered and which are not.
+
+Do not duplicate tests unnecessarily.
+
+3. Shared PostgreSQL Testcontainers support
+
+Review the current Testcontainers setup.
+
+Create or refactor a reusable test foundation if duplication exists.
+
+Suggested package:
+
+com.parazit.panel.test.support
+
+Possible classes:
+
+PostgreSqlContainerSupport
+
+IntegrationTestBase
+
+DatabaseCleaner
+
+Requirements:
+
+* Use one reusable PostgreSQL container strategy where practical.
+* Avoid starting a new container for every individual test class if the existing build structure supports reuse.
+* Use @DynamicPropertySource or equivalent.
+* Ensure Flyway migrations run.
+* Ensure Hibernate schema validation runs.
+* Tests must not depend on locally installed PostgreSQL.
+* Avoid static mutable test data.
+* Do not make tests order-dependent.
+* Do not hide container startup failures.
+* Keep test isolation reliable.
+
+Do not create a large inheritance hierarchy merely for reuse.
+
+Prefer composition or one small base class.
+
+4. Database cleanup strategy
+
+Ensure integration tests are isolated.
+
+Choose a reliable strategy, such as:
+
+* transactional rollback for tests that do not require committed concurrent transactions;
+* explicit table cleanup for full integration and concurrency tests;
+* TRUNCATE with safe ordering where appropriate.
+
+Requirements:
+
+* Do not rely on test execution order.
+* Reset all user-module tables as needed:
+
+referrals
+user_settings
+users
+
+* Respect foreign keys.
+* Do not accidentally clean Flyway history.
+* Do not clean unrelated tables unless required.
+* Document the chosen approach.
+
+5. Domain test coverage
+
+Ensure comprehensive pure unit tests for:
+
+User:
+
+* creation
+* normalization
+* required fields
+* immutable telegramUserId
+* referral code assignment
+* referral code immutability
+* status transitions
+* blocked state
+* profile update
+* language change
+* interaction timestamp
+* equality and hashCode behavior if applicable
+
+UserSettings:
+
+* default creation
+* all defaults
+* all preference mutations
+* threshold lower boundary
+* threshold upper boundary
+* invalid thresholds
+* same-value idempotency
+
+Referral:
+
+* creation
+* self-referral rejection
+* code normalization
+* default status
+* valid state transitions
+* invalid state transitions
+* immutable referrer and referred IDs
+
+No Spring context should start for domain tests.
+
+6. Application service test coverage
+
+Ensure isolated tests for:
+
+RegisterUserService
+
+GetUserProfileService
+
+UpdateUserProfileService
+
+GetUserLanguageService
+
+ChangeUserLanguageService
+
+GetUserSettingsService
+
+UpdateUserSettingsService
+
+EnsureUserReferralCodeService
+
+GetReferralOverviewService
+
+AssignReferralService
+
+Test:
+
+* happy paths
+* validation
+* missing resources
+* idempotency
+* preservation of unrelated fields
+* repository interaction
+* clock usage
+* exception behavior
+* null input
+* unsupported input
+* existing-data behavior
+
+Use fixed Instants.
+
+Use fakes or Mockito consistently with current project conventions.
+
+Do not over-specify implementation details when behavior assertions are sufficient.
+
+7. Repository contract tests
+
+Create reusable repository contract tests only if they reduce meaningful duplication.
+
+Verify generic repository behavior for:
+
+* save
+* findById
+* findAll
+* saveAll
+* existsById
+* count
+* delete
+* deleteById
+* null-handling rules
+
+Verify business repository behavior:
+
+UserRepository:
+
+* findByTelegramUserId
+* existsByTelegramUserId
+* findByReferralCode
+* existsByReferralCode
+
+UserSettingsRepository:
+
+* findByUserId
+* existsByUserId
+
+ReferralRepository:
+
+* findByReferredUserId
+* findAllByReferrerUserId
+* existsByReferredUserId
+* countByReferrerUserId
+
+Use real PostgreSQL.
+
+8. Database constraint tests
+
+Explicitly verify all important database constraints.
+
+Users:
+
+* telegram_user_id unique
+* referral_code unique when non-null
+* required fields
+* enum persistence
+* timestamp columns
+
+User settings:
+
+* user_id unique
+* foreign key to users
+* threshold check 1..100
+* required booleans
+
+Referrals:
+
+* unique referred_user_id
+* self-referral check
+* foreign keys
+* required fields
+* enum persistence
+
+Requirements:
+
+* Flush the persistence context to trigger constraints.
+* Do not rely only on application validation.
+* Assert the correct category of persistence exception.
+* Do not assert fragile vendor-specific full error messages.
+* Do not expose database constraint names to API responses.
+
+9. Registration integration suite
+
+Consolidate registration integration tests.
+
+Verify:
+
+* new user creation
+* repeated registration
+* same user ID returned
+* row count remains one
+* Telegram profile refresh
+* language initialized correctly
+* existing selected language preserved
+* status preserved
+* blocked state preserved
+* default settings created
+* settings preserved during repeated registration
+* referral code generated
+* referral code stable
+* existing user without settings gets settings
+* existing user without referral code gets backfilled
+* auditing works
+
+10. Profile integration suite
+
+Verify:
+
+* profile retrieval
+* profile update
+* firstName validation
+* optional lastName normalization
+* username remains controlled by Telegram registration
+* telegramUserId remains immutable
+* language behavior matches Task 12 design
+* status and blocked state remain unchanged
+* updatedAt changes only when expected
+
+11. Language integration suite
+
+Verify:
+
+* default registration language
+* supported FA variants
+* supported EN variants
+* unsupported registration language defaults to FA
+* unsupported explicit language change fails
+* same-language change is idempotent
+* blocked and suspended states are preserved
+* profile data is unchanged
+
+12. Settings integration suite
+
+Verify:
+
+* default settings created on registration
+* lazy creation for older user
+* one settings row per user
+* GET returns current settings
+* PUT persists updates
+* thresholds 1 and 100 accepted
+* thresholds outside range rejected
+* user profile, language, status, and blocked state remain unchanged
+* auditing works
+* concurrent creation does not produce duplicates
+
+13. Referral integration suite
+
+Verify:
+
+* each user receives one stable referral code
+* code lookup is case-insensitive at application level
+* first assignment succeeds
+* repeated same assignment is idempotent
+* different referrer returns conflict
+* self-referral rejected
+* unknown code rejected
+* one referral row per referred user
+* referral count is correct
+* no reward, wallet, or commission data exists
+* user settings and language remain unchanged
+
+14. Concurrency test suite
+
+Review and harden all concurrency tests.
+
+Required scenarios:
+
+Concurrent registration for same telegramUserId:
+
+* one user row
+* one settings row
+* one stable referral code
+* both operations recover successfully where designed
+
+Concurrent settings creation:
+
+* one settings row
+
+Concurrent same-referrer assignment:
+
+* one referral row
+* both operations return the same referral where designed
+
+Concurrent different-referrer assignment:
+
+* one referral row
+* one success
+* one conflict
+
+Requirements:
+
+* Use real PostgreSQL.
+* Use separate transactions.
+* Use deterministic synchronization primitives.
+* Do not use Thread.sleep.
+* Shut down ExecutorService.
+* Add timeouts to prevent hanging tests.
+* Avoid excessive concurrency counts.
+* Ensure tests are repeatable.
+
+15. Controller contract tests
+
+Ensure controller tests exist for all internal user-module endpoints.
+
+Registration:
+
+POST /internal/users/register
+
+Profile:
+
+GET /internal/users/{telegramUserId}
+
+PUT /internal/users/{telegramUserId}
+
+Language:
+
+GET /internal/users/{telegramUserId}/language
+
+PUT /internal/users/{telegramUserId}/language
+
+Settings:
+
+GET /internal/users/{telegramUserId}/settings
+
+PUT /internal/users/{telegramUserId}/settings
+
+Referral:
+
+GET /internal/users/{telegramUserId}/referral
+
+POST /internal/users/{telegramUserId}/referral
+
+Verify:
+
+* success status codes
+* validation errors
+* missing resources
+* conflict responses
+* JSON content type
+* stable field names
+* ISO-8601 timestamps
+* no entity internals
+* no stack traces
+* traceId present in all error responses
+* malformed JSON returns 400
+* unknown fields behavior matches current Jackson configuration
+
+16. Global exception handling tests
+
+Add focused tests for:
+
+* validation failure → 400
+* invalid domain/application input → 400
+* missing user → 404
+* missing referral code → 404
+* referral conflict → 409
+* access denied if existing behavior is present
+* unexpected exception → 500
+* traceId always present
+* path correct
+* status correct
+* timestamp present
+* error message safe
+* stack trace absent
+* SQL details absent
+
+Do not leak internal exception class names unless the API contract intentionally uses them.
+
+17. Trace ID tests
+
+Verify:
+
+* incoming trace ID is reused if the current TraceIdFilter supports it;
+* otherwise a new trace ID is generated;
+* response headers contain the trace ID if designed;
+* error body contains the same trace ID;
+* MDC is cleared after request completion;
+* one request's trace ID does not leak into another request.
+
+Use the existing header name.
+
+Do not invent a second trace mechanism.
+
+18. Architecture tests
+
+If ArchUnit is already present, extend architecture tests.
+
+If it is not present, add it only if the repository size and existing design justify it.
+
+Recommended rules:
+
+* domain does not depend on infrastructure
+* domain does not depend on API
+* application does not depend on infrastructure
+* controllers do not depend on Spring Data repositories
+* application services do not depend on Spring Data repositories
+* no field injection
+* no classes use ApplicationContext as service locator
+* JPA repositories remain inside infrastructure
+* API DTOs are not entities
+* domain repositories do not extend Spring Data interfaces
+
+If ArchUnit is not added, document a manual architecture checklist.
+
+19. Test naming and organization
+
+Standardize test naming.
+
+Preferred examples:
+
+registersNewUserWhenTelegramUserDoesNotExist
+
+preservesLanguageWhenExistingUserRegistersAgain
+
+rejectsSelfReferral
+
+returnsConflictWhenReferralAlreadyBelongsToAnotherReferrer
+
+Use behavior-focused names.
+
+Avoid names such as:
+
+test1
+happyPath
+shouldWork
+
+Organize tests with nested classes only where it improves readability.
+
+20. Test data builders
+
+Create small test-data builders or fixtures if object creation is duplicated heavily.
+
+Suggested package:
+
+com.parazit.panel.test.fixture
+
+Possible fixtures:
+
+UserTestData
+
+UserSettingsTestData
+
+ReferralTestData
+
+Requirements:
+
+* Keep builders test-only.
+* Use sensible defaults.
+* Allow explicit overrides.
+* Do not hide important test values.
+* Do not build a generic reflection-based fixture framework.
+* Do not introduce random values unless the test specifically needs them.
+* Prefer deterministic UUIDs and Instants.
+
+21. Coverage measurement
+
+Use the test coverage tool already configured.
+
+If none exists, add JaCoCo only if compatible with the build.
+
+Generate a coverage report.
+
+Suggested minimum quality target for the user module:
+
+* Domain and application classes: 85% line coverage
+* Domain and application classes: 75% branch coverage
+
+These are quality targets, not reasons to create meaningless tests.
+
+Do not enforce unrealistic 100% coverage.
+
+Exclude only:
+
+* generated code
+* configuration-only classes where appropriate
+* application bootstrap class
+
+Do not exclude business services.
+
+22. Mutation testing
+
+Do not add mutation testing tooling unless already present.
+
+Instead, review whether tests would detect these mutations:
+
+* removing unique checks
+* changing default language
+* changing settings threshold boundaries
+* allowing self-referral
+* overwriting existing language
+* regenerating referral codes
+* removing blocked-state preservation
+
+Add meaningful tests where these mutations would currently survive.
+
+23. Build pipeline quality gates
+
+Review the existing Gradle or Maven configuration.
+
+Ensure the normal verification command runs:
+
+* unit tests
+* integration tests if part of the same build
+* architecture tests
+* coverage verification if configured
+* static analysis already configured
+
+Do not require Docker Compose for automated tests.
+
+Testcontainers must provide PostgreSQL.
+
+Do not make Redis mandatory unless tests genuinely require it.
+
+24. Performance and stability
+
+Review test runtime.
+
+Requirements:
+
+* Avoid repeated full Spring context startup where slice tests are sufficient.
+* Reuse context configurations.
+* Keep pure unit tests context-free.
+* Keep integration tests focused.
+* Do not prematurely optimize by removing important tests.
+* Eliminate obvious flaky assertions based on real time.
+* Use fixed clocks.
+* Use Awaitility only if it is already present or clearly justified.
+* Prefer deterministic synchronization over polling.
+
+25. Documentation
+
+Create:
+
+docs/testing/user-module-test-strategy.md
+
+Document:
+
+* test pyramid for the user module;
+* domain unit tests;
+* application unit tests;
+* repository integration tests;
+* use-case integration tests;
+* controller tests;
+* concurrency tests;
+* Testcontainers strategy;
+* database cleanup;
+* fixed-clock strategy;
+* coverage targets;
+* architecture checks;
+* commands to run tests;
+* debugging failed container tests;
+* known limitations.
+
+Also update:
+
+docs/use-cases/register-user.md
+docs/use-cases/user-profile.md
+docs/use-cases/user-language.md
+docs/use-cases/user-settings.md
+docs/use-cases/referral-skeleton.md
+
+Only where behavior or test guarantees need clarification.
+
+26. Suggested test commands
+
+Use commands appropriate to the existing build.
+
+For Gradle, support commands similar to:
+
+./gradlew clean test
+./gradlew integrationTest
+./gradlew jacocoTestReport
+./gradlew check
+./gradlew build
+
+Do not create integrationTest source sets unless the current structure benefits from them.
+
+For Maven, support commands similar to:
+
+./mvnw clean test
+./mvnw verify
+
+Document the actual commands implemented.
+
+27. Phase 2 acceptance checklist
+
+Create:
+
+docs/tasks/phase-2-user-module-acceptance.md
+
+Checklist:
+
+* User model complete
+* Registration idempotent
+* Registration concurrency-safe
+* Profile retrieval works
+* Profile update works
+* Language management works
+* Settings management works
+* Default settings created
+* Referral code stable
+* Referral assignment idempotent
+* Self-referral blocked
+* Referral conflict handled
+* All Flyway migrations pass
+* Hibernate validation passes
+* Unit tests pass
+* Integration tests pass
+* Controller tests pass
+* Concurrency tests pass
+* Error responses contain traceId
+* No JPA entity exposed
+* No field injection
+* No Telegram handler implemented
+* No payment, plan, subscription, or 3x-ui logic implemented
+* Documentation updated
+* Build passes
+
+Mark checklist items only when verified.
+
+28. Refactoring rules
+
+Small refactors are allowed only when they improve correctness or testability.
+
+Acceptable examples:
+
+* extract shared test fixture;
+* remove duplicated language validation;
+* centralize referral code normalization;
+* improve transaction boundary;
+* fix a faulty exception mapping;
+* remove duplicate integration setup;
+* make clock injectable.
+
+Not acceptable:
+
+* redesign the entire architecture;
+* add unrelated frameworks;
+* introduce CQRS or event sourcing;
+* implement future features;
+* rename all packages without need.
+
+Explain every production-code refactor.
+
+29. Verification
+
+Run all available verification commands.
+
+At minimum:
+
+* clean compile
+* unit tests
+* integration tests
+* concurrency tests
+* controller tests
+* architecture tests if present
+* coverage report
+* full build
+
+Also verify application startup with PostgreSQL and local profile.
+
+Confirm:
+
+* all migrations run in order;
+* Hibernate validation succeeds;
+* all user-module tests pass;
+* tests are isolated;
+* no flaky test remains;
+* no disabled test exists;
+* no credentials are committed;
+* no future-phase feature was implemented.
+
+30. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Test inventory
+3. Missing coverage
+4. Flaky or duplicated areas
+5. Planned test architecture
+6. Planned files to create
+7. Planned files to modify
+8. Production refactors that may be required
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Production refactors
+5. Test inventory by category
+6. Test results
+7. Coverage results
+8. Concurrency-test results
+9. Build result
+10. Commands executed
+11. Remaining risks
+12. Phase 2 acceptance status
+13. Suggested commit message
+
+Use this commit message unless the repository already uses another convention:
+
+test(user): complete phase two user module quality gate
+
+Stop after completing Task 15.
+
+Do not start Task 16.
+

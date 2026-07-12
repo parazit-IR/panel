@@ -1,0 +1,2768 @@
+You are a senior Java 21, Spring Boot, Xray, and 3x-ui integration engineer.
+
+Continue implementing the existing project.
+
+# Task 26 — Update, Renew, Enable, and Reset 3x-ui Client
+
+## Goal
+
+Implement safe, idempotent, and concurrency-aware lifecycle updates for an existing 3x-ui VPN client.
+
+This is the final task of Phase 4.
+
+After this task, the application must be able to:
+
+* update a remote client without losing unchanged fields;
+* renew the client expiry date;
+* increase or replace its traffic limit;
+* enable a previously disabled client;
+* disable a client through the shared update mechanism where appropriate;
+* update IP limits;
+* update the remote remark/email only through a controlled operation if supported;
+* reset consumed traffic;
+* synchronize local provisioning state with remote 3x-ui state;
+* reconcile uncertain network outcomes;
+* preserve local audit history;
+* remain idempotent under repeated and concurrent requests.
+
+Do not implement:
+
+* payment processing;
+* order creation;
+* subscription URI generation;
+* QR Code generation;
+* Telegram Bot handlers;
+* automatic scheduled renewal;
+* traffic reminder jobs;
+* Admin Dashboard;
+* deployment.
+
+Stop after completing Task 26.
+
+Do not begin Task 27.
+
+---
+
+# 1. Important implementation rules
+
+* Inspect the full repository before making changes.
+* Preserve all working behavior from Tasks 1–25.
+* Use Java 21 and the current Spring Boot version.
+* Use the existing RestClient-based 3x-ui infrastructure.
+* Reuse authentication, session, retry, timeout, logging, and reconciliation mechanisms.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not expose infrastructure DTOs outside infrastructure.
+* Do not inject Spring Data repositories into application services or controllers.
+* Do not keep database transactions open during remote HTTP calls.
+* Do not blindly repeat non-idempotent remote operations after timeouts.
+* Do not log credentials, cookies, subscription IDs, raw client payloads, private keys, or complete remote client identifiers.
+* Do not call a real 3x-ui server from automated tests.
+* Do not add unrelated dependencies.
+* Do not edit already-applied Flyway migrations.
+* Use corrective migrations where necessary.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* current 3x-ui version assumptions;
+* generated or available OpenAPI specification;
+* XuiClientProvision aggregate;
+* XuiProvisionStatus lifecycle;
+* disable/delete implementation from Task 25;
+* XuiClientManagementClient;
+* remote client lookup support;
+* inbound and client snapshot models;
+* provisioning transaction boundaries;
+* exception mappings;
+* retry and uncertain-result handling;
+* existing configuration properties;
+* repository methods;
+* migration history;
+* Testcontainers support;
+* mock 3x-ui fixtures;
+* any existing update, renew, enable, or reset implementation.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Verified 3x-ui API contracts
+3. Existing lifecycle limitations
+4. Update-payload strategy
+5. Renewal semantics
+6. Traffic-limit semantics
+7. Reset-traffic semantics
+8. Transaction-boundary design
+9. Idempotency strategy
+10. Concurrency strategy
+11. Uncertain-result reconciliation strategy
+12. Planned files to create
+13. Planned files to modify
+14. Version-compatibility risks
+
+---
+
+# 3. Verify the installed 3x-ui API contract
+
+Do not guess endpoint paths, request bodies, or response formats.
+
+First inspect the OpenAPI document exposed by the configured panel where available:
+
+/panel/api/openapi.json
+
+Also inspect the current official source or sanitized project fixtures.
+
+Verify the actual installed version for:
+
+* update client endpoint;
+* enable/disable update payload;
+* reset-client-traffic endpoint;
+* get client traffic endpoint;
+* clear client IPs endpoint if used;
+* update-client-traffic endpoint if supported;
+* path parameter requirements;
+* inbound ID requirements;
+* client ID requirements;
+* email requirements;
+* nested settings JSON format;
+* response envelope;
+* success=false behavior;
+* not-found behavior;
+* duplicate-email behavior;
+* expiry-time unit;
+* total traffic unit;
+* reset traffic semantics;
+* whether the update endpoint requires the complete client object.
+
+Known API concepts may include paths similar to:
+
+POST /panel/api/inbounds/updateClient/{clientId}
+
+POST /panel/api/inbounds/{inboundId}/resetClientTraffic/{email}
+
+GET /panel/api/inbounds/getClientTraffics/{email}
+
+POST /panel/api/inbounds/clearClientIps/{email}
+
+But use only the verified paths for the installed version.
+
+Add configurable relative paths such as:
+
+app.xui.client-update-path-template
+
+app.xui.client-reset-traffic-path-template
+
+app.xui.client-traffic-path-template
+
+app.xui.client-clear-ips-path-template
+
+Environment variables:
+
+XUI_CLIENT_UPDATE_PATH_TEMPLATE
+
+XUI_CLIENT_RESET_TRAFFIC_PATH_TEMPLATE
+
+XUI_CLIENT_TRAFFIC_PATH_TEMPLATE
+
+XUI_CLIENT_CLEAR_IPS_PATH_TEMPLATE
+
+Do not hardcode full URLs.
+
+---
+
+# 4. Scope of supported updates
+
+Task 26 must support these operations:
+
+1. Renew expiry
+2. Change traffic limit
+3. Add traffic allowance
+4. Enable a disabled client
+5. Disable an active client through update where shared implementation is useful
+6. Change IP limit
+7. Reset consumed traffic
+8. Synchronize local state from remote state
+
+Optional, only if safely supported:
+
+9. Change remote email/remark
+
+Do not support changing:
+
+* remote client UUID;
+* user owner;
+* plan selection owner;
+* inbound without a dedicated migration flow;
+* protocol;
+* VLESS authentication mode;
+* subscription identifier;
+* private keys;
+* Reality server configuration.
+
+Remote client UUID must remain stable.
+
+---
+
+# 5. Renewal semantics
+
+Define renewal explicitly.
+
+Create two renewal modes:
+
+EXTEND_FROM_CURRENT_EXPIRY
+
+EXTEND_FROM_NOW
+
+Create:
+
+RenewalMode
+
+Rules:
+
+EXTEND_FROM_CURRENT_EXPIRY:
+
+* If the current expiry is still in the future:
+  newExpiry = currentExpiry + requested duration
+* If already expired:
+  newExpiry = now + requested duration
+
+EXTEND_FROM_NOW:
+
+* newExpiry = now + requested duration regardless of current expiry
+
+Default recommended mode:
+
+EXTEND_FROM_CURRENT_EXPIRY
+
+Requirements:
+
+* Duration must be positive.
+* Use calendar-independent day duration consistent with Plan duration rules.
+* Use Instant and Duration or ChronoUnit.DAYS carefully.
+* No local timezone calculations.
+* Do not shorten expiry through a renewal command.
+* Repeating the same renewal request must not accidentally extend twice.
+
+Because renewal is not naturally idempotent, require an explicit operation ID.
+
+---
+
+# 6. Operation idempotency model
+
+Create a persisted lifecycle-operation aggregate or record.
+
+Create:
+
+XuiClientOperation
+
+Suggested package:
+
+com.parazit.panel.domain.xui.operation
+
+Extend BaseEntity.
+
+Fields:
+
+UUID id inherited
+
+UUID operationId
+
+UUID provisionId
+
+XuiClientOperationType type
+
+XuiClientOperationStatus status
+
+String requestFingerprint
+
+Instant requestedAt
+
+Instant completedAt
+
+String failureCode
+
+String failureMessage
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Operation types:
+
+RENEW_EXPIRY
+
+REPLACE_TRAFFIC_LIMIT
+
+ADD_TRAFFIC
+
+ENABLE
+
+DISABLE
+
+CHANGE_IP_LIMIT
+
+RESET_TRAFFIC
+
+SYNCHRONIZE
+
+Optional:
+
+CHANGE_REMOTE_EMAIL
+
+Operation statuses:
+
+PENDING
+
+IN_PROGRESS
+
+SUCCEEDED
+
+FAILED
+
+UNKNOWN
+
+Requirements:
+
+* operationId supplied by caller or generated at API boundary and returned.
+* operationId must be globally unique.
+* Same operationId with the same request fingerprint returns the existing result.
+* Same operationId with a different request must return conflict.
+* Do not use only provisionId as the idempotency key because multiple legitimate renewals must be possible.
+* Store only sanitized request fingerprints, not raw JSON.
+* Never store credentials or cookies.
+* Persist operation history for auditing.
+* Do not physically delete completed operation records.
+
+---
+
+# 7. Operation database migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V9__create_xui_client_operations.sql
+
+Adjust version based on actual migration history.
+
+Table:
+
+xui_client_operations
+
+Columns:
+
+id UUID primary key
+
+operation_id UUID not null
+
+provision_id UUID not null
+
+type VARCHAR(40) not null
+
+status VARCHAR(32) not null
+
+request_fingerprint VARCHAR(128) not null
+
+requested_at TIMESTAMPTZ not null
+
+completed_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique operation_id;
+* foreign key provision_id -> xui_client_provisions(id);
+* valid operation type;
+* valid operation status;
+* SUCCEEDED or FAILED requires completed_at;
+* UNKNOWN may have completed_at nullable according to design.
+
+Indexes:
+
+provision_id
+operation_id
+type
+status
+requested_at
+
+Use RESTRICT or NO ACTION delete behavior.
+
+Preserve operation history.
+
+---
+
+# 8. Operation aggregate behavior
+
+Create controlled factory:
+
+XuiClientOperation.create(
+UUID operationId,
+UUID provisionId,
+XuiClientOperationType type,
+String requestFingerprint,
+Instant requestedAt
+)
+
+Initial status:
+
+PENDING
+
+Create methods:
+
+markInProgress()
+
+markSucceeded(Instant completedAt)
+
+markFailed(
+String failureCode,
+String safeMessage,
+Instant completedAt
+)
+
+markUnknown(
+String failureCode,
+String safeMessage
+)
+
+Requirements:
+
+* Validate operation ID and provision ID.
+* Fingerprint required and bounded.
+* Prevent invalid transitions.
+* SUCCEEDED is terminal.
+* FAILED may be retried only through a new operation ID unless the explicit recovery design allows resuming.
+* UNKNOWN must be reconciled before retry.
+* Same-state calls must be deterministic.
+* No public status setter.
+* No raw remote response stored.
+
+---
+
+# 9. Operation repository
+
+Create:
+
+XuiClientOperationRepository
+
+Suggested package:
+
+com.parazit.panel.domain.xui.operation.repository
+
+Extend:
+
+UuidRepository<XuiClientOperation>
+
+Add:
+
+Optional<XuiClientOperation> findByOperationId(UUID operationId)
+
+List<XuiClientOperation> findAllByProvisionIdOrderByRequestedAtDesc(
+UUID provisionId
+)
+
+boolean existsByOperationId(UUID operationId)
+
+Create:
+
+SpringDataXuiClientOperationRepository
+
+XuiClientOperationRepositoryAdapter
+
+Follow existing repository patterns.
+
+No Pageable unless already standardized.
+
+---
+
+# 10. Extend local provision synchronization fields
+
+Review XuiClientProvision.
+
+Add fields only if required:
+
+long consumedUploadBytes
+
+long consumedDownloadBytes
+
+long consumedTotalBytes
+
+Instant remoteExpiryAt
+
+long remoteTrafficLimitBytes
+
+int remoteIpLimit
+
+boolean remoteEnabled
+
+Instant lastSynchronizedAt
+
+Preferred approach:
+
+The local provision already stores expected configuration:
+
+trafficLimitBytes
+expiresAt
+ipLimit
+status
+
+Add remote observed-state fields only when they provide real reconciliation value.
+
+Recommended fields:
+
+long lastKnownUploadBytes
+
+long lastKnownDownloadBytes
+
+long lastKnownTotalBytes
+
+Instant lastSynchronizedAt
+
+Requirements:
+
+* Values must be non-negative.
+* lastKnownTotalBytes should equal upload + download or use the remote total if contract differs.
+* Do not overwrite expected configured traffic limit with consumed traffic.
+* Do not confuse:
+
+  * configured total limit;
+  * consumed traffic;
+  * remaining traffic.
+* Use a corrective Flyway migration if fields are added.
+* Do not duplicate remote state without purpose.
+
+---
+
+# 11. Provision lifecycle changes
+
+Support enabling a disabled provision.
+
+Extend XuiProvisionStatus if needed:
+
+ENABLING
+
+Existing likely statuses:
+
+ACTIVE
+
+DISABLING
+
+DISABLED
+
+DELETING
+
+DELETED
+
+UNKNOWN
+
+Recommended transition:
+
+DISABLED -> ENABLING -> ACTIVE
+
+Rules:
+
+* DELETED cannot be enabled.
+* DELETING cannot be enabled.
+* PROVISIONING cannot be renewed or reset.
+* UNKNOWN requires reconciliation first.
+* ACTIVE enable request is idempotent.
+* DISABLED disable request remains idempotent.
+* Renewal and traffic updates may be allowed for ACTIVE and DISABLED, but document whether disabled clients may be renewed.
+
+Recommended:
+
+Allow configuration updates for ACTIVE and DISABLED.
+
+Do not automatically enable a disabled client during renewal unless explicitly requested.
+
+---
+
+# 12. Remote snapshot model
+
+Ensure XuiClientSnapshot contains all fields necessary for safe full update:
+
+clientId
+
+email
+
+enabled
+
+totalTrafficLimitBytes
+
+uploadBytes
+
+downloadBytes
+
+expiryTime
+
+ipLimit
+
+subscriptionId
+
+flow
+
+reset
+
+comment
+
+telegramId or other fields if the panel requires them
+
+Requirements:
+
+* Keep remote DTO details in infrastructure.
+* Application snapshot may contain only fields needed for safe updates.
+* Never include password/cookie/private key.
+* Preserve all required remote client fields when building update payloads.
+* Missing required fields must produce XuiInvalidResponseException rather than destructive defaults.
+
+---
+
+# 13. Complete update payload strategy
+
+Some versions of 3x-ui require a full client object during update.
+
+Implement read-modify-write:
+
+1. Load remote client by inbound ID and stable client UUID.
+2. Verify remote email against local record.
+3. Copy all existing required remote values.
+4. Change only explicitly requested fields.
+5. Serialize the complete update payload.
+6. Submit update.
+7. Reload remote state.
+8. Verify intended changes.
+
+Never build an update from only local fields if that could clear remote-only fields.
+
+Never send null/default values for fields that should remain unchanged.
+
+Never change remote client UUID.
+
+---
+
+# 14. Remote update models
+
+Create application models:
+
+UpdateXuiClientRequest
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String expectedEmail
+
+Boolean enabled
+
+Instant expiryTime
+
+Long totalTrafficLimitBytes
+
+Integer ipLimit
+
+String newEmail
+
+Create:
+
+UpdateXuiClientResponse
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+boolean enabled
+
+Instant expiryTime
+
+long totalTrafficLimitBytes
+
+int ipLimit
+
+boolean updated
+
+String remoteMessage
+
+Requirements:
+
+* Null update fields mean unchanged.
+* At least one field must be requested.
+* Do not expose raw JSON.
+* Do not expose cookies.
+* Keep immutable.
+* newEmail optional and controlled.
+
+Create:
+
+ResetXuiClientTrafficRequest
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+Create:
+
+ResetXuiClientTrafficResponse
+
+Fields:
+
+long inboundId
+
+String clientId
+
+String email
+
+boolean reset
+
+boolean alreadyZero
+
+String remoteMessage
+
+Create:
+
+GetXuiClientTrafficRequest
+
+and:
+
+XuiClientTrafficSnapshot
+
+Fields:
+
+long uploadBytes
+
+long downloadBytes
+
+long totalConsumedBytes
+
+long configuredLimitBytes
+
+long remainingBytes
+
+Instant observedAt
+
+Requirements:
+
+* Remaining bytes for unlimited clients must be represented clearly.
+* Prefer nullable remainingBytes or an explicit unlimited boolean.
+* Avoid negative remaining values unless intentionally clamped.
+* Document calculation.
+
+---
+
+# 15. Extend remote management port
+
+Extend:
+
+XuiClientManagementClient
+
+Methods:
+
+UpdateXuiClientResponse updateClient(
+UpdateXuiClientRequest request
+)
+
+ResetXuiClientTrafficResponse resetTraffic(
+ResetXuiClientTrafficRequest request
+)
+
+Create or extend a focused read port:
+
+XuiClientStateClient
+
+Methods:
+
+Optional<XuiClientSnapshot> findClient(
+long inboundId,
+String clientId
+)
+
+XuiClientTrafficSnapshot getTraffic(
+long inboundId,
+String clientId,
+String email
+)
+
+Requirements:
+
+* No RestClient types.
+* No infrastructure DTOs.
+* No raw JSON.
+* Authentication handled transparently.
+* Do not place application orchestration in adapter.
+
+---
+
+# 16. Infrastructure payload builders
+
+Create:
+
+XuiUpdateClientPayloadBuilder
+
+Responsibilities:
+
+* accept current XuiClientSnapshot;
+* apply requested patch;
+* preserve all other fields;
+* convert Instant to epoch milliseconds;
+* preserve traffic bytes exactly;
+* preserve UUID;
+* preserve subscription ID;
+* preserve flow;
+* preserve reset strategy;
+* preserve comments and optional fields;
+* serialize nested settings exactly once.
+
+Create:
+
+XuiResetClientTrafficRequestBuilder
+
+if a body is required.
+
+Requirements:
+
+* Use ObjectMapper.
+* No string concatenation.
+* No double JSON encoding.
+* No silent field loss.
+* Test exact payload against sanitized fixtures.
+
+---
+
+# 17. RestClient adapter implementation
+
+Extend:
+
+RestClientXuiClientManagementClient
+
+Implement:
+
+updateClient
+
+resetTraffic
+
+getTraffic if appropriate, or create RestClientXuiClientStateClient.
+
+Requirements:
+
+* Use AuthenticatedRequestExecutor.
+* Use configured endpoint paths.
+* Validate response envelope.
+* Sanitize remote messages.
+* Handle authentication re-login once.
+* Apply transient retry only where safe.
+* Treat timeout after update/reset as potentially uncertain.
+* Do not blindly resend without remote state verification.
+
+For reset traffic:
+
+A reset request is non-idempotent in intent but repeated reset normally remains zero.
+
+Still reconcile remote traffic before retry.
+
+---
+
+# 18. Application use-case ports
+
+Create:
+
+RenewVpnClientUseCase
+
+ChangeVpnClientTrafficLimitUseCase
+
+AddVpnClientTrafficUseCase
+
+EnableVpnClientUseCase
+
+ChangeVpnClientIpLimitUseCase
+
+ResetVpnClientTrafficUseCase
+
+SynchronizeVpnClientUseCase
+
+Suggested package:
+
+com.parazit.panel.application.port.in.xui.client
+
+Optional:
+
+ChangeVpnClientRemoteEmailUseCase
+
+Only implement email changes if verified safe and required.
+
+---
+
+# 19. Commands
+
+Create:
+
+RenewVpnClientCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+int durationDays
+
+RenewalMode renewalMode
+
+Create:
+
+ReplaceVpnClientTrafficLimitCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+long trafficLimitBytes
+
+Create:
+
+AddVpnClientTrafficCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+long additionalTrafficBytes
+
+Create:
+
+EnableVpnClientCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+Create:
+
+ChangeVpnClientIpLimitCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+int ipLimit
+
+Create:
+
+ResetVpnClientTrafficCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+Create:
+
+SynchronizeVpnClientCommand
+
+Fields:
+
+UUID operationId
+
+Long telegramUserId
+
+UUID provisionId
+
+Requirements:
+
+* operationId required.
+* telegramUserId positive.
+* provisionId required.
+* durationDays positive.
+* traffic limits non-negative according to unlimited convention.
+* additional traffic strictly positive.
+* ipLimit zero or positive.
+* No inbound ID, client ID, or email accepted externally.
+* Trusted remote identifiers come from local provision.
+* No API/JPA annotations.
+* No Telegram SDK types.
+
+---
+
+# 20. Result model
+
+Create:
+
+XuiClientUpdateResult
+
+Fields:
+
+UUID operationId
+
+UUID provisionId
+
+long inboundId
+
+String remoteClientId
+
+String remoteEmail
+
+XuiProvisionStatus provisionStatus
+
+XuiClientOperationType operationType
+
+XuiClientOperationStatus operationStatus
+
+boolean enabled
+
+long trafficLimitBytes
+
+long uploadBytes
+
+long downloadBytes
+
+long totalConsumedBytes
+
+Long remainingBytes
+
+Instant expiresAt
+
+int ipLimit
+
+Instant synchronizedAt
+
+boolean changed
+
+Requirements:
+
+* Immutable.
+* No subscription ID.
+* No cookies.
+* No raw panel message.
+* changed=false for idempotent replay or no-op.
+* For unlimited traffic, remainingBytes may be null.
+* Clearly document values as bytes.
+
+---
+
+# 21. Ownership and lifecycle validation
+
+Every use case must validate:
+
+* User exists.
+* Provision exists.
+* Provision belongs to User.
+* Provision is not DELETED.
+* Provision is not DELETING.
+* Provision is not PROVISIONING.
+* Remote identity matches local record.
+* Operation ID is not reused with different data.
+
+Allowed states:
+
+Renew:
+
+ACTIVE or DISABLED
+
+Traffic-limit changes:
+
+ACTIVE or DISABLED
+
+Reset traffic:
+
+ACTIVE or DISABLED
+
+Enable:
+
+DISABLED or ACTIVE as idempotent no-op
+
+Synchronize:
+
+Any non-DELETED state where remote lookup is meaningful
+
+UNKNOWN:
+
+Reconcile before applying another operation.
+
+Ownership mismatch should follow Task 25 privacy semantics, preferably return 404.
+
+---
+
+# 22. Renewal service
+
+Create:
+
+RenewVpnClientService
+
+Responsibilities:
+
+1. Validate command and ownership.
+2. Resolve idempotency operation.
+3. Reconcile UNKNOWN provision if necessary.
+4. Load remote client snapshot.
+5. Verify identity.
+6. Calculate new expiry.
+7. If calculated expiry equals current expiry:
+   return no-op success.
+8. Claim operation IN_PROGRESS.
+9. Call remote update.
+10. Reload and verify new expiry.
+11. Update local provision expiresAt.
+12. Mark operation SUCCEEDED.
+13. Return result.
+
+Do not automatically reset traffic during renewal.
+
+Do not automatically enable the client.
+
+Do not change traffic limit unless a combined operation is explicitly designed.
+
+Prefer one operation per intent.
+
+---
+
+# 23. Replace traffic-limit service
+
+Create:
+
+ReplaceVpnClientTrafficLimitService
+
+Behavior:
+
+* Set configured total traffic limit to the requested exact value.
+* Use zero for unlimited only if verified as 3x-ui convention.
+* Do not modify consumed traffic.
+* Do not reset traffic.
+* Do not change expiry.
+* Update local provision trafficLimitBytes only after remote confirmation.
+* Repeating the same operation ID is idempotent.
+* A new operation ID with the same desired value may return a no-op success.
+
+Validate the requested value against project rules.
+
+---
+
+# 24. Add traffic service
+
+Create:
+
+AddVpnClientTrafficService
+
+Behavior:
+
+newLimit = currentConfiguredLimit + additionalTrafficBytes
+
+Rules:
+
+* Use overflow-safe arithmetic with Math.addExact.
+* Unlimited clients should either:
+
+  * reject add traffic as meaningless;
+  * or remain unlimited with no-op.
+
+Preferred:
+
+Reject adding traffic to unlimited clients with a safe conflict/validation exception.
+
+* Do not use consumed traffic as the base.
+* Do not reset usage.
+* Persist new configured limit after remote confirmation.
+* Require operation ID to prevent duplicate addition.
+
+This operation particularly requires idempotency because repeating it would add traffic twice.
+
+---
+
+# 25. Enable service
+
+Create:
+
+EnableVpnClientService
+
+Behavior:
+
+DISABLED:
+
+* claim ENABLING;
+* load remote client;
+* preserve all fields;
+* set enabled=true;
+* update remotely;
+* verify enabled;
+* mark provision ACTIVE;
+* clear disabledAt only if lifecycle design permits;
+* preserve historical disabled timestamp if audit requirements prefer it.
+
+ACTIVE:
+
+* return idempotent no-op.
+* changed=false.
+
+DELETED:
+
+* reject.
+
+Remote already enabled while local DISABLED:
+
+* reconcile local state to ACTIVE.
+* do not send unnecessary update.
+
+Do not reset traffic or extend expiry when enabling.
+
+If the client expiry is in the past, decide:
+
+Recommended:
+
+Allow enabling only after explicit renewal or return conflict.
+
+Do not enable an already expired client accidentally.
+
+---
+
+# 26. Change IP-limit service
+
+Create:
+
+ChangeVpnClientIpLimitService
+
+Rules:
+
+* ipLimit zero means unlimited only if verified by 3x-ui.
+* Positive values allowed.
+* Preserve all other fields.
+* Do not conflate device count with simultaneous IP count.
+* Update local ipLimit only after remote confirmation.
+* No reset of tracked IPs automatically.
+
+Optionally create a separate future operation for clearClientIps.
+
+Do not clear client IP records as part of changing the limit unless explicitly verified and documented.
+
+---
+
+# 27. Reset traffic service
+
+Create:
+
+ResetVpnClientTrafficService
+
+Flow:
+
+1. Validate ownership and state.
+2. Resolve operation idempotency.
+3. Load current traffic.
+4. If upload and download are already zero:
+   mark operation SUCCEEDED as no-op.
+5. Claim IN_PROGRESS.
+6. Call reset endpoint.
+7. Reload traffic.
+8. Confirm upload=0 and download=0 or panel-specific equivalent.
+9. Update local last-known traffic to zero.
+10. Mark operation SUCCEEDED.
+
+Requirements:
+
+* Do not change configured traffic limit.
+* Do not change expiry.
+* Do not enable/disable.
+* Do not reset all users.
+* Use only the single-client endpoint.
+* Verify correct inbound ID and email/client identity.
+* Repeated same operation ID must not cause issues.
+* New operation ID when already zero returns changed=false.
+
+---
+
+# 28. Synchronization service
+
+Create:
+
+SynchronizeVpnClientService
+
+Responsibilities:
+
+* Load local provision.
+* Retrieve remote client.
+* If remote client exists:
+
+  * verify identity;
+  * update local enabled/disabled lifecycle state;
+  * update expiry;
+  * update configured traffic limit;
+  * update IP limit;
+  * update consumed traffic snapshot;
+  * set lastSynchronizedAt.
+* If remote client is absent:
+
+  * do not automatically mark DELETED unless prior state/operation indicates deletion;
+  * mark UNKNOWN or a focused MISSING_REMOTE state if lifecycle design supports it.
+
+Recommended:
+
+Add status:
+
+REMOTE_MISSING
+
+only if it improves clarity.
+
+Otherwise use UNKNOWN with a safe failure code.
+
+Synchronization must not create or delete remote clients.
+
+Use synchronization for uncertain-result reconciliation.
+
+---
+
+# 29. Transaction boundaries
+
+Do not keep a database transaction open during remote calls.
+
+Use three-stage orchestration:
+
+Phase A — prepare transaction:
+
+* validate user/provision;
+* resolve/create operation;
+* detect idempotent replay;
+* claim operation IN_PROGRESS;
+* commit.
+
+Phase B — remote call:
+
+* load remote state;
+* execute update/reset;
+* verify remote state.
+
+Phase C — completion transaction:
+
+* update local provision;
+* mark operation SUCCEEDED/FAILED/UNKNOWN;
+* commit.
+
+Create focused components such as:
+
+PrepareXuiClientOperationTransaction
+
+CompleteXuiClientOperationTransaction
+
+LoadXuiClientOperationTransaction
+
+Do not use self-invoked @Transactional methods.
+
+Do not duplicate one transaction class per use case unless necessary.
+
+A reusable, focused operation coordinator is acceptable.
+
+---
+
+# 30. Request fingerprint
+
+Create:
+
+XuiClientOperationFingerprint
+
+Responsibilities:
+
+* produce deterministic SHA-256 hash from:
+
+  * operation ID excluded;
+  * provision ID;
+  * operation type;
+  * normalized requested values.
+* Same semantic request produces the same fingerprint.
+* Field ordering must be stable.
+* No raw personal data.
+* No secrets.
+* Return lowercase hex or URL-safe Base64 consistently.
+
+Use MessageDigest from JDK.
+
+Do not add a cryptographic dependency solely for hashing.
+
+Test fingerprint stability.
+
+---
+
+# 31. Idempotency behavior
+
+When operationId already exists:
+
+Same fingerprint:
+
+* If SUCCEEDED:
+  return existing final result.
+* If IN_PROGRESS:
+  reconcile or return documented in-progress behavior.
+* If UNKNOWN:
+  reconcile remote state.
+* If FAILED:
+  return existing failure or allow explicit new operation ID.
+* Do not execute the operation a second time blindly.
+
+Different fingerprint:
+
+* throw XuiOperationIdConflictException.
+* Map to HTTP 409.
+
+Particularly verify ADD_TRAFFIC cannot apply twice.
+
+---
+
+# 32. Concurrency
+
+Concurrent identical operation IDs:
+
+* one operation row;
+* one remote update/reset where possible;
+* callers converge on same result;
+* no raw unique error.
+
+Concurrent different operation IDs on same provision:
+
+Choose a safe serialization policy.
+
+Recommended:
+
+Allow only one IN_PROGRESS client operation per provision.
+
+Create a partial unique index conceptually:
+
+UNIQUE (provision_id) WHERE status = 'IN_PROGRESS'
+
+If PostgreSQL and current schema strategy support it.
+
+Alternative:
+
+Use pessimistic row locking during claim.
+
+Do not lock during remote HTTP call.
+
+Recommended implementation:
+
+* operation claim establishes one active operation;
+* competing operation receives 409 ClientOperationInProgress;
+* caller may retry later.
+
+Do not allow simultaneous renewal and deletion.
+
+Task 25 delete/disable operations should integrate into the same operation coordination if practical.
+
+Avoid a total architecture rewrite.
+
+---
+
+# 33. Corrective concurrency migration
+
+If enforcing one in-progress operation per provision, add a unique partial index in the Task 26 migration or a separate corrective migration.
+
+Example concept:
+
+CREATE UNIQUE INDEX ...
+ON xui_client_operations(provision_id)
+WHERE status = 'IN_PROGRESS';
+
+Ensure terminal operations do not block future operations.
+
+Handle crash/UNKNOWN transitions correctly.
+
+Document recovery for stuck IN_PROGRESS operations.
+
+Do not silently override status.
+
+---
+
+# 34. Uncertain-result reconciliation
+
+Update timeout:
+
+* reload remote client;
+* compare requested fields;
+* if desired state is present:
+  mark SUCCEEDED;
+* if old state remains:
+  one bounded retry may occur;
+* if remote lookup unavailable:
+  mark UNKNOWN;
+* do not blindly submit repeatedly.
+
+Reset timeout:
+
+* reload traffic;
+* if zero:
+  mark SUCCEEDED;
+* if not zero:
+  one bounded retry;
+* if unavailable:
+  UNKNOWN.
+
+Add-traffic timeout:
+
+* compare remote configured limit to expected exact new value.
+* If expected value present:
+  succeeded.
+* If old value present:
+  bounded retry.
+* If any unexpected third value appears:
+  mark conflict/UNKNOWN.
+* Never recalculate from the new remote value and add again automatically.
+
+Renew timeout:
+
+* compare remote expiry to exact calculated expected expiry.
+* Do not extend again if expected expiry is already present.
+
+---
+
+# 35. Exceptions
+
+Create or reuse:
+
+XuiClientOperationNotAllowedException
+
+XuiClientOperationNotFoundException
+
+XuiOperationIdConflictException
+
+XuiClientOperationInProgressException
+
+XuiClientUpdateFailedException
+
+XuiClientUpdateUnknownException
+
+XuiClientTrafficResetFailedException
+
+XuiClientTrafficResetUnknownException
+
+XuiRemoteClientMissingException
+
+XuiRemoteStateConflictException
+
+XuiTrafficOverflowException
+
+Requirements:
+
+* Safe messages.
+* No SQL details.
+* No raw remote response.
+* No cookies.
+* No session IDs.
+* No complete request payload.
+* No stack trace in API.
+
+Suggested mappings:
+
+missing user/provision -> 404
+
+ownership mismatch -> 404
+
+invalid lifecycle -> 409
+
+operation ID conflict -> 409
+
+operation already in progress -> 409
+
+invalid input -> 400
+
+panel unavailable -> 503
+
+timeout -> 504
+
+uncertain outcome -> 503
+
+remote malformed response -> 502
+
+---
+
+# 36. Internal API endpoints
+
+Extend:
+
+XuiClientProvisionController
+
+Base path:
+
+/internal/xui/clients/{provisionId}
+
+Endpoints:
+
+POST /renew
+
+PUT /traffic-limit
+
+POST /traffic/add
+
+POST /enable
+
+PUT /ip-limit
+
+POST /traffic/reset
+
+POST /synchronize
+
+Requests must include:
+
+telegramUserId
+
+operationId
+
+and operation-specific fields.
+
+Examples:
+
+Renew:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789,
+"durationDays": 30,
+"renewalMode": "EXTEND_FROM_CURRENT_EXPIRY"
+}
+
+Replace traffic:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789,
+"trafficLimitBytes": 32212254720
+}
+
+Add traffic:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789,
+"additionalTrafficBytes": 10737418240
+}
+
+Enable:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789
+}
+
+IP limit:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789,
+"ipLimit": 2
+}
+
+Reset traffic:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789
+}
+
+Synchronize:
+
+{
+"operationId": "uuid",
+"telegramUserId": 123456789
+}
+
+Requirements:
+
+* Internal and temporary.
+* Dedicated DTOs.
+* Controller depends on input ports.
+* No repository or RestClient injection.
+* No payment or order logic.
+* No Telegram SDK.
+* Do not accept remote email, client ID, inbound ID, or expected current limits from caller.
+
+---
+
+# 37. API DTO validation
+
+Create dedicated request records.
+
+Validation:
+
+operationId:
+
+@NotNull
+
+telegramUserId:
+
+@NotNull
+@Positive
+
+durationDays:
+
+@NotNull
+@Positive
+
+trafficLimitBytes:
+
+@NotNull
+@PositiveOrZero
+
+additionalTrafficBytes:
+
+@NotNull
+@Positive
+
+ipLimit:
+
+@NotNull
+@PositiveOrZero
+
+renewalMode:
+
+@NotNull
+
+Response:
+
+XuiClientUpdateResponse
+
+Fields:
+
+UUID operationId
+
+UUID provisionId
+
+long inboundId
+
+String remoteClientId
+
+String remoteEmail
+
+XuiProvisionStatus provisionStatus
+
+XuiClientOperationType operationType
+
+XuiClientOperationStatus operationStatus
+
+boolean enabled
+
+long trafficLimitBytes
+
+long uploadBytes
+
+long downloadBytes
+
+long totalConsumedBytes
+
+Long remainingBytes
+
+Instant expiresAt
+
+int ipLimit
+
+Instant synchronizedAt
+
+boolean changed
+
+Do not expose:
+
+userId
+
+planId
+
+planSelectionId
+
+subscriptionId
+
+raw remote messages
+
+failureMessage
+
+cookies
+
+---
+
+# 38. API mapper
+
+Create:
+
+XuiClientUpdateApiMapper
+
+Responsibilities:
+
+* request/path to application command;
+* result to response;
+* explicit manual mapping;
+* no JPA entity mapping;
+* no infrastructure DTO dependency;
+* no network access.
+
+---
+
+# 39. HTTP behavior
+
+Successful changed operation:
+
+200
+
+Idempotent replay:
+
+200 with changed=false or the original changed value, consistently documented.
+
+No-op desired state already present:
+
+200 with changed=false.
+
+Missing provision/user:
+
+404
+
+Ownership mismatch:
+
+404
+
+Invalid state:
+
+409
+
+Operation ID reused with different payload:
+
+409
+
+Operation already in progress:
+
+409
+
+Invalid input:
+
+400
+
+Panel unavailable:
+
+503
+
+Timeout:
+
+504
+
+Uncertain result:
+
+503
+
+Malformed remote response:
+
+502
+
+All errors use the standard response with traceId.
+
+---
+
+# 40. Logging
+
+INFO:
+
+* operation prepared;
+* renewal completed;
+* traffic limit replaced;
+* traffic added;
+* client enabled;
+* IP limit changed;
+* traffic reset;
+* synchronization completed.
+
+DEBUG:
+
+* idempotent operation replay;
+* no-op desired state;
+* remote verification result;
+* request fingerprint prefix;
+* reconciliation attempt.
+
+WARN:
+
+* operation conflict;
+* concurrent operation;
+* remote state mismatch;
+* uncertain result;
+* missing remote client.
+
+ERROR:
+
+* unrecoverable failure with stack trace in server logs.
+
+Include:
+
+operationId
+
+provisionId
+
+userId
+
+operationType
+
+oldStatus
+
+newStatus
+
+attempt
+
+duration
+
+traceId
+
+Do not log:
+
+password
+
+cookie
+
+session ID
+
+subscription ID
+
+raw update payload
+
+private keys
+
+personal names
+
+full remote state
+
+---
+
+# 41. Test fixtures
+
+Create sanitized fixtures:
+
+src/test/resources/xui/clients/
+
+update-client-success.json
+
+update-client-failure.json
+
+update-client-malformed.json
+
+reset-traffic-success.json
+
+reset-traffic-failure.json
+
+client-traffic-zero.json
+
+client-traffic-used.json
+
+client-enabled.json
+
+client-disabled.json
+
+client-renewed.json
+
+client-updated-traffic-limit.json
+
+Requirements:
+
+* Match verified API.
+* No real server data.
+* No credentials.
+* No private keys.
+* No real subscription IDs.
+* No production client identifiers.
+
+---
+
+# 42. Domain unit tests
+
+Test XuiClientOperation:
+
+* valid creation;
+* unique operation ID behavior at persistence layer;
+* null validation;
+* request fingerprint validation;
+* PENDING -> IN_PROGRESS;
+* IN_PROGRESS -> SUCCEEDED;
+* IN_PROGRESS -> FAILED;
+* IN_PROGRESS -> UNKNOWN;
+* terminal behavior;
+* completedAt requirements;
+* failure message sanitization;
+* invalid transitions;
+* same-state behavior.
+
+Extend XuiClientProvision tests:
+
+* DISABLED -> ENABLING -> ACTIVE;
+* enabling expired-client policy;
+* sync traffic values;
+* non-negative traffic;
+* lastSynchronizedAt;
+* DELETED remains terminal;
+* update expected expiry/traffic/IP limit only after confirmation.
+
+---
+
+# 43. Fingerprint tests
+
+Test:
+
+* same semantic request produces same fingerprint;
+* field order does not change fingerprint;
+* different provision changes fingerprint;
+* different operation type changes fingerprint;
+* different requested value changes fingerprint;
+* operation ID itself does not affect fingerprint;
+* no secret/personal data appears;
+* deterministic output format.
+
+---
+
+# 44. Payload builder tests
+
+Test complete update preservation:
+
+* client ID unchanged;
+* email unchanged unless explicitly changed;
+* subscription ID preserved;
+* flow preserved;
+* traffic preserved when expiry changes;
+* expiry preserved when traffic changes;
+* IP limit preserved when enable changes;
+* enabled preserved when IP limit changes;
+* comment/reset/optional fields preserved;
+* nested JSON encoded once;
+* epoch milliseconds exact;
+* bytes exact;
+* no null field resets;
+* request matches sanitized fixture.
+
+Reset traffic request:
+
+* correct path parameters;
+* correct inbound ID;
+* correct email;
+* single-client endpoint only;
+* no reset-all endpoint.
+
+---
+
+# 45. Remote adapter integration tests
+
+Using WireMock or MockWebServer:
+
+Update:
+
+* successful update;
+* success=false;
+* malformed response;
+* 401/403 re-login;
+* timeout;
+* 502/503/504 bounded retry;
+* exact endpoint;
+* exact payload;
+* cookies reused.
+
+Reset:
+
+* successful reset;
+* already zero;
+* timeout;
+* authentication refresh;
+* correct endpoint;
+* correct user only.
+
+Traffic read:
+
+* valid traffic;
+* missing client;
+* malformed response;
+* exact byte values.
+
+Verify uncertain operations are reconciled before resubmission.
+
+---
+
+# 46. Service unit tests
+
+RenewVpnClientService:
+
+* active future expiry extension;
+* expired client renewed from now;
+* EXTEND_FROM_NOW;
+* disabled client renewal;
+* deleted rejected;
+* operation replay;
+* operation ID conflict;
+* timeout reconciled;
+* no double extension;
+* exact Instant calculation.
+
+Replace traffic service:
+
+* exact replacement;
+* unlimited convention;
+* same desired value no-op;
+* consumed traffic unchanged;
+* expiry unchanged;
+* timeout reconciliation.
+
+Add traffic service:
+
+* addition;
+* overflow rejected;
+* unlimited rejected;
+* idempotent operation replay;
+* no double addition;
+* unexpected remote third value conflict.
+
+Enable service:
+
+* disabled to active;
+* active no-op;
+* expired policy;
+* remote already enabled reconciliation;
+* deleted rejected;
+* no traffic/expiry change.
+
+IP-limit service:
+
+* update;
+* same value no-op;
+* zero semantics;
+* no automatic IP-clear;
+* other fields unchanged.
+
+Reset traffic service:
+
+* used traffic reset;
+* already zero no-op;
+* configured limit unchanged;
+* timeout but remote zero;
+* persistent uncertainty.
+
+Synchronize service:
+
+* remote active;
+* remote disabled;
+* expiry update;
+* traffic update;
+* IP limit update;
+* consumed counters;
+* remote missing;
+* identity mismatch.
+
+Use fixed Instants.
+
+---
+
+# 47. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+Operation repository:
+
+* save;
+* auditing;
+* unique operationId;
+* lookup by operationId;
+* list by provision;
+* status persistence;
+* completedAt constraints;
+* failure fields;
+* foreign key;
+* partial unique in-progress operation if implemented.
+
+Provision changes:
+
+* ENABLING status;
+* traffic snapshot fields;
+* lastSynchronizedAt;
+* lifecycle constraints;
+* existing unique constraints preserved.
+
+Flyway and Hibernate validation must pass.
+
+---
+
+# 48. Full integration tests
+
+Use real PostgreSQL and mock 3x-ui.
+
+Renewal:
+
+1. Provision client.
+2. Renew 30 days.
+3. Verify exact remote expiry.
+4. Verify local expiry.
+5. Repeat same operation ID.
+6. Verify no second extension.
+7. Use new operation ID and renew again.
+8. Verify legitimate second extension.
+
+Traffic replace:
+
+* exact remote/local update;
+* usage unchanged.
+
+Traffic add:
+
+* expected exact new limit;
+* no duplicate addition on replay.
+
+Enable:
+
+* disable through Task 25;
+* enable;
+* verify remote/local ACTIVE;
+* no reset or renewal.
+
+IP limit:
+
+* update and verify.
+
+Reset:
+
+* initial nonzero usage;
+* reset;
+* verify zero;
+* limit unchanged.
+
+Synchronization:
+
+* externally modify mock remote state;
+* synchronize;
+* local state updated.
+
+---
+
+# 49. Uncertain-result integration tests
+
+Renew timeout but remote expiry updated:
+
+* reconcile to SUCCEEDED;
+* no second extension.
+
+Renew timeout and old expiry remains:
+
+* one bounded retry.
+
+Add traffic timeout but expected new limit exists:
+
+* success;
+* no additional increase.
+
+Add traffic timeout with unexpected remote value:
+
+* UNKNOWN/conflict;
+* no automatic addition.
+
+Reset timeout but traffic zero:
+
+* success.
+
+Update timeout with lookup unavailable:
+
+* operation UNKNOWN;
+* safe 503;
+* provision remains consistent.
+
+---
+
+# 50. Concurrency integration tests
+
+Scenario A: same operation ID concurrently
+
+* one operation row;
+* at most one remote request;
+* same final result.
+
+Scenario B: different operation IDs on same provision concurrently
+
+* one operation claims IN_PROGRESS;
+* the other receives 409;
+* no mixed remote update;
+* no corrupted local state.
+
+Scenario C: renewal races with delete
+
+* delete/lifecycle coordination prevents unsafe update;
+* deterministic documented outcome;
+* DELETED remains terminal.
+
+Scenario D: add traffic race
+
+* no lost update;
+* no double application;
+* one operation executes at a time.
+
+Requirements:
+
+* real PostgreSQL;
+* mock server;
+* deterministic synchronization;
+* no Thread.sleep;
+* ExecutorService shutdown;
+* timeout.
+
+---
+
+# 51. Controller tests
+
+Test each endpoint:
+
+Renew:
+
+* success;
+* idempotent replay;
+* invalid duration;
+* missing provision;
+* invalid state;
+* conflict;
+* uncertain.
+
+Traffic replace:
+
+* success;
+* zero/unlimited behavior;
+* negative rejected.
+
+Traffic add:
+
+* success;
+* zero rejected;
+* overflow error;
+* unlimited conflict;
+* replay no duplicate addition.
+
+Enable:
+
+* disabled success;
+* active no-op;
+* deleted conflict.
+
+IP limit:
+
+* success;
+* negative rejected.
+
+Reset:
+
+* success;
+* already zero no-op.
+
+Synchronize:
+
+* success;
+* remote missing;
+* unavailable panel.
+
+Verify standard errors contain traceId and no secrets.
+
+---
+
+# 52. Architecture verification
+
+Verify:
+
+* operation domain does not depend on API/infrastructure;
+* services depend on ports/repositories;
+* controllers depend on input ports;
+* no controller injects RestClient or repositories;
+* infrastructure DTOs stay infrastructure-only;
+* no raw JSON leaves infrastructure;
+* no long transaction around remote calls;
+* no blind retry;
+* no duplicate additive update;
+* no payment/order/subscription/Telegram logic;
+* no scheduler;
+* no field injection;
+* no service locator;
+* Task 25 lifecycle remains valid.
+
+Extend existing architecture tests where present.
+
+---
+
+# 53. Documentation
+
+Create:
+
+docs/xui/client-update-renew-reset.md
+
+Document:
+
+* verified API endpoints;
+* full update-payload requirement;
+* read-modify-write strategy;
+* renewal modes;
+* expiry calculation;
+* traffic-limit replacement;
+* traffic addition;
+* unlimited convention;
+* enable behavior;
+* IP-limit semantics;
+* reset-traffic behavior;
+* operation idempotency;
+* operation fingerprint;
+* transaction boundaries;
+* concurrency serialization;
+* uncertain-result reconciliation;
+* synchronization;
+* HTTP contracts;
+* error mappings;
+* secret redaction;
+* Phase 4 completion status;
+* work deferred to Phase 5 and Task 33.
+
+Include Mermaid diagrams for:
+
+* renewal;
+* add traffic;
+* idempotent replay;
+* enable;
+* reset traffic;
+* timeout reconciliation;
+* concurrent operation rejection;
+* synchronization.
+
+Update existing XUI documentation where necessary.
+
+Create:
+
+docs/tasks/phase-4-xui-acceptance.md
+
+Checklist:
+
+* Client foundation complete
+* Authentication complete
+* Session reuse complete
+* Automatic re-login complete
+* Inbound discovery complete
+* Eligible inbound selection complete
+* Client creation complete
+* Provisioning idempotent
+* Uncertain create reconciled
+* Client disable complete
+* Client deletion complete
+* Local history retained
+* Renewal complete
+* Traffic replacement complete
+* Traffic addition complete
+* Enable complete
+* IP-limit update complete
+* Traffic reset complete
+* Synchronization complete
+* Operation idempotency complete
+* Concurrent operation safety verified
+* No blind destructive retry
+* No credentials logged
+* Mock integration tests pass
+* PostgreSQL integration tests pass
+* Flyway passes
+* Hibernate validation passes
+* Full build passes
+* No payment implemented
+* No Telegram handler implemented
+* No subscription/QR generation implemented
+
+Mark only verified items.
+
+---
+
+# 54. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/xui/operation/
+XuiClientOperation.java
+XuiClientOperationType.java
+XuiClientOperationStatus.java
+
+src/main/java/com/parazit/panel/domain/xui/operation/repository/
+XuiClientOperationRepository.java
+
+src/main/java/com/parazit/panel/application/port/in/xui/client/
+RenewVpnClientUseCase.java
+ChangeVpnClientTrafficLimitUseCase.java
+AddVpnClientTrafficUseCase.java
+EnableVpnClientUseCase.java
+ChangeVpnClientIpLimitUseCase.java
+ResetVpnClientTrafficUseCase.java
+SynchronizeVpnClientUseCase.java
+
+src/main/java/com/parazit/panel/application/xui/client/command/
+RenewVpnClientCommand.java
+ReplaceVpnClientTrafficLimitCommand.java
+AddVpnClientTrafficCommand.java
+EnableVpnClientCommand.java
+ChangeVpnClientIpLimitCommand.java
+ResetVpnClientTrafficCommand.java
+SynchronizeVpnClientCommand.java
+
+src/main/java/com/parazit/panel/application/xui/client/result/
+XuiClientUpdateResult.java
+
+src/main/java/com/parazit/panel/application/xui/client/model/
+UpdateXuiClientRequest.java
+UpdateXuiClientResponse.java
+ResetXuiClientTrafficRequest.java
+ResetXuiClientTrafficResponse.java
+XuiClientTrafficSnapshot.java
+
+src/main/java/com/parazit/panel/application/xui/client/
+RenewVpnClientService.java
+ReplaceVpnClientTrafficLimitService.java
+AddVpnClientTrafficService.java
+EnableVpnClientService.java
+ChangeVpnClientIpLimitService.java
+ResetVpnClientTrafficService.java
+SynchronizeVpnClientService.java
+XuiClientOperationFingerprint.java
+PrepareXuiClientOperationTransaction.java
+CompleteXuiClientOperationTransaction.java
+XuiClientUpdateResultMapper.java
+
+src/main/java/com/parazit/panel/infrastructure/xui/client/
+XuiUpdateClientPayloadBuilder.java
+RestClientXuiClientManagementClient.java
+RestClientXuiClientStateClient.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/xui/operation/
+SpringDataXuiClientOperationRepository.java
+XuiClientOperationRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/internal/xui/client/
+RenewXuiClientRequestDto.java
+ReplaceXuiClientTrafficRequestDto.java
+AddXuiClientTrafficRequestDto.java
+EnableXuiClientRequestDto.java
+ChangeXuiClientIpLimitRequestDto.java
+ResetXuiClientTrafficRequestDto.java
+SynchronizeXuiClientRequestDto.java
+XuiClientUpdateResponse.java
+XuiClientUpdateApiMapper.java
+
+src/main/resources/db/migration/
+V9__create_xui_client_operations.sql
+or the actual next migration
+
+src/test/resources/xui/clients/
+update-client-success.json
+update-client-failure.json
+reset-traffic-success.json
+client-traffic-zero.json
+client-traffic-used.json
+client-enabled.json
+client-disabled.json
+client-renewed.json
+client-updated-traffic-limit.json
+
+src/test/java/com/parazit/panel/domain/xui/operation/
+XuiClientOperationTest.java
+
+src/test/java/com/parazit/panel/application/xui/client/
+RenewVpnClientServiceTest.java
+ReplaceVpnClientTrafficLimitServiceTest.java
+AddVpnClientTrafficServiceTest.java
+EnableVpnClientServiceTest.java
+ChangeVpnClientIpLimitServiceTest.java
+ResetVpnClientTrafficServiceTest.java
+SynchronizeVpnClientServiceTest.java
+XuiClientOperationFingerprintTest.java
+
+src/test/java/com/parazit/panel/infrastructure/xui/client/
+XuiUpdateClientPayloadBuilderTest.java
+RestClientXuiClientUpdateIntegrationTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/xui/operation/
+XuiClientOperationRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/xui/client/
+XuiClientRenewalIntegrationTest.java
+XuiClientTrafficUpdateIntegrationTest.java
+XuiClientEnableIntegrationTest.java
+XuiClientTrafficResetIntegrationTest.java
+XuiClientSynchronizationIntegrationTest.java
+XuiClientUpdateUncertainResultIntegrationTest.java
+ConcurrentXuiClientOperationIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/xui/client/
+XuiClientUpdateControllerTest.java
+
+docs/xui/
+client-update-renew-reset.md
+
+docs/tasks/
+phase-4-xui-acceptance.md
+
+Adapt names and migration versions to the existing project conventions.
+
+---
+
+# 55. Verification commands
+
+Run the commands supported by the current build.
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway migrations pass;
+* Hibernate validation passes;
+* operation-domain tests pass;
+* payload tests pass;
+* remote mock tests pass;
+* renewal tests pass;
+* traffic replacement tests pass;
+* additive traffic tests pass;
+* enable tests pass;
+* IP-limit tests pass;
+* reset tests pass;
+* synchronization tests pass;
+* uncertain-result tests pass;
+* concurrency tests pass;
+* controller tests pass;
+* application starts;
+* no real panel is called automatically;
+* no duplicate additive operation occurs;
+* no duplicate renewal occurs for the same operation ID;
+* no blind update retry occurs;
+* no payment, order, Telegram, subscription, or QR logic was added;
+* no credentials or production panel data were committed;
+* no tests were disabled.
+
+---
+
+# 56. Optional manual verification
+
+Do not run automatically.
+
+Use only a dedicated test client and test inbound.
+
+Manual flow:
+
+1. Provision a test client.
+2. Record:
+
+   * UUID
+   * email
+   * traffic limit
+   * expiry
+   * enabled state
+   * IP limit
+3. Renew by 30 days.
+4. Verify only expiry changes.
+5. Replay same operation ID.
+6. Verify expiry does not extend again.
+7. Add 10 GiB.
+8. Replay operation.
+9. Verify traffic is added only once.
+10. Replace traffic limit.
+11. Change IP limit.
+12. Disable and re-enable.
+13. Verify traffic/expiry are preserved.
+14. Generate test traffic or mock nonzero traffic.
+15. Reset traffic.
+16. Verify configured limit remains unchanged.
+17. Synchronize.
+18. Compare local and remote state.
+19. Delete the test client through Task 25 cleanup flow.
+
+Do not run against production clients.
+
+Do not commit real server details, UUIDs, subscription IDs, cookies, screenshots, or responses.
+
+---
+
+# 57. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Installed 3x-ui API contract
+3. Update-payload strategy
+4. Renewal-mode decision
+5. Traffic-limit and unlimited semantics
+6. Reset-traffic behavior
+7. Operation aggregate design
+8. Idempotency and fingerprint strategy
+9. Transaction-boundary design
+10. Concurrency strategy
+11. Uncertain-result reconciliation
+12. Planned files to create
+13. Planned files to modify
+14. Risks and compatibility concerns
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Remote API contracts
+6. Update-payload preservation behavior
+7. Renewal behavior
+8. Traffic replacement behavior
+9. Add-traffic behavior
+10. Enable behavior
+11. IP-limit behavior
+12. Reset-traffic behavior
+13. Synchronization behavior
+14. Idempotency behavior
+15. Transaction boundaries
+16. Concurrency handling
+17. Uncertain-result handling
+18. Internal API contracts
+19. Unit-test results
+20. Integration-test results
+21. Concurrency-test results
+22. Flyway and Hibernate results
+23. Build result
+24. Commands executed
+25. Phase 4 acceptance status
+26. Remaining issues
+27. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(xui): add client renewal updates traffic reset and synchronization
+
+Stop after completing Task 26.
+
+Do not begin Task 27.
+

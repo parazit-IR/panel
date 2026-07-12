@@ -1,0 +1,751 @@
+You are a senior Java 21 and Spring Boot engineer.
+
+Continue implementing the existing project.
+
+Task 10 – Register User Use Case
+
+Goal:
+
+Implement an idempotent user registration use case for Telegram users by using the User aggregate and UserRepository created in Task 9.
+
+The use case must create a new user when the Telegram user does not exist and update the existing Telegram profile when the user is already registered.
+
+Important rules:
+
+* Inspect the current repository before making changes.
+* Preserve all working code and conventions from Tasks 1–9.
+* Reuse User, UserRepository, SystemClockPort, logging, exception handling, validation, persistence, and dependency injection infrastructure.
+* Do not create a Telegram Bot handler yet.
+* Do not connect to the Telegram API in this task.
+* Do not implement Profile, Settings, Referral, Plan, Payment, Subscription, or 3x-ui logic.
+* Do not add authentication or authorization.
+* Do not expose JPA entities directly from controllers.
+* Do not inject Spring Data repositories into application services.
+* Do not add unnecessary dependencies.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not use Lombok @Data.
+* Use Java 21.
+* Stop after completing Task 10.
+* Do not begin Task 11.
+
+1. Current-state assessment
+
+Inspect and report:
+
+* User aggregate and invariants;
+* UserRepository methods;
+* SystemClockPort implementation;
+* existing application service conventions;
+* transaction configuration;
+* exception handling;
+* validation conventions;
+* integration test infrastructure;
+* current API package structure;
+* any relevant architecture concerns.
+
+Before implementation provide:
+
+1. Current-state assessment
+
+2. Planned files to create
+
+3. Planned files to modify
+
+4. Architecture decisions
+
+5. Risks and edge cases
+
+6. Registration input model
+
+Create an application-layer command.
+
+Suggested package:
+
+com.parazit.panel.application.user.command
+
+Create:
+
+RegisterUserCommand
+
+Prefer a Java record.
+
+Fields:
+
+Long telegramUserId
+
+String username
+
+String firstName
+
+String lastName
+
+String languageCode
+
+Requirements:
+
+* This is an application input model.
+* It must not be a JPA entity.
+* It must not depend on Telegram SDK classes.
+* It must not contain persistence annotations.
+* Validate required structural data where appropriate.
+* Do not place business logic inside the command.
+* telegramUserId is required.
+* firstName is required.
+* username and lastName are optional.
+* languageCode is optional because Telegram may not provide it.
+
+3. Registration result model
+
+Create:
+
+RegisterUserResult
+
+Suggested package:
+
+com.parazit.panel.application.user.result
+
+Prefer a Java record.
+
+Fields:
+
+UUID userId
+
+Long telegramUserId
+
+String username
+
+String firstName
+
+String lastName
+
+UserLanguage language
+
+UserStatus status
+
+boolean blocked
+
+boolean newlyCreated
+
+Instant registeredAt
+
+Instant lastInteractionAt
+
+Requirements:
+
+* Do not return the User entity directly.
+* Keep the result immutable.
+* Use domain enums where appropriate.
+* newlyCreated must indicate whether a new database record was created.
+* registeredAt should represent User.createdAt.
+* Do not expose internal persistence implementation details.
+
+4. Language resolution
+
+Create a small language resolver.
+
+Suggested package:
+
+com.parazit.panel.application.user
+
+Create:
+
+UserLanguageResolver
+
+Required behavior:
+
+* "fa" maps to FA.
+* "fa-IR" maps to FA.
+* Language codes starting with "fa" map to FA.
+* "en" maps to EN.
+* Language codes starting with "en" map to EN.
+* null or blank languageCode defaults to FA.
+* Unsupported language codes default to FA for now.
+
+Requirements:
+
+* Language matching must be case-insensitive.
+* Trim the input.
+* Do not throw an exception for unsupported language codes.
+* Keep this class independent from Telegram SDK.
+* The default language must be documented.
+* Do not add more languages yet.
+
+You may implement this as:
+
+* a stateless application component;
+* or a utility with a clear design;
+* or an explicit bean.
+
+Choose the simplest testable approach consistent with the project architecture.
+
+5. Registration use case port
+
+Create an input port.
+
+Suggested package:
+
+com.parazit.panel.application.port.in.user
+
+Create:
+
+RegisterUserUseCase
+
+Method:
+
+RegisterUserResult register(RegisterUserCommand command)
+
+Requirements:
+
+* Keep the interface independent from infrastructure.
+* Do not use Spring Data types.
+* Do not use Telegram SDK types.
+* Do not expose the User entity.
+* Do not add unrelated methods.
+
+6. Registration service
+
+Create:
+
+RegisterUserService
+
+Suggested package:
+
+com.parazit.panel.application.user
+
+Requirements:
+
+* Implement RegisterUserUseCase.
+* Depend on:
+
+UserRepository
+SystemClockPort
+UserLanguageResolver
+
+* Use constructor injection.
+* Define the transaction boundary at the application service.
+* Use @Transactional on the registration operation.
+* Do not annotate the interface with @Transactional.
+* Use the current time from SystemClockPort.
+* Do not call Instant.now() directly.
+* Do not inject infrastructure implementations directly.
+
+Registration algorithm:
+
+1. Validate the command is not null.
+2. Validate telegramUserId is positive.
+3. Validate firstName is not blank.
+4. Resolve UserLanguage from languageCode.
+5. Search by telegramUserId.
+6. If the user does not exist:
+
+   * create User through its controlled factory;
+   * save it;
+   * return result with newlyCreated=true.
+7. If the user already exists:
+
+   * update Telegram profile information;
+   * record the latest interaction time;
+   * preserve the existing language selection;
+   * do not overwrite language during repeated registration;
+   * save only if required by the repository/JPA design;
+   * return result with newlyCreated=false.
+
+Important behavior:
+
+* Registration must be idempotent.
+* Repeating the same command must not create duplicate users.
+* Re-registering an existing user must update username, first name, last name, and lastInteractionAt.
+* Re-registering must not automatically unblock a blocked user.
+* Re-registering must not activate, unsuspend, or change the user's business status.
+* Re-registering must not overwrite the user-selected language.
+* New users receive the resolved initial language.
+* The database unique constraint remains the final protection against duplicates.
+
+7. Concurrency and duplicate protection
+
+Handle concurrent registration attempts for the same telegramUserId.
+
+Requirements:
+
+* Do not rely only on existsByTelegramUserId.
+* Use findByTelegramUserId as the primary read.
+* Keep the database unique constraint.
+* Handle a race where two transactions both attempt to create the same user.
+* Catch only the relevant Spring data integrity exception at the application/infrastructure boundary where appropriate.
+* After a duplicate-key conflict, load the existing user and return it as newlyCreated=false.
+* Do not expose raw SQL or constraint names.
+* Do not catch generic Exception.
+* Avoid retry loops without limits.
+* Document the concurrency strategy.
+
+A valid strategy is:
+
+1. check existing user;
+2. attempt save;
+3. on unique constraint violation, load the existing user;
+4. update the Telegram profile if needed;
+5. return existing user.
+
+Be careful that transaction state may be marked rollback-only after a persistence failure.
+
+Choose a technically correct Spring transaction strategy.
+
+Acceptable approaches include:
+
+* a separate REQUIRES_NEW creation component;
+* database upsert implemented in a focused repository method;
+* retrying the complete registration operation through a dedicated transaction boundary;
+* another clean solution compatible with the existing architecture.
+
+Explain the selected approach before implementation.
+
+Do not use synchronized or JVM-only locks because the application may run on multiple instances.
+
+8. Registration exception design
+
+Create focused application exceptions only where needed.
+
+Suggested:
+
+UserRegistrationException
+
+Possible validation exception:
+
+InvalidRegistrationCommandException
+
+Requirements:
+
+* Reuse existing common exception conventions.
+* Invalid input should map to HTTP 400 if exposed through an API.
+* Unexpected registration failure should map to HTTP 500 without exposing internals.
+* Duplicate concurrent registration should not produce an error response when recovery succeeds.
+* Do not create UserAlreadyExistsException because registration is intentionally idempotent.
+* Do not expose SQL errors.
+
+9. Internal verification API
+
+Create a temporary internal endpoint to verify the use case.
+
+Suggested package:
+
+com.parazit.panel.api.internal.user
+
+Endpoint:
+
+POST /internal/users/register
+
+Request body:
+
+{
+"telegramUserId": 123456789,
+"username": "example_user",
+"firstName": "Ali",
+"lastName": "Ahmadi",
+"languageCode": "fa"
+}
+
+Create:
+
+RegisterUserRequest
+
+Create:
+
+RegisterUserResponse
+
+Requirements:
+
+* Request and response must be dedicated API DTOs.
+* Do not reuse application command/result as HTTP models.
+* Use Bean Validation.
+* Request fields:
+
+telegramUserId:
+@NotNull
+@Positive
+
+firstName:
+@NotBlank
+@Size(max = 128)
+
+username:
+@Size(max = 64)
+
+lastName:
+@Size(max = 128)
+
+languageCode:
+@Size(max = 16)
+
+* Convert request to RegisterUserCommand.
+* Convert RegisterUserResult to response.
+* Do not return User entity.
+* Return HTTP 201 when newlyCreated=true.
+* Return HTTP 200 when newlyCreated=false.
+* Add Location header only if a stable resource URL exists.
+* Do not invent a public GET endpoint solely for Location.
+* Mark the endpoint as internal and temporary in documentation.
+* Do not add security in this task.
+
+Suggested response:
+
+{
+"userId": "uuid",
+"telegramUserId": 123456789,
+"username": "example_user",
+"firstName": "Ali",
+"lastName": "Ahmadi",
+"language": "FA",
+"status": "ACTIVE",
+"blocked": false,
+"newlyCreated": true,
+"registeredAt": "2026-07-10T12:00:00Z",
+"lastInteractionAt": "2026-07-10T12:00:00Z"
+}
+
+10. API mapper
+
+Create a focused mapper.
+
+Suggested:
+
+RegisterUserApiMapper
+
+Requirements:
+
+* Convert RegisterUserRequest to RegisterUserCommand.
+* Convert RegisterUserResult to RegisterUserResponse.
+* Keep mapping logic out of the controller.
+* Do not introduce MapStruct unless already used in the project.
+* Prefer explicit manual mapping for this small use case.
+* Do not map JPA entities in the API layer.
+
+11. Logging
+
+Add appropriate structured logging.
+
+Requirements:
+
+* Log successful new registration at INFO.
+* Log existing-user refresh at DEBUG or INFO based on current logging conventions.
+* Include:
+
+userId
+telegramUserId
+newlyCreated
+traceId through MDC
+
+* Do not log full request bodies.
+* Do not log secrets.
+* Avoid logging personal data unnecessarily.
+* Do not log firstName or lastName unless justified.
+* Log concurrent duplicate recovery at WARN or DEBUG without stack trace if expected.
+* Log unexpected failures with stack trace.
+
+12. Unit tests for UserLanguageResolver
+
+Test:
+
+* fa
+* FA
+* fa-IR
+* fa_ir if supported by normalization
+* en
+* en-US
+* null
+* blank
+* unsupported language
+* trimmed language code
+
+Expected default:
+
+FA
+
+13. Unit tests for RegisterUserService
+
+Create pure unit tests without Spring context.
+
+Test at least:
+
+New user:
+
+* creates a user;
+* uses resolved language;
+* saves once;
+* returns newlyCreated=true;
+* returns generated values correctly.
+
+Existing user:
+
+* does not create a second user;
+* updates username;
+* updates first name;
+* updates last name;
+* updates lastInteractionAt;
+* preserves current language;
+* preserves blocked state;
+* preserves status;
+* returns newlyCreated=false.
+
+Validation:
+
+* null command rejected;
+* non-positive Telegram ID rejected;
+* blank first name rejected.
+
+Timing:
+
+* uses SystemClockPort;
+* does not depend on system time.
+
+Persistence interaction:
+
+* repository find method called correctly;
+* no exists-then-save-only anti-pattern;
+* expected save behavior verified.
+
+Use fixed Instants.
+
+Use fakes or Mockito according to current project convention.
+
+14. Integration tests
+
+Create PostgreSQL Testcontainers integration tests for the full registration service.
+
+Test:
+
+* new user registration persists a row;
+* repeated registration returns same user ID;
+* repeated registration does not increase row count;
+* repeated registration returns newlyCreated=false;
+* profile fields are refreshed;
+* language is preserved for existing users;
+* blocked state is preserved;
+* status is preserved;
+* audit timestamps are correct;
+* lastInteractionAt updates;
+* duplicate telegramUserId is never created;
+* Flyway and Hibernate validation still pass.
+
+Use a fixed or controlled clock where practical.
+
+15. Concurrent integration test
+
+Create a concurrency integration test for the same telegramUserId.
+
+Requirements:
+
+* Run at least two registration attempts concurrently.
+* Use separate transactions.
+* Use real PostgreSQL through Testcontainers.
+* Verify only one user row exists.
+* Verify both calls complete successfully when the chosen design supports recovery.
+* Verify both results reference the same user ID.
+* Do not use Thread.sleep for coordination.
+* Use ExecutorService, CountDownLatch, CyclicBarrier, or another deterministic coordination mechanism.
+* Ensure executors are shut down.
+* Avoid flaky timing assumptions.
+
+If the current test environment makes a deterministic concurrency test impractical, implement the strongest reliable test possible and clearly explain the limitation.
+
+16. Controller tests
+
+Create web tests for POST /internal/users/register.
+
+Test:
+
+* valid new registration returns 201;
+* repeated registration returns 200;
+* response JSON matches the contract;
+* invalid Telegram ID returns 400;
+* blank firstName returns 400;
+* too-long username returns 400;
+* malformed JSON returns 400;
+* Content-Type is application/json;
+* standard error response contains traceId;
+* entity internals are not exposed.
+
+Use MockMvc or WebTestClient based on the current stack.
+
+17. Transaction behavior
+
+Document and verify:
+
+* application service owns the transaction boundary;
+* repository adapter does not own business transaction flow;
+* concurrent duplicate handling is transaction-safe;
+* registration remains idempotent across multiple application instances;
+* database uniqueness is the final authority.
+
+Do not add @Transactional to controllers.
+
+18. Architecture rules
+
+Verify:
+
+* controller depends on RegisterUserUseCase, not RegisterUserService concrete class where practical;
+* application service depends on UserRepository and SystemClockPort interfaces;
+* application layer does not import infrastructure packages;
+* domain does not depend on API or Spring Data;
+* API does not inject SpringDataUserRepository;
+* no field injection exists;
+* no Telegram SDK type appears in command, service, domain, or API DTO;
+* no payment, plan, referral, subscription, or 3x-ui logic is added.
+
+19. Documentation
+
+Create:
+
+docs/use-cases/register-user.md
+
+Document:
+
+* use case purpose;
+* input fields;
+* validation rules;
+* new-user flow;
+* existing-user flow;
+* idempotency behavior;
+* language resolution;
+* field normalization;
+* status and blocked preservation;
+* transaction boundary;
+* concurrency strategy;
+* HTTP verification endpoint;
+* response status codes;
+* deferred Telegram integration;
+* failure behavior.
+
+Include a Mermaid sequence diagram for:
+
+Client
+Controller
+RegisterUserUseCase
+UserRepository
+PostgreSQL
+
+Show both:
+
+* new registration;
+* existing user refresh.
+
+20. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/in/user/
+RegisterUserUseCase.java
+
+src/main/java/com/parazit/panel/application/user/command/
+RegisterUserCommand.java
+
+src/main/java/com/parazit/panel/application/user/result/
+RegisterUserResult.java
+
+src/main/java/com/parazit/panel/application/user/
+RegisterUserService.java
+UserLanguageResolver.java
+
+src/main/java/com/parazit/panel/api/internal/user/
+RegisterUserController.java
+RegisterUserRequest.java
+RegisterUserResponse.java
+RegisterUserApiMapper.java
+
+src/test/java/com/parazit/panel/application/user/
+UserLanguageResolverTest.java
+RegisterUserServiceTest.java
+
+src/test/java/com/parazit/panel/integration/user/
+RegisterUserIntegrationTest.java
+ConcurrentUserRegistrationIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/user/
+RegisterUserControllerTest.java
+
+docs/use-cases/
+register-user.md
+
+Adapt names to existing conventions where necessary.
+
+21. Verification commands
+
+Run commands appropriate to the current build tool.
+
+For Gradle:
+
+./gradlew clean test
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+./mvnw verify
+
+Also run the application with the local profile and PostgreSQL.
+
+Verify manually:
+
+First request:
+
+POST /internal/users/register
+
+Expected:
+HTTP 201
+newlyCreated=true
+
+Second request with the same telegramUserId:
+
+Expected:
+HTTP 200
+same userId
+newlyCreated=false
+row count unchanged
+
+Confirm:
+
+* all previous tests still pass;
+* registration unit tests pass;
+* integration tests pass;
+* concurrent test passes;
+* controller tests pass;
+* Flyway succeeds;
+* Hibernate validation succeeds;
+* no duplicate users are created;
+* no credentials are committed;
+* no Telegram integration was implemented.
+
+22. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Architecture decisions
+3. Concurrency strategy
+4. Planned files to create
+5. Planned files to modify
+6. Risks and edge cases
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Registration flow
+5. Idempotency behavior
+6. Concurrency handling
+7. API contract
+8. Test results
+9. Build result
+10. Commands executed
+11. Remaining issues
+12. Suggested commit message
+
+Use this commit message unless the repository uses another convention:
+
+feat(user): implement idempotent user registration use case
+
+Stop after completing Task 10.
+
+Do not start Task 11.
+
