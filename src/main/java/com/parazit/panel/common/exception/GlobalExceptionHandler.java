@@ -9,6 +9,7 @@ import com.parazit.panel.application.plan.selection.PlanSelectionConflictExcepti
 import com.parazit.panel.application.plan.selection.PlanSelectionNotFoundException;
 import com.parazit.panel.application.plan.selection.UserNotEligibleForPlanSelectionException;
 import com.parazit.panel.application.payment.PaymentConflictException;
+import com.parazit.panel.application.payment.PaymentApprovalException;
 import com.parazit.panel.application.payment.PaymentNotFoundException;
 import com.parazit.panel.application.payment.PaymentOrderNotFoundException;
 import com.parazit.panel.application.payment.PaymentProcessorNotFoundException;
@@ -32,6 +33,12 @@ import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceipt
 import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptSubmissionNotAllowedException;
 import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptUnsupportedTypeException;
 import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptWithdrawalNotAllowedException;
+import com.parazit.panel.application.payment.manual.review.ManualPaymentReviewConflictException;
+import com.parazit.panel.application.payment.manual.review.ManualPaymentReviewNotAllowedException;
+import com.parazit.panel.application.payment.manual.review.ManualPaymentReviewNotFoundException;
+import com.parazit.panel.application.provisioning.outbox.ProvisioningOutboxException;
+import com.parazit.panel.application.provisioning.outbox.ProvisioningOutboxNotFoundException;
+import com.parazit.panel.application.provisioning.outbox.ProvisioningOutboxRetryNotAllowedException;
 import com.parazit.panel.application.payment.zarinpal.PaymentAlreadyApprovedException;
 import com.parazit.panel.application.payment.zarinpal.PaymentVerificationConflictException;
 import com.parazit.panel.application.payment.zarinpal.ZarinpalAmountMismatchException;
@@ -81,6 +88,7 @@ import com.parazit.panel.infrastructure.xui.exception.XuiConnectionException;
 import com.parazit.panel.infrastructure.xui.exception.XuiInvalidResponseException;
 import com.parazit.panel.infrastructure.xui.exception.XuiServerException;
 import com.parazit.panel.infrastructure.xui.exception.XuiTimeoutException;
+import com.parazit.panel.infrastructure.security.OperatorIdentityException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.time.OffsetDateTime;
@@ -303,6 +311,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiRemoteStateConflictException.class,
             XuiTrafficOverflowException.class,
             PaymentConflictException.class,
+            PaymentApprovalException.class,
             PaymentProcessorNotFoundException.class,
             ManualCardPaymentNotAllowedException.class,
             ManualPaymentInstructionConflictException.class,
@@ -313,6 +322,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             ManualPaymentReceiptAlreadySubmittedException.class,
             ManualPaymentReceiptDuplicateException.class,
             ManualPaymentReceiptWithdrawalNotAllowedException.class,
+            ManualPaymentReviewConflictException.class,
+            ManualPaymentReviewNotAllowedException.class,
+            ProvisioningOutboxRetryNotAllowedException.class,
             ZarinpalDisabledException.class,
             ZarinpalConfigurationException.class,
             ZarinpalPaymentNotAllowedException.class,
@@ -352,6 +364,33 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.PAYLOAD_TOO_LARGE, "Receipt file is too large", request);
+    }
+
+    @ExceptionHandler({
+            ManualPaymentReviewNotFoundException.class,
+            ProvisioningOutboxNotFoundException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleTask31NotFound(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(OperatorIdentityException.class)
+    public ResponseEntity<ApiErrorResponse> handleOperatorIdentity(
+            OperatorIdentityException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ProvisioningOutboxException.class)
+    public ResponseEntity<ApiErrorResponse> handleProvisioningOutbox(
+            ProvisioningOutboxException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
     @ExceptionHandler({

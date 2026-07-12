@@ -1,6 +1,9 @@
 package com.parazit.panel.application.payment.zarinpal;
 
 import com.parazit.panel.application.port.out.SystemClockPort;
+import com.parazit.panel.application.payment.ApprovePaymentCommand;
+import com.parazit.panel.application.payment.PaymentApprovalService;
+import com.parazit.panel.application.payment.PaymentApprovalSource;
 import com.parazit.panel.application.payment.PaymentNotFoundException;
 import com.parazit.panel.application.payment.zarinpal.model.ZarinpalVerifyResponse;
 import com.parazit.panel.domain.payment.Payment;
@@ -17,15 +20,18 @@ public class CompleteZarinpalVerificationTransaction {
 
     private final PaymentRepository paymentRepository;
     private final ZarinpalPaymentAttemptRepository attemptRepository;
+    private final PaymentApprovalService paymentApprovalService;
     private final SystemClockPort clock;
 
     public CompleteZarinpalVerificationTransaction(
             PaymentRepository paymentRepository,
             ZarinpalPaymentAttemptRepository attemptRepository,
+            PaymentApprovalService paymentApprovalService,
             SystemClockPort clock
     ) {
         this.paymentRepository = Objects.requireNonNull(paymentRepository, "paymentRepository must not be null");
         this.attemptRepository = Objects.requireNonNull(attemptRepository, "attemptRepository must not be null");
+        this.paymentApprovalService = Objects.requireNonNull(paymentApprovalService, "paymentApprovalService must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -34,20 +40,24 @@ public class CompleteZarinpalVerificationTransaction {
         Payment payment = paymentRepository.findById(paymentId)
                 .orElseThrow(() -> new PaymentNotFoundException(paymentId));
         ZarinpalPaymentAttempt attempt = attemptRepository.findById(attemptId).orElseThrow();
-        if (paymentRepository.existsApprovedPaymentForOrder(payment.getOrderId())
-                && payment.getStatus() != com.parazit.panel.domain.payment.PaymentStatus.APPROVED) {
-            throw new PaymentVerificationConflictException("Order already has an approved payment");
-        }
+        java.time.Instant now = clock.now();
         attempt.markVerified(
                 response.referenceId(),
                 String.valueOf(response.code()),
                 response.cardHash(),
                 response.cardPanMasked(),
-                clock.now()
+                now
         );
-        payment.markApproved(clock.now(), response.referenceId(), attempt.getAuthority());
-        paymentRepository.save(payment);
+        paymentApprovalService.approve(new ApprovePaymentCommand(
+                payment.getId(),
+                PaymentApprovalSource.ZARINPAL_VERIFICATION,
+                response.referenceId(),
+                attempt.getAuthority(),
+                now
+        ));
         attemptRepository.save(attempt);
+        payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new PaymentNotFoundException(paymentId));
         return new CompletedZarinpalVerification(payment, attempt);
     }
 

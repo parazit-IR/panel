@@ -213,6 +213,22 @@ public class ManualPaymentReceipt extends BaseEntity {
         status = ManualPaymentReceiptStatus.WITHDRAWN;
     }
 
+    public void markApproved() {
+        if (status == ManualPaymentReceiptStatus.APPROVED) {
+            return;
+        }
+        requireStatus(ManualPaymentReceiptStatus.QUEUED_FOR_REVIEW, "approve");
+        status = ManualPaymentReceiptStatus.APPROVED;
+    }
+
+    public void markRejected() {
+        if (status == ManualPaymentReceiptStatus.REJECTED) {
+            return;
+        }
+        requireStatus(ManualPaymentReceiptStatus.QUEUED_FOR_REVIEW, "reject");
+        status = ManualPaymentReceiptStatus.REJECTED;
+    }
+
     public boolean hasStoredContent() {
         return storageKey != null && fileSha256 != null && fileSizeBytes != null;
     }

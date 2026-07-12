@@ -142,6 +142,23 @@ app:
       image-max-height: "${PAYMENT_RECEIPT_IMAGE_MAX_HEIGHT:5000}"
       upload-timeout: "${PAYMENT_RECEIPT_UPLOAD_TIMEOUT:PT30S}"
       calculate-sha256: "${PAYMENT_RECEIPT_CALCULATE_SHA256:true}"
+    manual-review:
+      claim-ttl: "${MANUAL_PAYMENT_REVIEW_CLAIM_TTL:PT15M}"
+      queue-page-size: "${MANUAL_PAYMENT_REVIEW_QUEUE_PAGE_SIZE:50}"
+      max-queue-page-size: "${MANUAL_PAYMENT_REVIEW_MAX_QUEUE_PAGE_SIZE:200}"
+      require-tracking-number: "${MANUAL_PAYMENT_REVIEW_REQUIRE_TRACKING_NUMBER:false}"
+      require-sender-card-last-four: "${MANUAL_PAYMENT_REVIEW_REQUIRE_SENDER_CARD_LAST_FOUR:false}"
+      require-operator-note-on-approval: "${MANUAL_PAYMENT_REVIEW_REQUIRE_OPERATOR_NOTE_ON_APPROVAL:false}"
+  provisioning:
+    outbox:
+      enabled: "${PROVISIONING_OUTBOX_ENABLED:false}"
+      poll-interval: "${PROVISIONING_OUTBOX_POLL_INTERVAL:PT5S}"
+      batch-size: "${PROVISIONING_OUTBOX_BATCH_SIZE:20}"
+      max-attempts: "${PROVISIONING_OUTBOX_MAX_ATTEMPTS:10}"
+      initial-retry-delay: "${PROVISIONING_OUTBOX_INITIAL_RETRY_DELAY:PT10S}"
+      max-retry-delay: "${PROVISIONING_OUTBOX_MAX_RETRY_DELAY:PT15M}"
+      retry-multiplier: "${PROVISIONING_OUTBOX_RETRY_MULTIPLIER:2.0}"
+      processing-timeout: "${PROVISIONING_OUTBOX_PROCESSING_TIMEOUT:PT5M}"
   xui:
     base-url: "${XUI_BASE_URL:http://localhost:2053}"
     username: "${XUI_USERNAME:}"

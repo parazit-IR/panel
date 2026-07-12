@@ -190,6 +190,21 @@ public class ManualCardPaymentInstruction extends BaseEntity {
         status = ManualPaymentInstructionStatus.COMPLETED;
     }
 
+    public void returnToActiveAfterReceiptRejection(Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        if (status == ManualPaymentInstructionStatus.ACTIVE) {
+            return;
+        }
+        requireStatus(ManualPaymentInstructionStatus.RECEIPT_PENDING, "return to active");
+        if (!expiresAt.isAfter(now)) {
+            status = ManualPaymentInstructionStatus.EXPIRED;
+            expiredAt = now;
+            return;
+        }
+        status = ManualPaymentInstructionStatus.ACTIVE;
+        paidClaimedAt = null;
+    }
+
     public boolean isActiveReservation() {
         return status == ManualPaymentInstructionStatus.CREATED
                 || status == ManualPaymentInstructionStatus.ACTIVE

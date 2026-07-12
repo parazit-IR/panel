@@ -2,5 +2,11 @@ package com.parazit.panel.domain.order;
 
 public enum OrderStatus {
     CREATED,
-    CANCELLED
+    PAYMENT_PENDING,
+    PAID,
+    PROVISIONING,
+    COMPLETED,
+    PROVISIONING_FAILED,
+    CANCELLED,
+    EXPIRED
 }

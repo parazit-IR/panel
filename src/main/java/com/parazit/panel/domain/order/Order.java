@@ -7,6 +7,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -25,6 +26,16 @@ public class Order extends BaseEntity {
     @Column(name = "user_id", nullable = false, updatable = false)
     private UUID userId;
 
+    @Column(name = "plan_id")
+    private UUID planId;
+
+    @Column(name = "plan_selection_id")
+    private UUID planSelectionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type", nullable = false, length = 40)
+    private OrderType type;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 32)
     private OrderStatus status;
@@ -32,8 +43,29 @@ public class Order extends BaseEntity {
     @Column(name = "amount", nullable = false, updatable = false)
     private long amount;
 
+    @Column(name = "base_amount", nullable = false)
+    private long baseAmount;
+
+    @Column(name = "final_amount", nullable = false)
+    private long finalAmount;
+
     @Column(name = "currency", nullable = false, length = 8, updatable = false)
     private String currency;
+
+    @Column(name = "paid_at")
+    private Instant paidAt;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
+    @Column(name = "failure_code", length = 64)
+    private String failureCode;
+
+    @Column(name = "failure_message", length = 500)
+    private String failureMessage;
 
     protected Order() {
     }
@@ -41,12 +73,87 @@ public class Order extends BaseEntity {
     private Order(UUID userId, long amount, String currency) {
         this.userId = Objects.requireNonNull(userId, "userId must not be null");
         this.amount = requirePositiveOrZero(amount, "amount");
+        this.baseAmount = this.amount;
+        this.finalAmount = this.amount;
         this.currency = normalizeCurrency(currency);
+        this.type = OrderType.NEW_SUBSCRIPTION;
         this.status = OrderStatus.CREATED;
+    }
+
+    private Order(UUID userId, UUID planId, UUID planSelectionId, OrderType type, long amount, String currency) {
+        this(userId, amount, currency);
+        this.planId = Objects.requireNonNull(planId, "planId must not be null");
+        this.planSelectionId = Objects.requireNonNull(planSelectionId, "planSelectionId must not be null");
+        this.type = Objects.requireNonNull(type, "type must not be null");
     }
 
     public static Order create(UUID userId, long amount, String currency) {
         return new Order(userId, amount, currency);
+    }
+
+    public static Order createForPlanSelection(
+            UUID userId,
+            UUID planId,
+            UUID planSelectionId,
+            long amount,
+            String currency
+    ) {
+        return new Order(userId, planId, planSelectionId, OrderType.NEW_SUBSCRIPTION, amount, currency);
+    }
+
+    public void markPaymentPending() {
+        if (status == OrderStatus.PAYMENT_PENDING) {
+            return;
+        }
+        requireStatus(OrderStatus.CREATED, "mark payment pending");
+        status = OrderStatus.PAYMENT_PENDING;
+    }
+
+    public void markPaid(Instant paidAt) {
+        if (status == OrderStatus.PAID) {
+            return;
+        }
+        if (status != OrderStatus.CREATED && status != OrderStatus.PAYMENT_PENDING) {
+            throw invalidTransition("mark paid");
+        }
+        this.paidAt = Objects.requireNonNull(paidAt, "paidAt must not be null");
+        status = OrderStatus.PAID;
+        failureCode = null;
+        failureMessage = null;
+    }
+
+    public void markProvisioning(Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        if (status == OrderStatus.PROVISIONING) {
+            return;
+        }
+        if (status != OrderStatus.PAID && status != OrderStatus.PROVISIONING_FAILED) {
+            throw invalidTransition("mark provisioning");
+        }
+        status = OrderStatus.PROVISIONING;
+    }
+
+    public void markCompleted(Instant completedAt) {
+        if (status == OrderStatus.COMPLETED) {
+            return;
+        }
+        requireStatus(OrderStatus.PROVISIONING, "complete");
+        this.completedAt = Objects.requireNonNull(completedAt, "completedAt must not be null");
+        status = OrderStatus.COMPLETED;
+        failureCode = null;
+        failureMessage = null;
+    }
+
+    public void markProvisioningFailed(String failureCode, String failureMessage) {
+        if (status == OrderStatus.PROVISIONING_FAILED) {
+            this.failureCode = normalizeOptional(failureCode, 64);
+            this.failureMessage = normalizeOptional(failureMessage, 500);
+            return;
+        }
+        requireStatus(OrderStatus.PROVISIONING, "mark provisioning failed");
+        status = OrderStatus.PROVISIONING_FAILED;
+        this.failureCode = normalizeOptional(failureCode, 64);
+        this.failureMessage = normalizeOptional(failureMessage, 500);
     }
 
     public void cancel() {
@@ -59,8 +166,34 @@ public class Order extends BaseEntity {
         status = OrderStatus.CANCELLED;
     }
 
+    public void markExpired() {
+        if (status == OrderStatus.EXPIRED) {
+            return;
+        }
+        if (status != OrderStatus.CREATED && status != OrderStatus.PAYMENT_PENDING) {
+            throw invalidTransition("expire");
+        }
+        status = OrderStatus.EXPIRED;
+    }
+
+    public boolean requiresProvisioning() {
+        return type == OrderType.NEW_SUBSCRIPTION && planId != null && planSelectionId != null;
+    }
+
     public UUID getUserId() {
         return userId;
+    }
+
+    public UUID getPlanId() {
+        return planId;
+    }
+
+    public UUID getPlanSelectionId() {
+        return planSelectionId;
+    }
+
+    public OrderType getType() {
+        return type;
     }
 
     public OrderStatus getStatus() {
@@ -73,6 +206,44 @@ public class Order extends BaseEntity {
 
     public String getCurrency() {
         return currency;
+    }
+
+    public long getBaseAmount() {
+        return baseAmount;
+    }
+
+    public long getFinalAmount() {
+        return finalAmount;
+    }
+
+    public Instant getPaidAt() {
+        return paidAt;
+    }
+
+    public Instant getCancelledAt() {
+        return cancelledAt;
+    }
+
+    public Instant getCompletedAt() {
+        return completedAt;
+    }
+
+    public String getFailureCode() {
+        return failureCode;
+    }
+
+    public String getFailureMessage() {
+        return failureMessage;
+    }
+
+    private void requireStatus(OrderStatus expected, String action) {
+        if (status != expected) {
+            throw invalidTransition(action);
+        }
+    }
+
+    private IllegalStateException invalidTransition(String action) {
+        return new IllegalStateException("cannot " + action + " order with status " + status);
     }
 
     private static long requirePositiveOrZero(long value, String fieldName) {
@@ -90,6 +261,20 @@ public class Order extends BaseEntity {
         }
         if (normalized.length() > 8) {
             throw new IllegalArgumentException("currency must be at most 8 characters");
+        }
+        return normalized;
+    }
+
+    private static String normalizeOptional(String value, int maxLength) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.isBlank()) {
+            return null;
+        }
+        if (normalized.length() > maxLength) {
+            return normalized.substring(0, maxLength);
         }
         return normalized;
     }

@@ -114,6 +114,14 @@ public class Payment extends BaseEntity {
         status = PaymentStatus.WAITING_FOR_PAYMENT;
     }
 
+    public void returnToWaitingForPaymentAfterReviewRejection() {
+        if (status == PaymentStatus.WAITING_FOR_PAYMENT) {
+            return;
+        }
+        requireStatus(PaymentStatus.WAITING_FOR_REVIEW, "return to waiting for payment");
+        status = PaymentStatus.WAITING_FOR_PAYMENT;
+    }
+
     public void markProcessing() {
         if (status == PaymentStatus.PROCESSING) {
             return;
