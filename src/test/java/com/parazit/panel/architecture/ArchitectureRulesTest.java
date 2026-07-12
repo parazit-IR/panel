@@ -215,6 +215,7 @@ class ArchitectureRulesTest {
         List<Path> providerImplementations = javaFiles("com/parazit/panel")
                 .filter(path -> path.getFileName().toString().endsWith("PaymentProcessor.java"))
                 .filter(path -> !source(path).contains("interface PaymentProcessor"))
+                .filter(path -> !path.toString().contains("/application/payment/zarinpal/ZarinpalPaymentProcessor.java"))
                 .toList();
         List<Path> businessSwitches = javaFiles("com/parazit/panel/application/payment")
                 .filter(path -> {
@@ -244,6 +245,30 @@ class ArchitectureRulesTest {
                 .toList();
 
         assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void zarinpalGatewayDetailsRemainInInfrastructure() throws IOException {
+        List<Path> applicationViolations = javaFiles("com/parazit/panel/application/payment/zarinpal")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("org.springframework.web.client")
+                            || source.contains("RestClient")
+                            || source.contains("infrastructure.payment.zarinpal.dto")
+                            || source.contains("JsonNode");
+                })
+                .toList();
+        List<Path> apiViolations = javaFiles("com/parazit/panel/api/payment/zarinpal")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("domain.payment.zarinpal.ZarinpalPaymentAttempt")
+                            || source.contains("repository.");
+                })
+                .toList();
+
+        assertThat(applicationViolations).isEmpty();
+        assertThat(apiViolations).isEmpty();
     }
 
     @Test

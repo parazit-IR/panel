@@ -12,6 +12,19 @@ import com.parazit.panel.application.payment.PaymentConflictException;
 import com.parazit.panel.application.payment.PaymentNotFoundException;
 import com.parazit.panel.application.payment.PaymentOrderNotFoundException;
 import com.parazit.panel.application.payment.PaymentProcessorNotFoundException;
+import com.parazit.panel.application.payment.zarinpal.PaymentAlreadyApprovedException;
+import com.parazit.panel.application.payment.zarinpal.PaymentVerificationConflictException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalAmountMismatchException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalAuthorityNotFoundException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalCallbackInvalidException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalConfigurationException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalDisabledException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalPaymentNotAllowedException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalRequestFailedException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalRequestUnknownException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalResponseInvalidException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalVerificationFailedException;
+import com.parazit.panel.application.payment.zarinpal.ZarinpalVerificationUnknownException;
 import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
 import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
 import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
@@ -216,7 +229,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiClientOperationNotFoundException.class,
             XuiProvisionOwnershipException.class,
             PaymentNotFoundException.class,
-            PaymentOrderNotFoundException.class
+            PaymentOrderNotFoundException.class,
+            ZarinpalAuthorityNotFoundException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
             RuntimeException exception,
@@ -250,7 +264,13 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiRemoteStateConflictException.class,
             XuiTrafficOverflowException.class,
             PaymentConflictException.class,
-            PaymentProcessorNotFoundException.class
+            PaymentProcessorNotFoundException.class,
+            ZarinpalDisabledException.class,
+            ZarinpalConfigurationException.class,
+            ZarinpalPaymentNotAllowedException.class,
+            ZarinpalAmountMismatchException.class,
+            PaymentAlreadyApprovedException.class,
+            PaymentVerificationConflictException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,
@@ -268,6 +288,44 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ZarinpalCallbackInvalidException.class)
+    public ResponseEntity<ApiErrorResponse> handleZarinpalInvalidCallback(
+            ZarinpalCallbackInvalidException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            ZarinpalRequestFailedException.class,
+            ZarinpalVerificationFailedException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleZarinpalGatewayRejected(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ZarinpalResponseInvalidException.class)
+    public ResponseEntity<ApiErrorResponse> handleZarinpalInvalidResponse(
+            ZarinpalResponseInvalidException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            ZarinpalRequestUnknownException.class,
+            ZarinpalVerificationUnknownException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleZarinpalUnknown(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
     @ExceptionHandler(XuiClientProvisionFailedException.class)

@@ -128,7 +128,9 @@ public class Payment extends BaseEntity {
         if (status == PaymentStatus.APPROVED) {
             return;
         }
-        if (status != PaymentStatus.WAITING_FOR_PAYMENT && status != PaymentStatus.PROCESSING) {
+        if (status != PaymentStatus.WAITING_FOR_PAYMENT
+                && status != PaymentStatus.PROCESSING
+                && status != PaymentStatus.UNKNOWN) {
             throw invalidTransition("approve");
         }
         Instant timestamp = Objects.requireNonNull(approvedAt, "approvedAt must not be null");
@@ -185,6 +187,29 @@ public class Payment extends BaseEntity {
         }
         status = PaymentStatus.FAILED;
         rejectionReason = normalizeOptional(reason, "failureReason", REJECTION_REASON_MAX_LENGTH);
+    }
+
+    public void markUnknown(Instant unknownAt, String reason) {
+        Objects.requireNonNull(unknownAt, "unknownAt must not be null");
+        if (status == PaymentStatus.UNKNOWN) {
+            return;
+        }
+        if (status == PaymentStatus.APPROVED) {
+            return;
+        }
+        if (status != PaymentStatus.WAITING_FOR_PAYMENT && status != PaymentStatus.PROCESSING) {
+            throw invalidTransition("mark unknown");
+        }
+        status = PaymentStatus.UNKNOWN;
+        rejectionReason = normalizeOptional(reason, "unknownReason", REJECTION_REASON_MAX_LENGTH);
+    }
+
+    public void resumeProcessingFromUnknown() {
+        if (status == PaymentStatus.PROCESSING) {
+            return;
+        }
+        requireStatus(PaymentStatus.UNKNOWN, "resume processing");
+        status = PaymentStatus.PROCESSING;
     }
 
     public boolean isTerminal() {

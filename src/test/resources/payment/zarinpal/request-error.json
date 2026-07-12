@@ -1,0 +1,12 @@
+{
+  "data": {
+    "code": -9,
+    "message": "Validation error"
+  },
+  "errors": [
+    {
+      "code": -9,
+      "message": "Validation error"
+    }
+  ]
+}

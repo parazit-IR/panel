@@ -1,0 +1,12 @@
+{
+  "data": {
+    "code": 101,
+    "message": "Verified before",
+    "card_hash": "FAKE_HASH_ONLY_FOR_TESTS",
+    "card_pan": "502229******5995",
+    "ref_id": 987654321,
+    "fee_type": "Merchant",
+    "fee": 0
+  },
+  "errors": []
+}

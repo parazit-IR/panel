@@ -28,7 +28,7 @@ flowchart LR
 
 `PaymentService` receives all processors from Spring and builds a method-to-processor map. Business logic does not switch on `PaymentMethod`; adding a provider later means adding a new processor bean.
 
-No provider implementation is included in Task 27.
+Task 28 adds the Zarinpal processor and provider-specific attempt model without changing the generic payment aggregate.
 
 ## State Machine
 
