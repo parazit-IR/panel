@@ -52,3 +52,4 @@ app:
   payment:
     enabled: "${PAYMENT_ENABLED:false}"
     merchant-id: "${PAYMENT_MERCHANT_ID}"
+    default-expiration: "${PAYMENT_DEFAULT_EXPIRATION:PT30M}"

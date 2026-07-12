@@ -182,7 +182,7 @@ class Phase3PlanModuleEndToEndIntegrationTest extends PostgreSqlContainerSupport
                 1
         ))).isInstanceOf(PlanModificationNotAllowedException.class);
 
-        assertThat(existingDeferredOperationalTables()).isEmpty();
+        assertThat(existingStillDeferredOperationalTables()).isEmpty();
     }
 
     private long activeSelectionCount() {
@@ -193,12 +193,12 @@ class Phase3PlanModuleEndToEndIntegrationTest extends PostgreSqlContainerSupport
         return count == null ? 0 : count;
     }
 
-    private Set<String> existingDeferredOperationalTables() {
+    private Set<String> existingStillDeferredOperationalTables() {
         return Set.copyOf(jdbcTemplate.queryForList("""
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = 'public'
-                  AND table_name IN ('orders', 'payments', 'subscriptions', 'vpn_clients')
+                  AND table_name IN ('subscriptions', 'vpn_clients')
                 """, String.class));
     }
 }

@@ -211,6 +211,42 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    void paymentFoundationKeepsProviderDetailsOutOfBusinessLogic() throws IOException {
+        List<Path> providerImplementations = javaFiles("com/parazit/panel")
+                .filter(path -> path.getFileName().toString().endsWith("PaymentProcessor.java"))
+                .filter(path -> !source(path).contains("interface PaymentProcessor"))
+                .toList();
+        List<Path> businessSwitches = javaFiles("com/parazit/panel/application/payment")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("switch (")
+                            || source.contains("switch(")
+                            || source.contains("case ZARINPAL")
+                            || source.contains("case CARD_TO_CARD");
+                })
+                .toList();
+
+        assertThat(providerImplementations).isEmpty();
+        assertThat(businessSwitches).isEmpty();
+    }
+
+    @Test
+    void paymentApiDependsOnInputPortsOnly() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/api/internal/payment")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.domain.payment.Payment;")
+                            || source.contains("com.parazit.panel.domain.payment.repository")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("SpringData")
+                            || source.contains("JpaRepository");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
     void xuiClientFoundationStaysInfrastructureOnly() throws IOException {
         List<Path> portViolations = javaFiles("com/parazit/panel/application/port/out/xui")
                 .filter(path -> {

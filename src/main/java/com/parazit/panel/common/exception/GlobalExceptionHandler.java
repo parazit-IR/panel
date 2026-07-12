@@ -8,6 +8,10 @@ import com.parazit.panel.application.plan.admin.PlanNotFoundException;
 import com.parazit.panel.application.plan.selection.PlanSelectionConflictException;
 import com.parazit.panel.application.plan.selection.PlanSelectionNotFoundException;
 import com.parazit.panel.application.plan.selection.UserNotEligibleForPlanSelectionException;
+import com.parazit.panel.application.payment.PaymentConflictException;
+import com.parazit.panel.application.payment.PaymentNotFoundException;
+import com.parazit.panel.application.payment.PaymentOrderNotFoundException;
+import com.parazit.panel.application.payment.PaymentProcessorNotFoundException;
 import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
 import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
 import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
@@ -210,7 +214,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiEligibleInboundNotFoundException.class,
             XuiClientProvisionNotFoundException.class,
             XuiClientOperationNotFoundException.class,
-            XuiProvisionOwnershipException.class
+            XuiProvisionOwnershipException.class,
+            PaymentNotFoundException.class,
+            PaymentOrderNotFoundException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
             RuntimeException exception,
@@ -242,7 +248,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiClientOperationNotAllowedException.class,
             XuiRemoteClientMissingException.class,
             XuiRemoteStateConflictException.class,
-            XuiTrafficOverflowException.class
+            XuiTrafficOverflowException.class,
+            PaymentConflictException.class,
+            PaymentProcessorNotFoundException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,
