@@ -118,10 +118,29 @@ public class Payment extends BaseEntity {
         if (status == PaymentStatus.PROCESSING) {
             return;
         }
-        if (status != PaymentStatus.CREATED && status != PaymentStatus.WAITING_FOR_PAYMENT) {
+        if (status != PaymentStatus.CREATED
+                && status != PaymentStatus.WAITING_FOR_PAYMENT
+                && status != PaymentStatus.WAITING_FOR_REVIEW) {
             throw invalidTransition("process");
         }
         status = PaymentStatus.PROCESSING;
+    }
+
+    public void markReceiptSubmitted(Instant submittedAt) {
+        Objects.requireNonNull(submittedAt, "submittedAt must not be null");
+        if (status == PaymentStatus.RECEIPT_SUBMITTED) {
+            return;
+        }
+        requireStatus(PaymentStatus.WAITING_FOR_PAYMENT, "mark receipt submitted");
+        status = PaymentStatus.RECEIPT_SUBMITTED;
+    }
+
+    public void markWaitingForReview() {
+        if (status == PaymentStatus.WAITING_FOR_REVIEW) {
+            return;
+        }
+        requireStatus(PaymentStatus.RECEIPT_SUBMITTED, "wait for review");
+        status = PaymentStatus.WAITING_FOR_REVIEW;
     }
 
     public void markApproved(Instant approvedAt, String gatewayTransactionId, String gatewayAuthority) {
@@ -130,6 +149,7 @@ public class Payment extends BaseEntity {
         }
         if (status != PaymentStatus.WAITING_FOR_PAYMENT
                 && status != PaymentStatus.PROCESSING
+                && status != PaymentStatus.WAITING_FOR_REVIEW
                 && status != PaymentStatus.UNKNOWN) {
             throw invalidTransition("approve");
         }

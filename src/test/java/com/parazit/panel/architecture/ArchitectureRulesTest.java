@@ -299,6 +299,35 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    void manualReceiptUploadKeepsStorageAndApprovalSeparated() throws IOException {
+        List<Path> commandViolations = javaFiles("com/parazit/panel/application/payment/manual/receipt")
+                .filter(path -> source(path).contains("MultipartFile")
+                        || source(path).contains("java.nio.file.Path;")
+                        || source(path).contains("markApproved")
+                        || source(path).contains("PaymentApproved"))
+                .toList();
+        List<Path> domainViolations = javaFiles("com/parazit/panel/domain/payment/manual/receipt")
+                .filter(path -> source(path).contains("@Lob")
+                        || source(path).contains("byte[]")
+                        || source(path).contains("MultipartFile")
+                        || source(path).contains("java.nio.file.Path"))
+                .toList();
+        List<Path> apiViolations = javaFiles("com/parazit/panel/api/payment/manual/receipt")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("repository.")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("storageKey")
+                            || source.contains("StorageKey");
+                })
+                .toList();
+
+        assertThat(commandViolations).isEmpty();
+        assertThat(domainViolations).isEmpty();
+        assertThat(apiViolations).isEmpty();
+    }
+
+    @Test
     void xuiClientFoundationStaysInfrastructureOnly() throws IOException {
         List<Path> portViolations = javaFiles("com/parazit/panel/application/port/out/xui")
                 .filter(path -> {

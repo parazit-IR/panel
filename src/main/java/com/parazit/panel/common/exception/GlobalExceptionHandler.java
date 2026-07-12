@@ -20,6 +20,18 @@ import com.parazit.panel.application.payment.manual.ManualPaymentInstructionConf
 import com.parazit.panel.application.payment.manual.ManualPaymentInstructionNotFoundException;
 import com.parazit.panel.application.payment.manual.ManualPaymentReissueNotAllowedException;
 import com.parazit.panel.application.payment.manual.ManualPaymentRequestIdConflictException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptAlreadySubmittedException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptAmountMismatchException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptContentUnavailableException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptDuplicateException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptFileTooLargeException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptInvalidFileException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptNotFoundException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptRequestIdConflictException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptStorageException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptSubmissionNotAllowedException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptUnsupportedTypeException;
+import com.parazit.panel.application.payment.manual.receipt.ManualPaymentReceiptWithdrawalNotAllowedException;
 import com.parazit.panel.application.payment.zarinpal.PaymentAlreadyApprovedException;
 import com.parazit.panel.application.payment.zarinpal.PaymentVerificationConflictException;
 import com.parazit.panel.application.payment.zarinpal.ZarinpalAmountMismatchException;
@@ -83,6 +95,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -130,6 +143,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         );
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleMaxUploadSizeExceededException(
+            MaxUploadSizeExceededException exception,
+            HttpHeaders headers,
+            HttpStatusCode status,
+            WebRequest request
+    ) {
+        HttpServletRequest servletRequest = ((ServletWebRequest) request).getRequest();
+        ApiErrorResponse response = buildErrorResponse(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                "Receipt file is too large",
+                servletRequest
+        );
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(response);
     }
 
     @ExceptionHandler(ConstraintViolationException.class)
@@ -239,6 +268,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             PaymentNotFoundException.class,
             PaymentOrderNotFoundException.class,
             ManualPaymentInstructionNotFoundException.class,
+            ManualPaymentReceiptNotFoundException.class,
             ZarinpalAuthorityNotFoundException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
@@ -278,6 +308,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             ManualPaymentInstructionConflictException.class,
             ManualPaymentRequestIdConflictException.class,
             ManualPaymentReissueNotAllowedException.class,
+            ManualPaymentReceiptSubmissionNotAllowedException.class,
+            ManualPaymentReceiptRequestIdConflictException.class,
+            ManualPaymentReceiptAlreadySubmittedException.class,
+            ManualPaymentReceiptDuplicateException.class,
+            ManualPaymentReceiptWithdrawalNotAllowedException.class,
             ZarinpalDisabledException.class,
             ZarinpalConfigurationException.class,
             ZarinpalPaymentNotAllowedException.class,
@@ -290,6 +325,44 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            ManualPaymentReceiptAmountMismatchException.class,
+            ManualPaymentReceiptInvalidFileException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleManualReceiptBadRequest(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ManualPaymentReceiptUnsupportedTypeException.class)
+    public ResponseEntity<ApiErrorResponse> handleManualReceiptUnsupportedType(
+            ManualPaymentReceiptUnsupportedTypeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.UNSUPPORTED_MEDIA_TYPE, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(ManualPaymentReceiptFileTooLargeException.class)
+    public ResponseEntity<ApiErrorResponse> handleManualReceiptTooLarge(
+            ManualPaymentReceiptFileTooLargeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.PAYLOAD_TOO_LARGE, "Receipt file is too large", request);
+    }
+
+    @ExceptionHandler({
+            ManualPaymentReceiptStorageException.class,
+            ManualPaymentReceiptContentUnavailableException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleManualReceiptStorage(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
     @ExceptionHandler({

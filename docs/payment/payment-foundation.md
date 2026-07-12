@@ -1,6 +1,6 @@
 # Payment Foundation
 
-Task 27 introduced the local payment foundation only. Task 28 added Zarinpal request/callback/verification. Task 29 adds manual card-to-card payment instructions with unique payable amounts. Manual receipt upload, operator approval, subscriptions, Telegram handlers, and VPN provisioning remain deferred.
+Task 27 introduced the local payment foundation only. Task 28 added Zarinpal request/callback/verification. Task 29 added manual card-to-card payment instructions with unique payable amounts. Task 30 adds manual receipt upload and the review queue. Operator approval, subscriptions, Telegram handlers, and VPN provisioning remain deferred.
 
 ## Architecture
 
@@ -30,7 +30,7 @@ flowchart LR
 
 Task 28 adds the Zarinpal processor and provider-specific attempt model without changing the generic payment aggregate.
 
-Task 29 adds the manual card processor and provider-specific instruction model. Manual card payment uses dedicated instruction use cases because it does not have meaningful online gateway verification in this phase.
+Task 29 adds the manual card processor and provider-specific instruction model. Task 30 adds receipt metadata, storage ports, and review queue use cases. Manual card payment uses dedicated instruction and receipt use cases because it does not have meaningful online gateway verification in this phase.
 
 ## State Machine
 
@@ -50,6 +50,10 @@ stateDiagram-v2
     WAITING_FOR_PAYMENT --> EXPIRED
     WAITING_FOR_PAYMENT --> CANCELLED
     WAITING_FOR_PAYMENT --> FAILED
+    WAITING_FOR_PAYMENT --> RECEIPT_SUBMITTED
+    RECEIPT_SUBMITTED --> WAITING_FOR_REVIEW
+    WAITING_FOR_REVIEW --> PROCESSING
+    WAITING_FOR_REVIEW --> APPROVED
     PROCESSING --> APPROVED
     PROCESSING --> REJECTED
     PROCESSING --> FAILED
@@ -85,7 +89,7 @@ Temporary internal endpoints:
 - `GET /internal/payments/{id}`
 - `GET /internal/orders/{id}/payments`
 
-These endpoints create and read local payment records only. Provider-specific endpoints initialize Zarinpal or manual-card instructions. No endpoint in Task 29 approves a manual payment, uploads receipts, or provisions VPN clients.
+These endpoints create and read local payment records only. Provider-specific endpoints initialize Zarinpal, create manual-card instructions, and accept manual receipt uploads. No endpoint in Task 30 approves a manual payment or provisions VPN clients.
 
 ## Payment Operation History
 

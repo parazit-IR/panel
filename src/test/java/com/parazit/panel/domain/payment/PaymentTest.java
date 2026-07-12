@@ -79,6 +79,28 @@ class PaymentTest {
     }
 
     @Test
+    void supportsManualReceiptReviewTransitionsWithoutApproval() {
+        Payment payment = payment();
+
+        payment.markWaitingForPayment();
+        payment.markReceiptSubmitted(NOW);
+        payment.markWaitingForReview();
+
+        assertThat(payment.getStatus()).isEqualTo(PaymentStatus.WAITING_FOR_REVIEW);
+        assertThat(payment.getApprovedAt()).isNull();
+        assertThat(payment.getPaidAt()).isNull();
+    }
+
+    @Test
+    void rejectsReceiptSubmissionOutsideWaitingForPayment() {
+        Payment payment = payment();
+
+        assertThatThrownBy(() -> payment.markReceiptSubmitted(NOW))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("CREATED");
+    }
+
+    @Test
     void rejectsInvalidTransitions() {
         Payment payment = payment();
 

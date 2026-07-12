@@ -18,7 +18,7 @@ The unique amount is only a matching aid. It is not proof of payment.
 
 The project uses the existing `PaymentMethod.CARD_TO_CARD` enum value. No second `CARD_TO_CARD_MANUAL` value is introduced.
 
-Manual payment requires user transfer, future receipt submission, future operator review, and explicit approval in a later task. Task 29 never marks a Payment as `APPROVED`.
+Manual payment requires user transfer, receipt submission, operator review, and explicit approval in a later task. Task 29 never marks a Payment as `APPROVED`. Task 30 adds receipt submission and review queueing, but still does not approve a Payment.
 
 ## Instruction Lifecycle
 
@@ -34,11 +34,11 @@ stateDiagram-v2
     RECEIPT_PENDING --> COMPLETED: Task 31
 ```
 
-Task 29 uses `CREATED`, `ACTIVE`, `EXPIRED`, and `CANCELLED`. Receipt and completion states are reserved for later tasks.
+Task 29 uses `CREATED`, `ACTIVE`, `EXPIRED`, and `CANCELLED`. Task 30 uses `RECEIPT_PENDING` after a valid receipt is stored and queued. `COMPLETED` remains reserved for the future approval workflow.
 
 ## Payment Lifecycle
 
-Creating an active instruction moves the Payment to `WAITING_FOR_PAYMENT`. Instruction expiry or cancellation does not approve, reject, or fail the Payment. The Payment remains reusable until its own expiry and lifecycle rules prevent it.
+Creating an active instruction moves the Payment to `WAITING_FOR_PAYMENT`. A successful receipt upload moves it through `RECEIPT_SUBMITTED` to `WAITING_FOR_REVIEW`. Instruction expiry or cancellation does not approve, reject, or fail the Payment. The Payment remains reusable until its own expiry and lifecycle rules prevent it.
 
 ## Destination Card Security
 
@@ -57,7 +57,7 @@ No CVV2, PIN, OTP, internet-bank credential, or receipt data is stored.
 
 The database is the correctness authority. PostgreSQL partial unique indexes enforce one active instruction per Payment and one active `(currency, payable_amount)` reservation.
 
-Active reservation statuses are `CREATED`, `ACTIVE`, and `RECEIPT_PENDING`. Expired and cancelled instructions retain history but release the active reservation.
+Active reservation statuses are `CREATED`, `ACTIVE`, and `RECEIPT_PENDING`. During receipt review the reservation remains held. Expired and cancelled instructions retain history but release the active reservation.
 
 ```mermaid
 sequenceDiagram
@@ -133,9 +133,13 @@ sequenceDiagram
 - `POST /internal/payments/{paymentId}/manual-card/initialize`
 - `GET /internal/payments/{paymentId}/manual-card?telegramUserId=...`
 - `POST /internal/payments/{paymentId}/manual-card/cancel`
+- `POST /internal/payments/{paymentId}/manual-card/receipt`
+- `GET /internal/payments/{paymentId}/manual-card/receipt?telegramUserId=...`
+- `GET /internal/admin/manual-payments/review-queue`
+- `GET /internal/admin/manual-payments/receipts/{receiptId}/content`
 
-The response includes display information, exact amounts, masked card number, and controlled full card number. Error responses must not contain the card number.
+Instruction responses include display information, exact amounts, masked card number, and controlled full card number. Receipt responses include safe file metadata and never expose storage keys or filesystem paths. Error responses must not contain card numbers or receipt storage details.
 
 ## Deferred Work
 
-Task 29 does not implement receipt upload, OCR, operator approval or rejection, automatic bank verification, Payment approval, VPN provisioning, Telegram handlers, or reminders.
+Task 30 does not implement OCR, operator approval or rejection, automatic bank verification, Payment approval, VPN provisioning, Telegram handlers, or reminders.

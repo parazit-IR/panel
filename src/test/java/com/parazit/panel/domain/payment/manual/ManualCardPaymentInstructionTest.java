@@ -56,6 +56,20 @@ class ManualCardPaymentInstructionTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void marksReceiptPendingAndKeepsReservationActive() {
+        ManualCardPaymentInstruction instruction = instruction();
+        instruction.activate();
+
+        instruction.markReceiptPending(NOW.plusSeconds(10));
+
+        assertThat(instruction.getStatus()).isEqualTo(ManualPaymentInstructionStatus.RECEIPT_PENDING);
+        assertThat(instruction.getPaidClaimedAt()).isEqualTo(NOW.plusSeconds(10));
+        assertThat(instruction.isActiveReservation()).isTrue();
+        assertThatThrownBy(() -> instruction.cancel(NOW.plusSeconds(20)))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
     private ManualCardPaymentInstruction instruction() {
         return ManualCardPaymentInstruction.create(
                 UUID.randomUUID(),
