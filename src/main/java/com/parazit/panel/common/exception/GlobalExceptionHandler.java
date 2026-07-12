@@ -12,6 +12,14 @@ import com.parazit.panel.application.payment.PaymentConflictException;
 import com.parazit.panel.application.payment.PaymentNotFoundException;
 import com.parazit.panel.application.payment.PaymentOrderNotFoundException;
 import com.parazit.panel.application.payment.PaymentProcessorNotFoundException;
+import com.parazit.panel.application.payment.manual.ManualCardPaymentDisabledException;
+import com.parazit.panel.application.payment.manual.ManualCardPaymentNotAllowedException;
+import com.parazit.panel.application.payment.manual.ManualPaymentAmountReservationException;
+import com.parazit.panel.application.payment.manual.ManualPaymentDestinationUnavailableException;
+import com.parazit.panel.application.payment.manual.ManualPaymentInstructionConflictException;
+import com.parazit.panel.application.payment.manual.ManualPaymentInstructionNotFoundException;
+import com.parazit.panel.application.payment.manual.ManualPaymentReissueNotAllowedException;
+import com.parazit.panel.application.payment.manual.ManualPaymentRequestIdConflictException;
 import com.parazit.panel.application.payment.zarinpal.PaymentAlreadyApprovedException;
 import com.parazit.panel.application.payment.zarinpal.PaymentVerificationConflictException;
 import com.parazit.panel.application.payment.zarinpal.ZarinpalAmountMismatchException;
@@ -230,6 +238,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiProvisionOwnershipException.class,
             PaymentNotFoundException.class,
             PaymentOrderNotFoundException.class,
+            ManualPaymentInstructionNotFoundException.class,
             ZarinpalAuthorityNotFoundException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
@@ -265,6 +274,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             XuiTrafficOverflowException.class,
             PaymentConflictException.class,
             PaymentProcessorNotFoundException.class,
+            ManualCardPaymentNotAllowedException.class,
+            ManualPaymentInstructionConflictException.class,
+            ManualPaymentRequestIdConflictException.class,
+            ManualPaymentReissueNotAllowedException.class,
             ZarinpalDisabledException.class,
             ZarinpalConfigurationException.class,
             ZarinpalPaymentNotAllowedException.class,
@@ -277,6 +290,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            ManualCardPaymentDisabledException.class,
+            ManualPaymentDestinationUnavailableException.class,
+            ManualPaymentAmountReservationException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleManualPaymentUnavailable(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
     @ExceptionHandler({

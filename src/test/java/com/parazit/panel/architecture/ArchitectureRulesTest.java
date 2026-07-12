@@ -216,6 +216,7 @@ class ArchitectureRulesTest {
                 .filter(path -> path.getFileName().toString().endsWith("PaymentProcessor.java"))
                 .filter(path -> !source(path).contains("interface PaymentProcessor"))
                 .filter(path -> !path.toString().contains("/application/payment/zarinpal/ZarinpalPaymentProcessor.java"))
+                .filter(path -> !path.toString().contains("/application/payment/manual/ManualCardPaymentProcessor.java"))
                 .toList();
         List<Path> businessSwitches = javaFiles("com/parazit/panel/application/payment")
                 .filter(path -> {
@@ -268,6 +269,32 @@ class ArchitectureRulesTest {
                 .toList();
 
         assertThat(applicationViolations).isEmpty();
+        assertThat(apiViolations).isEmpty();
+    }
+
+    @Test
+    void manualPaymentKeepsCardStorageAndApprovalOutOfTask29() throws IOException {
+        List<Path> persistenceViolations = javaFiles("com/parazit/panel/domain/payment/manual")
+                .filter(path -> source(path).contains("cardNumberEncrypted")
+                        || source(path).contains("receiptFile")
+                        || source(path).contains("receiptUrl")
+                        || source(path).contains("receiptStorage"))
+                .toList();
+        List<Path> approvalViolations = javaFiles("com/parazit/panel/application/payment/manual")
+                .filter(path -> source(path).contains("markApproved")
+                        || source(path).contains("APPROVED"))
+                .toList();
+        List<Path> apiViolations = javaFiles("com/parazit/panel/api/payment/manual")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("domain.payment.manual.ManualCardPaymentInstruction")
+                            || source.contains("repository.");
+                })
+                .toList();
+
+        assertThat(persistenceViolations).isEmpty();
+        assertThat(approvalViolations).isEmpty();
         assertThat(apiViolations).isEmpty();
     }
 

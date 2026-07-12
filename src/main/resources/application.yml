@@ -114,6 +114,18 @@ app:
       retry-delay: "${ZARINPAL_RETRY_DELAY:PT1S}"
       sandbox-enabled: "${ZARINPAL_SANDBOX_ENABLED:false}"
       verify-ssl: "${ZARINPAL_VERIFY_SSL:true}"
+    manual-card:
+      enabled: "${MANUAL_CARD_PAYMENT_ENABLED:false}"
+      instruction-ttl: "${MANUAL_CARD_PAYMENT_TTL:PT30M}"
+      minimum-suffix: "${MANUAL_CARD_SUFFIX_MIN:101}"
+      maximum-suffix: "${MANUAL_CARD_SUFFIX_MAX:4999}"
+      max-generation-attempts: "${MANUAL_CARD_SUFFIX_MAX_ATTEMPTS:20}"
+      destination-id: "${MANUAL_CARD_DESTINATION_ID:PRIMARY_CARD}"
+      bank-name: "${MANUAL_CARD_BANK_NAME:}"
+      card-holder-name: "${MANUAL_CARD_HOLDER_NAME:}"
+      card-number: "${MANUAL_CARD_NUMBER:}"
+      allow-instruction-reissue: "${MANUAL_CARD_ALLOW_REISSUE:true}"
+      reissue-cooldown: "${MANUAL_CARD_REISSUE_COOLDOWN:PT2M}"
   xui:
     base-url: "${XUI_BASE_URL:http://localhost:2053}"
     username: "${XUI_USERNAME:}"

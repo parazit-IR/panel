@@ -1,6 +1,6 @@
 # Payment Foundation
 
-Task 27 introduces the local payment foundation only. It does not implement Zarinpal, manual receipt upload, callbacks, verification endpoints, operator approval, subscriptions, Telegram handlers, or VPN provisioning.
+Task 27 introduced the local payment foundation only. Task 28 added Zarinpal request/callback/verification. Task 29 adds manual card-to-card payment instructions with unique payable amounts. Manual receipt upload, operator approval, subscriptions, Telegram handlers, and VPN provisioning remain deferred.
 
 ## Architecture
 
@@ -29,6 +29,8 @@ flowchart LR
 `PaymentService` receives all processors from Spring and builds a method-to-processor map. Business logic does not switch on `PaymentMethod`; adding a provider later means adding a new processor bean.
 
 Task 28 adds the Zarinpal processor and provider-specific attempt model without changing the generic payment aggregate.
+
+Task 29 adds the manual card processor and provider-specific instruction model. Manual card payment uses dedicated instruction use cases because it does not have meaningful online gateway verification in this phase.
 
 ## State Machine
 
@@ -83,7 +85,7 @@ Temporary internal endpoints:
 - `GET /internal/payments/{id}`
 - `GET /internal/orders/{id}/payments`
 
-These endpoints create and read local payment records only. They do not initiate a gateway payment, verify a payment, approve a manual payment, upload receipts, or provision VPN clients.
+These endpoints create and read local payment records only. Provider-specific endpoints initialize Zarinpal or manual-card instructions. No endpoint in Task 29 approves a manual payment, uploads receipts, or provisions VPN clients.
 
 ## Payment Operation History
 
@@ -91,6 +93,4 @@ These endpoints create and read local payment records only. They do not initiate
 
 ## Future Providers
 
-Future Zarinpal and card-to-card support should add provider-specific classes that implement `PaymentProcessor`. The application service can select the implementation automatically using `supportedMethod()`.
-
-Task 28 may add gateway-specific initialization, but it should not change the payment aggregate invariants introduced here.
+Provider-specific classes implement `PaymentProcessor` for registration, while dedicated use cases handle provider-specific flows such as Zarinpal callbacks or manual-card instructions. The application service can select processors automatically using `supportedMethod()`.
