@@ -159,6 +159,68 @@ public class TelegramMessageCatalog {
             case "telegram.subscription.status.REVOKED" -> fa ? "لغوشده" : "Revoked";
             case "telegram.subscription.status.EXPIRED" -> fa ? "منقضی‌شده" : "Expired";
             case "telegram.action.confirm" -> fa ? "تأیید" : "Confirm";
+            case "telegram.account.title" -> fa ? "👤 اطلاعات حساب کاربری شما" : "👤 Your account information";
+            case "telegram.account.title_short" -> fa ? "👤 حساب کاربری" : "👤 Account";
+            case "telegram.account.telegram_id" -> fa ? "🆔 شناسه تلگرام" : "🆔 Telegram ID";
+            case "telegram.account.name" -> fa ? "👤 نام" : "👤 Name";
+            case "telegram.account.registered_at" -> fa ? "📅 زمان عضویت" : "📅 Registered at";
+            case "telegram.account.total_services" -> fa ? "🛍 تعداد سرویس‌ها" : "🛍 Total services";
+            case "telegram.account.active_services" -> fa ? "🟢 سرویس‌های فعال" : "🟢 Active services";
+            case "telegram.account.expired_services" -> fa ? "⚫ سرویس‌های منقضی" : "⚫ Expired services";
+            case "telegram.account.paid_orders" -> fa ? "💳 پرداخت‌های موفق" : "💳 Successful payments";
+            case "telegram.account.pending_payments" -> fa ? "⏳ پرداخت‌های در انتظار" : "⏳ Pending payments";
+            case "telegram.account.referral_code" -> fa ? "🎁 کد معرف" : "🎁 Referral code";
+            case "telegram.account.phone" -> fa ? "📱 شماره تماس" : "📱 Phone";
+            case "telegram.account.wallet_balance" -> fa ? "💰 موجودی کیف پول" : "💰 Wallet balance";
+            case "telegram.account.customer_group" -> fa ? "🏷 گروه کاربری" : "🏷 Customer group";
+            case "telegram.account.discount_usage" -> fa ? "🎟 تعداد تخفیف‌های استفاده‌شده" : "🎟 Used discounts";
+            case "telegram.account.payments" -> fa ? "💳 پرداخت‌های من" : "💳 My payments";
+            case "telegram.account.settings" -> fa ? "⚙️ تنظیمات اعلان‌ها" : "⚙️ Notification settings";
+            case "telegram.services.title" -> fa ? "🛍 اشتراک‌های خریداری‌شده توسط شما" : "🛍 Your purchased services";
+            case "telegram.services.description" -> fa
+                    ? "برای مشاهده اطلاعات و مدیریت سرویس، روی نام آن کلیک کنید.\n\nبرای پیدا کردن سریع‌تر سرویس می‌توانید از جست‌وجوی سریع استفاده کنید."
+                    : "Tap a service name to view and manage it.\n\nUse quick search to find a service faster.";
+            case "telegram.services.empty" -> fa ? "اشتراکی برای نمایش وجود ندارد." : "No services are available.";
+            case "telegram.services.search" -> fa ? "🔎 جست‌وجوی سریع" : "🔎 Quick search";
+            case "telegram.services.search_prompt" -> fa ? "نام یا شناسه سرویس را ارسال کنید." : "Send the service name or identifier.";
+            case "telegram.services.search_too_short" -> fa ? "عبارت جست‌وجو باید حداقل ۳ کاراکتر باشد." : "Search query must be at least 3 characters.";
+            case "telegram.services.search_no_result" -> fa ? "سرویسی با این مشخصات در حساب شما پیدا نشد." : "No service with these details was found in your account.";
+            case "telegram.services.search_expired" -> fa
+                    ? "زمان جست‌وجو به پایان رسید. دوباره از بخش «سرویس‌های من» جست‌وجو را شروع کنید."
+                    : "Search expired. Start quick search again from My services.";
+            case "telegram.services.search_results" -> fa ? "نتیجه جست‌وجو:" : "Search results:";
+            case "telegram.services.previous" -> fa ? "قبلی" : "Previous";
+            case "telegram.services.next" -> fa ? "بعدی" : "Next";
+            case "telegram.services.details" -> fa ? "🛍 اطلاعات سرویس" : "🛍 Service details";
+            case "telegram.service.name" -> fa ? "👤 نام سرویس" : "👤 Service name";
+            case "telegram.service.plan" -> fa ? "📦 پلن" : "📦 Plan";
+            case "telegram.service.status" -> fa ? "📌 وضعیت" : "📌 Status";
+            case "telegram.service.total_traffic" -> fa ? "📊 حجم کل" : "📊 Total traffic";
+            case "telegram.service.used_traffic" -> fa ? "📉 حجم مصرف‌شده" : "📉 Used traffic";
+            case "telegram.service.remaining_traffic" -> fa ? "📈 حجم باقی‌مانده" : "📈 Remaining traffic";
+            case "telegram.service.expires_at" -> fa ? "📅 تاریخ انقضا" : "📅 Expires at";
+            case "telegram.service.remaining_time" -> fa ? "⏳ زمان باقی‌مانده" : "⏳ Remaining time";
+            case "telegram.service.usage_unavailable" -> fa ? "📊 اطلاعات مصرف" : "📊 Usage";
+            case "telegram.service.usage_unavailable_text" -> fa ? "در حال حاضر در دسترس نیست." : "Currently unavailable.";
+            case "telegram.service.usage_stale" -> fa ? "⚠️ اطلاعات مصرف ممکن است به‌روز نباشد." : "⚠️ Usage data may be stale.";
+            case "telegram.service.refresh" -> fa ? "🔄 به‌روزرسانی وضعیت" : "🔄 Refresh status";
+            case "telegram.service.subscription_link" -> fa ? "🔗 دریافت لینک اشتراک" : "🔗 Get subscription link";
+            case "telegram.service.qr" -> fa ? "📱 دریافت QR Code" : "📱 Get QR Code";
+            case "telegram.service.vless" -> fa ? "📋 دریافت کانفیگ" : "📋 Get config";
+            case "telegram.service.renewal" -> fa ? "♻️ تمدید سرویس" : "♻️ Renew service";
+            case "telegram.service.provisioning" -> fa
+                    ? "سرویس در حال ساخت است. چند لحظه دیگر وضعیت را به‌روزرسانی کنید."
+                    : "The service is being prepared. Refresh the status in a moment.";
+            case "telegram.service.failed" -> fa
+                    ? "ساخت سرویس با خطا روبه‌رو شده است. لطفاً از بخش پشتیبانی پیگیری کنید."
+                    : "Service provisioning failed. Please contact support.";
+            case "telegram.service.status.PROVISIONING" -> fa ? "🟡 در حال ساخت" : "🟡 Provisioning";
+            case "telegram.service.status.ACTIVE" -> fa ? "🟢 فعال" : "🟢 Active";
+            case "telegram.service.status.SUSPENDED" -> fa ? "🟠 تعلیق‌شده" : "🟠 Suspended";
+            case "telegram.service.status.EXPIRED" -> fa ? "⚫ منقضی‌شده" : "⚫ Expired";
+            case "telegram.service.status.REVOKED" -> fa ? "🔴 لغوشده" : "🔴 Revoked";
+            case "telegram.service.status.FAILED" -> fa ? "❌ خطای ساخت" : "❌ Provisioning failed";
+            case "telegram.service.status.UNKNOWN" -> fa ? "❔ نامشخص" : "❔ Unknown";
             default -> key;
         };
     }

@@ -15,6 +15,8 @@ class TelegramCommandParserTest {
         assertThat(parser.parse("/start@PanelBot abc")).isEqualTo(TelegramCommand.START);
         assertThat(parser.parse("/menu")).isEqualTo(TelegramCommand.MENU);
         assertThat(parser.parse("/subscriptions")).isEqualTo(TelegramCommand.MY_SUBSCRIPTIONS);
+        assertThat(parser.parse("/account")).isEqualTo(TelegramCommand.ACCOUNT);
+        assertThat(parser.parse("/profile")).isEqualTo(TelegramCommand.ACCOUNT);
         assertThat(parser.parse("/help")).isEqualTo(TelegramCommand.HELP);
     }
 

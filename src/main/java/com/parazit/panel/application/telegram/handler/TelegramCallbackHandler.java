@@ -38,8 +38,12 @@ import com.parazit.panel.application.telegram.model.TelegramResponseAction;
 import com.parazit.panel.application.telegram.model.TelegramResponsePlan;
 import com.parazit.panel.application.telegram.faq.TelegramFaqDetailHandler;
 import com.parazit.panel.application.telegram.faq.TelegramFaqListHandler;
+import com.parazit.panel.application.telegram.account.TelegramCustomerAccountHandler;
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuAction;
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuHandler;
+import com.parazit.panel.application.telegram.service.TelegramMyServicesHandler;
+import com.parazit.panel.application.telegram.service.TelegramServiceDetailsHandler;
+import com.parazit.panel.application.telegram.service.TelegramServiceSearchHandler;
 import com.parazit.panel.application.telegram.support.TelegramSupportMenuHandler;
 import com.parazit.panel.application.telegram.tariff.TelegramTariffCatalogHandler;
 import com.parazit.panel.application.telegram.tutorial.TelegramDownloadLinksHandler;
@@ -81,6 +85,12 @@ public class TelegramCallbackHandler {
     private final TelegramSupportMenuHandler supportMenuHandler;
     private final TelegramFaqListHandler faqListHandler;
     private final TelegramFaqDetailHandler faqDetailHandler;
+    private final TelegramCustomerAccountHandler accountHandler;
+    private final TelegramMyServicesHandler myServicesHandler;
+    private final TelegramServiceDetailsHandler serviceDetailsHandler;
+    private final TelegramServiceSearchHandler serviceSearchHandler;
+    private final PaymentsTelegramCommandHandler paymentsTelegramCommandHandler;
+    private final SettingsTelegramCommandHandler settingsTelegramCommandHandler;
 
     public TelegramCallbackHandler(
             TelegramCallbackDataCodec callbackDataCodec,
@@ -106,7 +116,13 @@ public class TelegramCallbackHandler {
             TelegramDownloadLinksHandler downloadLinksHandler,
             TelegramSupportMenuHandler supportMenuHandler,
             TelegramFaqListHandler faqListHandler,
-            TelegramFaqDetailHandler faqDetailHandler
+            TelegramFaqDetailHandler faqDetailHandler,
+            TelegramCustomerAccountHandler accountHandler,
+            TelegramMyServicesHandler myServicesHandler,
+            TelegramServiceDetailsHandler serviceDetailsHandler,
+            TelegramServiceSearchHandler serviceSearchHandler,
+            PaymentsTelegramCommandHandler paymentsTelegramCommandHandler,
+            SettingsTelegramCommandHandler settingsTelegramCommandHandler
     ) {
         this.callbackDataCodec = Objects.requireNonNull(callbackDataCodec, "callbackDataCodec must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
@@ -132,6 +148,12 @@ public class TelegramCallbackHandler {
         this.supportMenuHandler = Objects.requireNonNull(supportMenuHandler, "supportMenuHandler must not be null");
         this.faqListHandler = Objects.requireNonNull(faqListHandler, "faqListHandler must not be null");
         this.faqDetailHandler = Objects.requireNonNull(faqDetailHandler, "faqDetailHandler must not be null");
+        this.accountHandler = Objects.requireNonNull(accountHandler, "accountHandler must not be null");
+        this.myServicesHandler = Objects.requireNonNull(myServicesHandler, "myServicesHandler must not be null");
+        this.serviceDetailsHandler = Objects.requireNonNull(serviceDetailsHandler, "serviceDetailsHandler must not be null");
+        this.serviceSearchHandler = Objects.requireNonNull(serviceSearchHandler, "serviceSearchHandler must not be null");
+        this.paymentsTelegramCommandHandler = Objects.requireNonNull(paymentsTelegramCommandHandler, "paymentsTelegramCommandHandler must not be null");
+        this.settingsTelegramCommandHandler = Objects.requireNonNull(settingsTelegramCommandHandler, "settingsTelegramCommandHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, String callbackData) {
@@ -148,13 +170,20 @@ public class TelegramCallbackHandler {
         switch (payload.action()) {
             case MAIN_MENU, BACK_TO_MAIN -> actions.add(menuMessage(context));
             case HELP -> actions.add(helpMessage(context));
-            case MY_SUBSCRIPTIONS, BACK_TO_SUBSCRIPTIONS -> actions.add(subscriptionsMessage(context));
-            case VIEW_SUBSCRIPTION -> actions.add(subscriptionDetails(context, requireSubscription(payload)));
-            case SHOW_CONFIG -> actions.add(configText(context, requireSubscription(payload), configIndex(payload)));
-            case SHOW_CONFIG_QR -> actions.add(configQr(context, requireSubscription(payload), configIndex(payload)));
-            case REQUEST_SUBSCRIPTION_LINK -> actions.add(rotationWarning(context, requireSubscription(payload)));
+            case MY_SUBSCRIPTIONS, BACK_TO_SUBSCRIPTIONS, LIST_MY_SERVICES -> actions.addAll(myServicesHandler.handle(context, 1).actions());
+            case MY_SERVICES_PAGE, BACK_TO_MY_SERVICES -> actions.addAll(myServicesHandler.handle(context, configIndex(payload)).actions());
+            case VIEW_SUBSCRIPTION, SHOW_SERVICE_DETAILS -> actions.addAll(serviceDetailsHandler.handle(context, requireSubscription(payload), configIndex(payload)).actions());
+            case REFRESH_SERVICE_STATUS -> actions.addAll(serviceDetailsHandler.refresh(context, requireSubscription(payload), configIndex(payload)).actions());
+            case SHOW_CONFIG, SHOW_VLESS_CONFIG -> actions.add(configText(context, requireSubscription(payload), configIndex(payload)));
+            case SHOW_CONFIG_QR, SHOW_SUBSCRIPTION_QR -> actions.add(configQr(context, requireSubscription(payload), configIndex(payload)));
+            case REQUEST_SUBSCRIPTION_LINK, SHOW_SUBSCRIPTION_LINK -> actions.add(rotationWarning(context, requireSubscription(payload)));
             case CONFIRM_ROTATE_SUBSCRIPTION_TOKEN -> actions.addAll(confirmRotation(context, requireAction(payload)));
             case CANCEL_ROTATION -> actions.add(cancelRotation(context, requireAction(payload)));
+            case SHOW_ACCOUNT, BACK_TO_ACCOUNT -> actions.addAll(accountHandler.handle(context).actions());
+            case SEARCH_MY_SERVICES -> actions.addAll(serviceSearchHandler.begin(context, configIndex(payload)).actions());
+            case REQUEST_RENEWAL -> actions.add(unavailable(context, "telegram.feature.renewal_unavailable"));
+            case SHOW_PAYMENTS -> actions.addAll(paymentsTelegramCommandHandler.handle(context).actions());
+            case SHOW_NOTIFICATION_SETTINGS -> actions.addAll(settingsTelegramCommandHandler.handle(context).actions());
             case SHOW_TARIFFS -> actions.addAll(tariffCatalogHandler.handle(context, 1).actions());
             case SHOW_TARIFF_PAGE -> actions.addAll(tariffCatalogHandler.handle(context, configIndex(payload)).actions());
             case BUY_SUBSCRIPTION -> actions.addAll(mainMenuHandler.handle(context, TelegramMainMenuAction.BUY_SUBSCRIPTION).actions());
@@ -170,6 +199,17 @@ public class TelegramCallbackHandler {
 
     private TelegramResponseAction subscriptionsMessage(TelegramInteractionContext context) {
         return mySubscriptionsTelegramCommandHandler.handle(context).actions().getFirst();
+    }
+
+    private TelegramResponseAction unavailable(TelegramInteractionContext context, String key) {
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                catalog.text(context.language(), key),
+                TelegramParseMode.NONE,
+                TelegramInlineKeyboard.empty(),
+                telegramProperties.disableLinkPreview(),
+                null
+        ), false);
     }
 
     private TelegramResponseAction subscriptionDetails(TelegramInteractionContext context, UUID subscriptionId) {

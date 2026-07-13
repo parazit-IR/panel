@@ -45,6 +45,7 @@ public class TelegramCommandParser {
             case "services" -> TelegramCommand.MY_SUBSCRIPTIONS;
             case "payments" -> TelegramCommand.PAYMENTS;
             case "settings" -> TelegramCommand.SETTINGS;
+            case "account", "profile" -> TelegramCommand.ACCOUNT;
             case "tutorials" -> TelegramCommand.TUTORIALS;
             case "support" -> TelegramCommand.SUPPORT;
             case "faq" -> TelegramCommand.FAQ;

@@ -18,4 +18,6 @@ public interface SpringDataPaymentRepository extends SpringDataUuidRepository<Pa
     List<Payment> findAllByStatusOrderByExpiresAtAsc(PaymentStatus status);
 
     boolean existsByOrderIdAndStatus(UUID orderId, PaymentStatus status);
+
+    long countByUserIdAndStatusIn(UUID userId, List<PaymentStatus> statuses);
 }

@@ -8,6 +8,7 @@ public enum TelegramCommand {
     MY_SUBSCRIPTIONS,
     PAYMENTS,
     SETTINGS,
+    ACCOUNT,
     TUTORIALS,
     SUPPORT,
     FAQ,

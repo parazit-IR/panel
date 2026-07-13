@@ -13,6 +13,14 @@ Callback data is signed with HMAC-SHA-256 using `TELEGRAM_BOT_CALLBACK_SIGNING_S
 - payment references
 - private keys
 
+Task 43 service callbacks may carry an internal subscription UUID inside signed callback data, but that value is never displayed. Every service detail, config, QR, and refresh action rechecks:
+
+```text
+telegramUserId -> local User -> owned Subscription -> related provision
+```
+
+The bot never trusts callback-carried usernames, traffic values, owner IDs, tokens, QR payloads, or VLESS URIs.
+
 Subscription URLs cannot be reconstructed from storage because only token hashes are stored. The Telegram bot therefore generates a new link only after explicit confirmation and token rotation.
 
 ```mermaid
@@ -29,4 +37,3 @@ sequenceDiagram
 ```
 
 Logs include safe IDs and action names only. They must not include bot token, callback secret, subscription token, subscription URL, VLESS URI, QR bytes, XUI credentials, or payment data.
-

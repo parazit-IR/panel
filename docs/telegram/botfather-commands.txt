@@ -3,6 +3,7 @@ menu - نمایش منوی اصلی
 plans - مشاهده پلن‌ها
 buy - خرید اشتراک جدید
 subscriptions - سرویس‌های من
+account - اطلاعات حساب کاربری
 payments - پرداخت‌های من
 settings - تنظیمات اعلان‌ها
 tutorials - آموزش اتصال

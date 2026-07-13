@@ -22,7 +22,8 @@ Feature behavior:
 
 - Buy routes to the existing purchase entry point.
 - Tariffs route to a read-only active plan tariff catalog.
-- My services routes to the existing subscription list.
+- My services routes to the Task 43 customer service list with pagination, quick search, account summary access, and safe service details.
+- Account summary is available through `/account`, `/profile`, and the My Services page without adding another permanent main-menu row.
 - Tutorials route to configured platform instructions and trusted download links.
 - Support routes to FAQ and configured Telegram support URL.
 - Renewal, trial, and wallet remain visible but return localized unavailable messages until those domains are implemented.

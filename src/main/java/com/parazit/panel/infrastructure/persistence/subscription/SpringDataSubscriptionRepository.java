@@ -1,6 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.subscription;
 
 import com.parazit.panel.domain.subscription.Subscription;
+import com.parazit.panel.domain.subscription.SubscriptionStatus;
 import com.parazit.panel.infrastructure.persistence.repository.SpringDataUuidRepository;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
@@ -25,6 +26,10 @@ public interface SpringDataSubscriptionRepository extends SpringDataUuidReposito
     Optional<Subscription> findByUserIdAndId(UUID userId, UUID subscriptionId);
 
     List<Subscription> findAllByUserIdOrderByCreatedAtDesc(UUID userId);
+
+    long countByUserId(UUID userId);
+
+    long countByUserIdAndStatus(UUID userId, SubscriptionStatus status);
 
     boolean existsByXuiClientProvisionId(UUID provisionId);
 

@@ -26,7 +26,21 @@ public enum TelegramCallbackAction {
     BACK_TO_TUTORIALS("Y"),
     BACK_TO_SUPPORT("J"),
     BACK_TO_FAQ("K"),
-    BUY_SUBSCRIPTION("A");
+    BUY_SUBSCRIPTION("A"),
+    SHOW_ACCOUNT("Z"),
+    LIST_MY_SERVICES("e"),
+    MY_SERVICES_PAGE("g"),
+    SEARCH_MY_SERVICES("h"),
+    SHOW_SERVICE_DETAILS("i"),
+    REFRESH_SERVICE_STATUS("j"),
+    SHOW_SUBSCRIPTION_LINK("k"),
+    SHOW_SUBSCRIPTION_QR("l"),
+    SHOW_VLESS_CONFIG("m"),
+    REQUEST_RENEWAL("n"),
+    BACK_TO_MY_SERVICES("o"),
+    BACK_TO_ACCOUNT("p"),
+    SHOW_PAYMENTS("q"),
+    SHOW_NOTIFICATION_SETTINGS("r");
 
     private final String code;
 
