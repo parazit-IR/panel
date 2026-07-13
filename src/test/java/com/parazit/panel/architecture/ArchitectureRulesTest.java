@@ -500,6 +500,79 @@ class ArchitectureRulesTest {
         assertThat(violations).isEmpty();
     }
 
+    @Test
+    void telegramDomainAndApplicationStayInsideCleanArchitectureBoundaries() throws IOException {
+        List<Path> domainViolations = javaFiles("com/parazit/panel/domain/telegram")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.api.")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("org.springframework.web.client")
+                            || source.contains("RestClient");
+                })
+                .toList();
+        List<Path> applicationViolations = javaFiles("com/parazit/panel/application/telegram")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("org.springframework.web.client")
+                            || source.contains("jakarta.persistence")
+                            || source.contains("JpaRepository")
+                            || source.contains("RestClient");
+                })
+                .toList();
+
+        assertThat(domainViolations).isEmpty();
+        assertThat(applicationViolations).isEmpty();
+    }
+
+    @Test
+    void telegramHandlersDependOnUseCasesAndDoNotInjectRepositoriesOrPaymentFlows() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/application/telegram/handler")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("repository.")
+                            || source.contains("JpaRepository")
+                            || source.contains("PaymentApprovalService")
+                            || source.contains("CreatePayment")
+                            || source.contains("Zarinpal")
+                            || source.contains("ManualCardPayment")
+                            || source.contains("CreateVpnClient")
+                            || source.contains("XuiClientManagementClient");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void telegramDoesNotPersistSecretsUrlsUrisOrQrBytes() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/domain/telegram")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("accessToken")
+                            || source.contains("subscriptionUrl")
+                            || source.contains("vless")
+                            || source.contains("VLESS")
+                            || source.contains("photoBytes")
+                            || source.contains("@Lob")
+                            || source.contains("byte[]");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void telegramSdkTypesDoNotLeakOutsideInfrastructure() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel")
+                .filter(path -> source(path).contains("org.telegram"))
+                .filter(path -> !path.toString().contains("/infrastructure/telegram/"))
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
     private static Stream<Path> javaFiles(String packagePath) throws IOException {
         Path root = packagePath.isBlank() ? MAIN_JAVA : MAIN_JAVA.resolve(packagePath);
         return Files.walk(root)

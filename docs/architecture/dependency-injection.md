@@ -53,7 +53,7 @@ interface to an implementation is clearer.
 Optional modules such as Telegram, Panel, and Payment use enable flags:
 
 ```text
-app.telegram.enabled
+app.telegram.bot.enabled
 app.panel.enabled
 app.payment.enabled
 ```

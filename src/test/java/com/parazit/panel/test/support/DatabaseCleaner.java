@@ -5,27 +5,29 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 public final class DatabaseCleaner {
 
+    private static final String TELEGRAM_TABLES = "telegram_sensitive_actions, telegram_processed_updates, telegram_polling_state, ";
+
     private DatabaseCleaner() {
     }
 
     public static void cleanUserModuleTables(JdbcTemplate jdbcTemplate) {
         Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null")
-                .execute("TRUNCATE TABLE subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, referrals, user_settings, users RESTART IDENTITY");
+                .execute("TRUNCATE TABLE " + TELEGRAM_TABLES + "subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, referrals, user_settings, users RESTART IDENTITY");
     }
 
     public static void cleanPlanTables(JdbcTemplate jdbcTemplate) {
         Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null")
-                .execute("TRUNCATE TABLE subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, plans RESTART IDENTITY");
+                .execute("TRUNCATE TABLE " + TELEGRAM_TABLES + "subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, plans RESTART IDENTITY");
     }
 
     public static void cleanPlanSelectionTables(JdbcTemplate jdbcTemplate) {
         Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null")
-                .execute("TRUNCATE TABLE subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, referrals, user_settings, users, plans RESTART IDENTITY");
+                .execute("TRUNCATE TABLE " + TELEGRAM_TABLES + "subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, referrals, user_settings, users, plans RESTART IDENTITY");
     }
 
     public static void cleanPaymentTables(JdbcTemplate jdbcTemplate) {
         Objects.requireNonNull(jdbcTemplate, "jdbcTemplate must not be null")
-                .execute("TRUNCATE TABLE subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, referrals, user_settings, users RESTART IDENTITY");
+                .execute("TRUNCATE TABLE " + TELEGRAM_TABLES + "subscriptions, provisioning_outbox, manual_payment_reviews, manual_payment_receipts, manual_card_payment_instructions, zarinpal_payment_attempts, payment_operations, payments, orders, xui_client_operations, xui_client_provisions, plan_selections, referrals, user_settings, users RESTART IDENTITY");
     }
 
     public static void cleanTestPersistenceTables(JdbcTemplate jdbcTemplate) {

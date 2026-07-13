@@ -1,0 +1,330 @@
+package com.parazit.panel.application.telegram.handler;
+
+import com.parazit.panel.application.port.in.subscription.RotateSubscriptionTokenUseCase;
+import com.parazit.panel.application.port.in.subscription.delivery.BuildSubscriptionUrlUseCase;
+import com.parazit.panel.application.port.in.subscription.delivery.GenerateSubscriptionUrlQrCodeUseCase;
+import com.parazit.panel.application.port.in.subscription.delivery.GenerateVlessConfigQrCodeUseCase;
+import com.parazit.panel.application.port.in.subscription.delivery.GetSubscriptionConfigEntryUseCase;
+import com.parazit.panel.application.port.in.subscription.delivery.GetSubscriptionDeliverySummaryUseCase;
+import com.parazit.panel.application.qrcode.model.QrImageFormat;
+import com.parazit.panel.application.qrcode.model.QrRenderOptions;
+import com.parazit.panel.application.subscription.command.RotateSubscriptionTokenCommand;
+import com.parazit.panel.application.subscription.delivery.BuildSubscriptionUrlCommand;
+import com.parazit.panel.application.subscription.delivery.BuildSubscriptionUrlResult;
+import com.parazit.panel.application.subscription.delivery.GenerateSubscriptionUrlQrCommand;
+import com.parazit.panel.application.subscription.delivery.GenerateVlessConfigQrCommand;
+import com.parazit.panel.application.subscription.delivery.QrCodeImageResult;
+import com.parazit.panel.application.subscription.delivery.SubscriptionConfigEntryResult;
+import com.parazit.panel.application.subscription.delivery.SubscriptionDeliveryEntry;
+import com.parazit.panel.application.subscription.delivery.SubscriptionDeliverySummary;
+import com.parazit.panel.application.subscription.result.CreateSubscriptionResult;
+import com.parazit.panel.application.telegram.TelegramCallbackDataCodec;
+import com.parazit.panel.application.telegram.TelegramKeyboardFactory;
+import com.parazit.panel.application.telegram.TelegramMessageCatalog;
+import com.parazit.panel.application.telegram.TelegramMessageFormatter;
+import com.parazit.panel.application.telegram.TelegramSensitiveActionService;
+import com.parazit.panel.application.telegram.command.AnswerTelegramCallbackCommand;
+import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
+import com.parazit.panel.application.telegram.command.SendTelegramPhotoCommand;
+import com.parazit.panel.application.telegram.model.TelegramCallbackAction;
+import com.parazit.panel.application.telegram.model.TelegramCallbackPayload;
+import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
+import com.parazit.panel.application.telegram.model.TelegramInlineKeyboardRow;
+import com.parazit.panel.application.telegram.model.TelegramInteractionContext;
+import com.parazit.panel.application.telegram.model.TelegramParseMode;
+import com.parazit.panel.application.telegram.model.TelegramResponseAction;
+import com.parazit.panel.application.telegram.model.TelegramResponsePlan;
+import com.parazit.panel.config.properties.QrCodeProperties;
+import com.parazit.panel.config.properties.TelegramBotProperties;
+import com.parazit.panel.domain.telegram.TelegramSensitiveAction;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
+import org.springframework.stereotype.Component;
+
+@Component
+public class TelegramCallbackHandler {
+
+    private final TelegramCallbackDataCodec callbackDataCodec;
+    private final TelegramKeyboardFactory keyboardFactory;
+    private final TelegramMessageCatalog catalog;
+    private final TelegramMessageFormatter formatter;
+    private final TelegramBotProperties telegramProperties;
+    private final QrCodeProperties qrProperties;
+    private final GetSubscriptionDeliverySummaryUseCase getSummaryUseCase;
+    private final GetSubscriptionConfigEntryUseCase getConfigEntryUseCase;
+    private final GenerateVlessConfigQrCodeUseCase generateVlessQrUseCase;
+    private final GenerateSubscriptionUrlQrCodeUseCase generateSubscriptionUrlQrUseCase;
+    private final RotateSubscriptionTokenUseCase rotateSubscriptionTokenUseCase;
+    private final BuildSubscriptionUrlUseCase buildSubscriptionUrlUseCase;
+    private final TelegramSensitiveActionService sensitiveActionService;
+    private final MySubscriptionsTelegramCommandHandler mySubscriptionsTelegramCommandHandler;
+
+    public TelegramCallbackHandler(
+            TelegramCallbackDataCodec callbackDataCodec,
+            TelegramKeyboardFactory keyboardFactory,
+            TelegramMessageCatalog catalog,
+            TelegramMessageFormatter formatter,
+            TelegramBotProperties telegramProperties,
+            QrCodeProperties qrProperties,
+            GetSubscriptionDeliverySummaryUseCase getSummaryUseCase,
+            GetSubscriptionConfigEntryUseCase getConfigEntryUseCase,
+            GenerateVlessConfigQrCodeUseCase generateVlessQrUseCase,
+            GenerateSubscriptionUrlQrCodeUseCase generateSubscriptionUrlQrUseCase,
+            RotateSubscriptionTokenUseCase rotateSubscriptionTokenUseCase,
+            BuildSubscriptionUrlUseCase buildSubscriptionUrlUseCase,
+            TelegramSensitiveActionService sensitiveActionService,
+            MySubscriptionsTelegramCommandHandler mySubscriptionsTelegramCommandHandler
+    ) {
+        this.callbackDataCodec = Objects.requireNonNull(callbackDataCodec, "callbackDataCodec must not be null");
+        this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
+        this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
+        this.formatter = Objects.requireNonNull(formatter, "formatter must not be null");
+        this.telegramProperties = Objects.requireNonNull(telegramProperties, "telegramProperties must not be null");
+        this.qrProperties = Objects.requireNonNull(qrProperties, "qrProperties must not be null");
+        this.getSummaryUseCase = Objects.requireNonNull(getSummaryUseCase, "getSummaryUseCase must not be null");
+        this.getConfigEntryUseCase = Objects.requireNonNull(getConfigEntryUseCase, "getConfigEntryUseCase must not be null");
+        this.generateVlessQrUseCase = Objects.requireNonNull(generateVlessQrUseCase, "generateVlessQrUseCase must not be null");
+        this.generateSubscriptionUrlQrUseCase = Objects.requireNonNull(generateSubscriptionUrlQrUseCase, "generateSubscriptionUrlQrUseCase must not be null");
+        this.rotateSubscriptionTokenUseCase = Objects.requireNonNull(rotateSubscriptionTokenUseCase, "rotateSubscriptionTokenUseCase must not be null");
+        this.buildSubscriptionUrlUseCase = Objects.requireNonNull(buildSubscriptionUrlUseCase, "buildSubscriptionUrlUseCase must not be null");
+        this.sensitiveActionService = Objects.requireNonNull(sensitiveActionService, "sensitiveActionService must not be null");
+        this.mySubscriptionsTelegramCommandHandler = Objects.requireNonNull(mySubscriptionsTelegramCommandHandler, "mySubscriptionsTelegramCommandHandler must not be null");
+    }
+
+    public TelegramResponsePlan handle(TelegramInteractionContext context, String callbackData) {
+        TelegramCallbackPayload payload;
+        try {
+            payload = callbackDataCodec.decode(callbackData, context.telegramUserId(), context.receivedAt());
+        } catch (IllegalArgumentException exception) {
+            return new TelegramResponsePlan(List.of(
+                    answer(context, catalog.text(context.language(), "not_available"))
+            ), "callback:invalid");
+        }
+        List<TelegramResponseAction> actions = new ArrayList<>();
+        actions.add(answer(context, ""));
+        switch (payload.action()) {
+            case MAIN_MENU, BACK_TO_MAIN -> actions.add(menuMessage(context));
+            case HELP -> actions.add(helpMessage(context));
+            case MY_SUBSCRIPTIONS, BACK_TO_SUBSCRIPTIONS -> actions.add(subscriptionsMessage(context));
+            case VIEW_SUBSCRIPTION -> actions.add(subscriptionDetails(context, requireSubscription(payload)));
+            case SHOW_CONFIG -> actions.add(configText(context, requireSubscription(payload), configIndex(payload)));
+            case SHOW_CONFIG_QR -> actions.add(configQr(context, requireSubscription(payload), configIndex(payload)));
+            case REQUEST_SUBSCRIPTION_LINK -> actions.add(rotationWarning(context, requireSubscription(payload)));
+            case CONFIRM_ROTATE_SUBSCRIPTION_TOKEN -> actions.addAll(confirmRotation(context, requireAction(payload)));
+            case CANCEL_ROTATION -> actions.add(cancelRotation(context, requireAction(payload)));
+        }
+        return new TelegramResponsePlan(actions, "callback:" + payload.action().name().toLowerCase());
+    }
+
+    private TelegramResponseAction subscriptionsMessage(TelegramInteractionContext context) {
+        return mySubscriptionsTelegramCommandHandler.handle(context).actions().getFirst();
+    }
+
+    private TelegramResponseAction subscriptionDetails(TelegramInteractionContext context, UUID subscriptionId) {
+        SubscriptionDeliverySummary summary = getSummaryUseCase.get(context.telegramUserId(), subscriptionId);
+        List<TelegramInlineKeyboardRow> rows = new ArrayList<>();
+        for (SubscriptionDeliveryEntry entry : summary.entries()) {
+            rows.add(keyboardFactory.row(
+                    keyboardFactory.button("Config " + entry.index(), TelegramCallbackAction.SHOW_CONFIG, context.telegramUserId(), subscriptionId, entry.index(), null, context.receivedAt()),
+                    keyboardFactory.button("Config QR " + entry.index(), TelegramCallbackAction.SHOW_CONFIG_QR, context.telegramUserId(), subscriptionId, entry.index(), null, context.receivedAt())
+            ));
+        }
+        rows.add(keyboardFactory.row(keyboardFactory.button("Generate new link", TelegramCallbackAction.REQUEST_SUBSCRIPTION_LINK, context.telegramUserId(), subscriptionId, null, null, context.receivedAt())));
+        rows.add(keyboardFactory.row(keyboardFactory.button("Back", TelegramCallbackAction.BACK_TO_SUBSCRIPTIONS, context.telegramUserId(), null, null, null, context.receivedAt())));
+        String text = "Subscription\n"
+                + "Plan: " + formatter.html(summary.planName()) + "\n"
+                + "Status: " + summary.status() + "\n"
+                + "Expires: " + formatter.formatDate(summary.expiresAt()) + "\n"
+                + "Configs: " + summary.configCount() + "\n"
+                + "Token version: " + summary.tokenVersion();
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                text,
+                TelegramParseMode.HTML,
+                keyboardFactory.rows(rows),
+                telegramProperties.disableLinkPreview(),
+                null
+        ), false);
+    }
+
+    private TelegramResponseAction configText(TelegramInteractionContext context, UUID subscriptionId, int configIndex) {
+        SubscriptionConfigEntryResult result = getConfigEntryUseCase.get(context.telegramUserId(), subscriptionId, configIndex);
+        String text = "VLESS config " + configIndex + "\n<code>" + formatter.html(result.uri()) + "</code>";
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                text,
+                TelegramParseMode.HTML,
+                TelegramInlineKeyboard.empty(),
+                true,
+                null
+        ), true);
+    }
+
+    private TelegramResponseAction configQr(TelegramInteractionContext context, UUID subscriptionId, int configIndex) {
+        QrCodeImageResult result = generateVlessQrUseCase.generate(new GenerateVlessConfigQrCommand(
+                context.telegramUserId(),
+                subscriptionId,
+                configIndex,
+                defaultQrOptions(),
+                false
+        ));
+        return TelegramResponseAction.sendPhoto(new SendTelegramPhotoCommand(
+                context.chatId(),
+                result.bytes(),
+                result.filename(),
+                "VLESS config " + configIndex,
+                TelegramParseMode.NONE,
+                TelegramInlineKeyboard.empty()
+        ), true);
+    }
+
+    private TelegramResponseAction rotationWarning(TelegramInteractionContext context, UUID subscriptionId) {
+        TelegramSensitiveAction action = sensitiveActionService.createRotation(context.telegramUserId(), subscriptionId);
+        TelegramInlineKeyboard keyboard = keyboardFactory.rows(List.of(
+                keyboardFactory.row(keyboardFactory.button(
+                        "Confirm",
+                        TelegramCallbackAction.CONFIRM_ROTATE_SUBSCRIPTION_TOKEN,
+                        context.telegramUserId(),
+                        null,
+                        null,
+                        action.getId(),
+                        context.receivedAt()
+                )),
+                keyboardFactory.row(keyboardFactory.button(
+                        "Cancel",
+                        TelegramCallbackAction.CANCEL_ROTATION,
+                        context.telegramUserId(),
+                        null,
+                        null,
+                        action.getId(),
+                        context.receivedAt()
+                ))
+        ));
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                catalog.text(context.language(), "rotation_warning"),
+                TelegramParseMode.NONE,
+                keyboard,
+                telegramProperties.disableLinkPreview(),
+                null
+        ), false);
+    }
+
+    private List<TelegramResponseAction> confirmRotation(TelegramInteractionContext context, UUID actionId) {
+        return sensitiveActionService.claimRotation(actionId, context.telegramUserId(), "telegram-rotation-" + context.updateId())
+                .map(action -> {
+                    CreateSubscriptionResult rotated = rotateSubscriptionTokenUseCase.rotate(new RotateSubscriptionTokenCommand(
+                            context.telegramUserId(),
+                            action.getSubscriptionId(),
+                            "telegram-delivery"
+                    ));
+                    BuildSubscriptionUrlResult url = buildSubscriptionUrlUseCase.build(new BuildSubscriptionUrlCommand(
+                            context.telegramUserId(),
+                            action.getSubscriptionId(),
+                            rotated.rawAccessToken()
+                    ));
+                    QrCodeImageResult qr = generateSubscriptionUrlQrUseCase.generate(new GenerateSubscriptionUrlQrCommand(
+                            context.telegramUserId(),
+                            action.getSubscriptionId(),
+                            rotated.rawAccessToken(),
+                            defaultQrOptions(),
+                            false
+                    ));
+                    return List.of(
+                            TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                                    context.chatId(),
+                                    formatter.rawSensitive(url.subscriptionUrl()),
+                                    TelegramParseMode.NONE,
+                                    TelegramInlineKeyboard.empty(),
+                                    true,
+                                    null
+                            ), true),
+                            TelegramResponseAction.sendPhoto(new SendTelegramPhotoCommand(
+                                    context.chatId(),
+                                    qr.bytes(),
+                                    qr.filename(),
+                                    "Subscription QR",
+                                    TelegramParseMode.NONE,
+                                    TelegramInlineKeyboard.empty()
+                            ), true)
+                    );
+                })
+                .orElseGet(() -> List.of(TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                        context.chatId(),
+                        catalog.text(context.language(), "not_available"),
+                        TelegramParseMode.NONE,
+                        TelegramInlineKeyboard.empty(),
+                        telegramProperties.disableLinkPreview(),
+                        null
+                ), false)));
+    }
+
+    private TelegramResponseAction cancelRotation(TelegramInteractionContext context, UUID actionId) {
+        sensitiveActionService.cancel(actionId, context.telegramUserId());
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                catalog.text(context.language(), "rotation_cancelled"),
+                TelegramParseMode.NONE,
+                TelegramInlineKeyboard.empty(),
+                telegramProperties.disableLinkPreview(),
+                null
+        ), false);
+    }
+
+    private TelegramResponseAction menuMessage(TelegramInteractionContext context) {
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                catalog.text(context.language(), "main_menu_title"),
+                TelegramParseMode.NONE,
+                keyboardFactory.mainMenu(context.telegramUserId(), context.receivedAt()),
+                telegramProperties.disableLinkPreview(),
+                null
+        ), false);
+    }
+
+    private TelegramResponseAction helpMessage(TelegramInteractionContext context) {
+        return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                catalog.text(context.language(), "help"),
+                TelegramParseMode.NONE,
+                TelegramInlineKeyboard.empty(),
+                telegramProperties.disableLinkPreview(),
+                null
+        ), false);
+    }
+
+    private TelegramResponseAction answer(TelegramInteractionContext context, String text) {
+        return TelegramResponseAction.answerCallback(new AnswerTelegramCallbackCommand(context.callbackQueryId(), text, false));
+    }
+
+    private QrRenderOptions defaultQrOptions() {
+        return new QrRenderOptions(
+                qrProperties.defaultSize(),
+                qrProperties.defaultSize(),
+                qrProperties.defaultMarginModules(),
+                qrProperties.defaultErrorCorrection(),
+                QrImageFormat.PNG,
+                false
+        );
+    }
+
+    private static UUID requireSubscription(TelegramCallbackPayload payload) {
+        if (payload.subscriptionId() == null) {
+            throw new IllegalArgumentException("subscription callback reference is missing");
+        }
+        return payload.subscriptionId();
+    }
+
+    private static UUID requireAction(TelegramCallbackPayload payload) {
+        if (payload.actionId() == null) {
+            throw new IllegalArgumentException("sensitive action callback reference is missing");
+        }
+        return payload.actionId();
+    }
+
+    private static int configIndex(TelegramCallbackPayload payload) {
+        return payload.configIndex() == null ? 1 : payload.configIndex();
+    }
+}

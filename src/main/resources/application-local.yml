@@ -40,8 +40,16 @@ app:
     host: "${REDIS_HOST:localhost}"
     port: "${REDIS_PORT:6379}"
   telegram:
-    enabled: "${TELEGRAM_ENABLED:false}"
-    bot-token: "${BOT_TOKEN:}"
+    bot:
+      enabled: "${TELEGRAM_BOT_ENABLED:false}"
+      token: "${TELEGRAM_BOT_TOKEN:}"
+      username: "${TELEGRAM_BOT_USERNAME:}"
+      update-mode: "${TELEGRAM_BOT_UPDATE_MODE:LONG_POLLING}"
+      polling-timeout: "${TELEGRAM_BOT_POLLING_TIMEOUT:PT30S}"
+      polling-backoff: "${TELEGRAM_BOT_POLLING_BACKOFF:PT2S}"
+      update-batch-size: "${TELEGRAM_BOT_UPDATE_BATCH_SIZE:50}"
+      callback-signing-secret: "${TELEGRAM_BOT_CALLBACK_SIGNING_SECRET:}"
+      callback-ttl: "${TELEGRAM_BOT_CALLBACK_TTL:PT15M}"
   panel:
     enabled: "${PANEL_ENABLED:false}"
     url: "${PANEL_URL:http://localhost:2053}"
