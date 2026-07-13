@@ -39,6 +39,11 @@ import com.parazit.panel.application.payment.manual.review.ManualPaymentReviewNo
 import com.parazit.panel.application.provisioning.outbox.ProvisioningOutboxException;
 import com.parazit.panel.application.provisioning.outbox.ProvisioningOutboxNotFoundException;
 import com.parazit.panel.application.provisioning.outbox.ProvisioningOutboxRetryNotAllowedException;
+import com.parazit.panel.application.qrcode.InvalidQrOptionsException;
+import com.parazit.panel.application.qrcode.QrCodeGenerationException;
+import com.parazit.panel.application.qrcode.QrPayloadTooLargeException;
+import com.parazit.panel.application.qrcode.QrRenderingDisabledException;
+import com.parazit.panel.application.qrcode.UnsupportedQrFormatException;
 import com.parazit.panel.application.payment.zarinpal.PaymentAlreadyApprovedException;
 import com.parazit.panel.application.payment.zarinpal.PaymentVerificationConflictException;
 import com.parazit.panel.application.payment.zarinpal.ZarinpalAmountMismatchException;
@@ -375,6 +380,36 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.PAYLOAD_TOO_LARGE, "Receipt file is too large", request);
+    }
+
+    @ExceptionHandler(QrPayloadTooLargeException.class)
+    public ResponseEntity<ApiErrorResponse> handleQrPayloadTooLarge(
+            QrPayloadTooLargeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.PAYLOAD_TOO_LARGE, "QR payload is too large", request);
+    }
+
+    @ExceptionHandler({
+            InvalidQrOptionsException.class,
+            UnsupportedQrFormatException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleQrBadRequest(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            QrRenderingDisabledException.class,
+            QrCodeGenerationException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleQrUnavailable(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
     }
 
     @ExceptionHandler({

@@ -29,6 +29,7 @@ dependencies {
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.apache.httpcomponents.client5:httpclient5")
+    implementation("com.google.zxing:core:3.5.3")
 
     runtimeOnly("org.postgresql:postgresql")
 
@@ -40,6 +41,7 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
+    testImplementation("com.google.zxing:javase:3.5.3")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.testcontainers:junit-jupiter")
 }

@@ -423,14 +423,12 @@ class ArchitectureRulesTest {
     }
 
     @Test
-    void subscriptionTaskDoesNotIntroduceQrTelegramOrPaymentMutationCoupling() throws IOException {
+    void subscriptionDeliveryDoesNotIntroduceTelegramOrPaymentMutationCoupling() throws IOException {
         List<Path> violations = javaFiles("com/parazit/panel")
                 .filter(path -> path.toString().contains("/subscription/"))
                 .filter(path -> {
                     String source = source(path);
-                    return source.contains("QRCode")
-                            || source.contains("QrCode")
-                            || source.contains("org.telegram")
+                    return source.contains("org.telegram")
                             || source.contains("TelegramBot")
                             || source.contains("TelegramLongPollingBot")
                             || source.contains("PaymentApprovalService")
@@ -450,6 +448,52 @@ class ArchitectureRulesTest {
                     return source.contains("com.parazit.panel.api.")
                             || source.contains("privateKey")
                             || source.contains("Reality private");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void qrCodeLibraryIsIsolatedToInfrastructure() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel")
+                .filter(path -> source(path).contains("com.google.zxing"))
+                .filter(path -> !path.toString().contains("/infrastructure/qrcode/"))
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void qrControllersDependOnUseCasesAndDoNotInjectGeneratorsOrRepositories() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/api/internal/subscription/delivery")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("QrCodeGenerator")
+                            || source.contains("repository.")
+                            || source.contains("JpaRepository")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("com.parazit.panel.domain.subscription.Subscription;");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void qrDeliveryDoesNotPersistPayloadsOrBytes() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel")
+                .filter(path -> path.toString().contains("/qrcode/")
+                        || path.toString().contains("/subscription/delivery/")
+                        || path.toString().contains("/subscription/model/"))
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("@Entity")
+                            || source.contains("@Lob")
+                            || source.contains("Files.write")
+                            || source.contains("java.nio.file.Path")
+                            || source.contains("PaymentApprovalService")
+                            || source.contains("org.telegram");
                 })
                 .toList();
 

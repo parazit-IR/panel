@@ -119,5 +119,7 @@ app:
     public-base-url: "${SUBSCRIPTION_PUBLIC_BASE_URL:http://localhost:8081}"
     endpoint:
       public-host: "${SUBSCRIPTION_PUBLIC_HOST:vpn.example.test}"
+    qr:
+      enabled: "${SUBSCRIPTION_QR_ENABLED:true}"
   plan-selection:
     ttl: "${PLAN_SELECTION_TTL:PT30M}"

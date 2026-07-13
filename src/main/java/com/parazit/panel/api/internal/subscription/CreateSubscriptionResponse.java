@@ -16,6 +16,7 @@ public record CreateSubscriptionResponse(
         int tokenVersion,
         Instant activatedAt,
         Instant expiresAt,
-        boolean newlyCreated
+        boolean newlyCreated,
+        SubscriptionDeliveryLinksResponse delivery
 ) {
 }

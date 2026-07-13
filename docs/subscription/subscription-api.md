@@ -100,3 +100,28 @@ flowchart LR
     C --> E[3x-ui client unchanged]
 ```
 
+## Delivery Endpoints
+
+Task 34 adds internal delivery endpoints:
+
+- `GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery`
+- `POST /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery/subscription-url`
+- `POST /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery/subscription-url/qr`
+- `GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery/content?format=plain`
+- `GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery/content?format=base64`
+- `GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery/configs/{configIndex}`
+- `GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery/configs/{configIndex}/qr`
+
+Subscription URL display and QR generation require the raw token in the request body and validate it against the stored hash. Config-entry and VLESS QR generation do not require the raw token, but they still require user ownership and an active accessible subscription/provision.
+
+```mermaid
+sequenceDiagram
+    participant API as Internal delivery API
+    participant Token as Token validation
+    participant QR as QR generator
+    API->>Token: subscription id and raw token
+    Token->>Token: hash and compare current token
+    Token-->>API: trusted subscription URL
+    API->>QR: URL payload
+    QR-->>API: PNG image
+```

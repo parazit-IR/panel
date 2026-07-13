@@ -63,7 +63,8 @@ public class SubscriptionApiMapper {
                 result.tokenVersion(),
                 result.activatedAt(),
                 result.expiresAt(),
-                result.newlyCreated()
+                result.newlyCreated(),
+                deliveryLinks(result)
         );
     }
 
@@ -94,5 +95,10 @@ public class SubscriptionApiMapper {
                 result.accessCount(),
                 result.accessible()
         );
+    }
+
+    private static SubscriptionDeliveryLinksResponse deliveryLinks(CreateSubscriptionResult result) {
+        String base = "/internal/users/{telegramUserId}/subscriptions/" + result.subscriptionId() + "/delivery";
+        return new SubscriptionDeliveryLinksResponse(base, base + "/subscription-url/qr", 1);
     }
 }
