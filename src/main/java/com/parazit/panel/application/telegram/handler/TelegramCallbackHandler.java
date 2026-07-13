@@ -36,6 +36,15 @@ import com.parazit.panel.application.telegram.model.TelegramInteractionContext;
 import com.parazit.panel.application.telegram.model.TelegramParseMode;
 import com.parazit.panel.application.telegram.model.TelegramResponseAction;
 import com.parazit.panel.application.telegram.model.TelegramResponsePlan;
+import com.parazit.panel.application.telegram.faq.TelegramFaqDetailHandler;
+import com.parazit.panel.application.telegram.faq.TelegramFaqListHandler;
+import com.parazit.panel.application.telegram.menu.TelegramMainMenuAction;
+import com.parazit.panel.application.telegram.menu.TelegramMainMenuHandler;
+import com.parazit.panel.application.telegram.support.TelegramSupportMenuHandler;
+import com.parazit.panel.application.telegram.tariff.TelegramTariffCatalogHandler;
+import com.parazit.panel.application.telegram.tutorial.TelegramDownloadLinksHandler;
+import com.parazit.panel.application.telegram.tutorial.TelegramTutorialDetailHandler;
+import com.parazit.panel.application.telegram.tutorial.TelegramTutorialMenuHandler;
 import com.parazit.panel.config.properties.QrCodeProperties;
 import com.parazit.panel.config.properties.TelegramBotProperties;
 import com.parazit.panel.domain.telegram.TelegramSensitiveAction;
@@ -64,6 +73,14 @@ public class TelegramCallbackHandler {
     private final BuildSubscriptionUrlUseCase buildSubscriptionUrlUseCase;
     private final TelegramSensitiveActionService sensitiveActionService;
     private final MySubscriptionsTelegramCommandHandler mySubscriptionsTelegramCommandHandler;
+    private final TelegramMainMenuHandler mainMenuHandler;
+    private final TelegramTariffCatalogHandler tariffCatalogHandler;
+    private final TelegramTutorialMenuHandler tutorialMenuHandler;
+    private final TelegramTutorialDetailHandler tutorialDetailHandler;
+    private final TelegramDownloadLinksHandler downloadLinksHandler;
+    private final TelegramSupportMenuHandler supportMenuHandler;
+    private final TelegramFaqListHandler faqListHandler;
+    private final TelegramFaqDetailHandler faqDetailHandler;
 
     public TelegramCallbackHandler(
             TelegramCallbackDataCodec callbackDataCodec,
@@ -81,7 +98,15 @@ public class TelegramCallbackHandler {
             RotateSubscriptionTokenUseCase rotateSubscriptionTokenUseCase,
             BuildSubscriptionUrlUseCase buildSubscriptionUrlUseCase,
             TelegramSensitiveActionService sensitiveActionService,
-            MySubscriptionsTelegramCommandHandler mySubscriptionsTelegramCommandHandler
+            MySubscriptionsTelegramCommandHandler mySubscriptionsTelegramCommandHandler,
+            TelegramMainMenuHandler mainMenuHandler,
+            TelegramTariffCatalogHandler tariffCatalogHandler,
+            TelegramTutorialMenuHandler tutorialMenuHandler,
+            TelegramTutorialDetailHandler tutorialDetailHandler,
+            TelegramDownloadLinksHandler downloadLinksHandler,
+            TelegramSupportMenuHandler supportMenuHandler,
+            TelegramFaqListHandler faqListHandler,
+            TelegramFaqDetailHandler faqDetailHandler
     ) {
         this.callbackDataCodec = Objects.requireNonNull(callbackDataCodec, "callbackDataCodec must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
@@ -99,6 +124,14 @@ public class TelegramCallbackHandler {
         this.buildSubscriptionUrlUseCase = Objects.requireNonNull(buildSubscriptionUrlUseCase, "buildSubscriptionUrlUseCase must not be null");
         this.sensitiveActionService = Objects.requireNonNull(sensitiveActionService, "sensitiveActionService must not be null");
         this.mySubscriptionsTelegramCommandHandler = Objects.requireNonNull(mySubscriptionsTelegramCommandHandler, "mySubscriptionsTelegramCommandHandler must not be null");
+        this.mainMenuHandler = Objects.requireNonNull(mainMenuHandler, "mainMenuHandler must not be null");
+        this.tariffCatalogHandler = Objects.requireNonNull(tariffCatalogHandler, "tariffCatalogHandler must not be null");
+        this.tutorialMenuHandler = Objects.requireNonNull(tutorialMenuHandler, "tutorialMenuHandler must not be null");
+        this.tutorialDetailHandler = Objects.requireNonNull(tutorialDetailHandler, "tutorialDetailHandler must not be null");
+        this.downloadLinksHandler = Objects.requireNonNull(downloadLinksHandler, "downloadLinksHandler must not be null");
+        this.supportMenuHandler = Objects.requireNonNull(supportMenuHandler, "supportMenuHandler must not be null");
+        this.faqListHandler = Objects.requireNonNull(faqListHandler, "faqListHandler must not be null");
+        this.faqDetailHandler = Objects.requireNonNull(faqDetailHandler, "faqDetailHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, String callbackData) {
@@ -122,6 +155,15 @@ public class TelegramCallbackHandler {
             case REQUEST_SUBSCRIPTION_LINK -> actions.add(rotationWarning(context, requireSubscription(payload)));
             case CONFIRM_ROTATE_SUBSCRIPTION_TOKEN -> actions.addAll(confirmRotation(context, requireAction(payload)));
             case CANCEL_ROTATION -> actions.add(cancelRotation(context, requireAction(payload)));
+            case SHOW_TARIFFS -> actions.addAll(tariffCatalogHandler.handle(context, 1).actions());
+            case SHOW_TARIFF_PAGE -> actions.addAll(tariffCatalogHandler.handle(context, configIndex(payload)).actions());
+            case BUY_SUBSCRIPTION -> actions.addAll(mainMenuHandler.handle(context, TelegramMainMenuAction.BUY_SUBSCRIPTION).actions());
+            case SHOW_TUTORIALS, BACK_TO_TUTORIALS -> actions.addAll(tutorialMenuHandler.handle(context).actions());
+            case SHOW_TUTORIAL_PLATFORM -> actions.addAll(tutorialDetailHandler.handle(context, requireReference(payload)).actions());
+            case SHOW_DOWNLOAD_LINKS -> actions.addAll(downloadLinksHandler.handle(context).actions());
+            case SHOW_SUPPORT, BACK_TO_SUPPORT -> actions.addAll(supportMenuHandler.handle(context).actions());
+            case SHOW_FAQ, BACK_TO_FAQ, SHOW_FAQ_PAGE -> actions.addAll(faqListHandler.handle(context, configIndex(payload)).actions());
+            case SHOW_FAQ_ITEM -> actions.addAll(faqDetailHandler.handle(context, requireReference(payload), configIndex(payload)).actions());
         }
         return new TelegramResponsePlan(actions, "callback:" + payload.action().name().toLowerCase());
     }
@@ -338,6 +380,13 @@ public class TelegramCallbackHandler {
 
     private static int configIndex(TelegramCallbackPayload payload) {
         return payload.configIndex() == null ? 1 : payload.configIndex();
+    }
+
+    private static String requireReference(TelegramCallbackPayload payload) {
+        if (payload.reference() == null || payload.reference().isBlank()) {
+            throw new IllegalArgumentException("callback reference is missing");
+        }
+        return payload.reference();
     }
 
     private String statusLabel(String language, String status) {

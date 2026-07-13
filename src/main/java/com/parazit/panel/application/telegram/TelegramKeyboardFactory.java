@@ -49,6 +49,25 @@ public class TelegramKeyboardFactory {
         return TelegramInlineButton.callback(text, codec.encode(payload, telegramUserId));
     }
 
+    public TelegramInlineButton button(
+            String text,
+            TelegramCallbackAction action,
+            long telegramUserId,
+            Integer page,
+            String reference,
+            Instant now
+    ) {
+        TelegramCallbackPayload payload = new TelegramCallbackPayload(
+                action,
+                null,
+                page,
+                null,
+                reference,
+                now.plus(properties.callbackTtl())
+        );
+        return TelegramInlineButton.callback(text, codec.encode(payload, telegramUserId));
+    }
+
     public TelegramInlineKeyboard rows(List<TelegramInlineKeyboardRow> rows) {
         return TelegramInlineKeyboard.ofRows(rows);
     }

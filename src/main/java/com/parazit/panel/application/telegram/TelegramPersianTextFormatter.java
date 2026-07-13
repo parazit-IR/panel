@@ -21,6 +21,9 @@ public class TelegramPersianTextFormatter {
         if (currency == null || currency.isBlank()) {
             return formatted;
         }
+        if ("IRT".equalsIgnoreCase(currency) && language != null && language.toUpperCase(Locale.ROOT).startsWith("FA")) {
+            return formatted + " تومان";
+        }
         return formatted + " " + currency;
     }
 }

@@ -8,6 +8,9 @@ import com.parazit.panel.application.telegram.TelegramKeyboardFactory;
 import com.parazit.panel.application.telegram.TelegramMessageCatalog;
 import com.parazit.panel.application.telegram.TelegramPersianTextFormatter;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
+import com.parazit.panel.application.telegram.support.TelegramSupportMenuHandler;
+import com.parazit.panel.application.telegram.tariff.TelegramTariffCatalogHandler;
+import com.parazit.panel.application.telegram.tutorial.TelegramTutorialMenuHandler;
 import com.parazit.panel.application.telegram.handler.MySubscriptionsTelegramCommandHandler;
 import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboard;
 import com.parazit.panel.application.telegram.model.TelegramCallbackAction;
@@ -43,6 +46,9 @@ public class TelegramMainMenuHandler {
     private final TelegramBotProperties properties;
     private final ListAvailablePlansUseCase listAvailablePlansUseCase;
     private final MySubscriptionsTelegramCommandHandler subscriptionsHandler;
+    private final TelegramTariffCatalogHandler tariffCatalogHandler;
+    private final TelegramTutorialMenuHandler tutorialMenuHandler;
+    private final TelegramSupportMenuHandler supportMenuHandler;
 
     public TelegramMainMenuHandler(
             TelegramMenuFeatureAvailabilityService availabilityService,
@@ -56,7 +62,10 @@ public class TelegramMainMenuHandler {
             TelegramMenuMetrics metrics,
             TelegramBotProperties properties,
             ListAvailablePlansUseCase listAvailablePlansUseCase,
-            MySubscriptionsTelegramCommandHandler subscriptionsHandler
+            MySubscriptionsTelegramCommandHandler subscriptionsHandler,
+            TelegramTariffCatalogHandler tariffCatalogHandler,
+            TelegramTutorialMenuHandler tutorialMenuHandler,
+            TelegramSupportMenuHandler supportMenuHandler
     ) {
         this.availabilityService = Objects.requireNonNull(availabilityService, "availabilityService must not be null");
         this.unavailableFormatter = Objects.requireNonNull(unavailableFormatter, "unavailableFormatter must not be null");
@@ -70,6 +79,9 @@ public class TelegramMainMenuHandler {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.listAvailablePlansUseCase = Objects.requireNonNull(listAvailablePlansUseCase, "listAvailablePlansUseCase must not be null");
         this.subscriptionsHandler = Objects.requireNonNull(subscriptionsHandler, "subscriptionsHandler must not be null");
+        this.tariffCatalogHandler = Objects.requireNonNull(tariffCatalogHandler, "tariffCatalogHandler must not be null");
+        this.tutorialMenuHandler = Objects.requireNonNull(tutorialMenuHandler, "tutorialMenuHandler must not be null");
+        this.supportMenuHandler = Objects.requireNonNull(supportMenuHandler, "supportMenuHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, TelegramMainMenuAction action) {
@@ -98,9 +110,12 @@ public class TelegramMainMenuHandler {
                 .addKeyValue("locale", context.language())
                 .log("Telegram main menu action selected");
         return switch (action) {
-            case BUY_SUBSCRIPTION, SHOW_TARIFFS -> planCatalog(context, action);
+            case BUY_SUBSCRIPTION -> planCatalog(context, action);
+            case SHOW_TARIFFS -> tariffCatalogHandler.handle(context, 1);
             case MY_SERVICES -> subscriptionsHandler.handle(context);
-            case RENEW_SERVICE, REQUEST_TRIAL, SHOW_WALLET, SHOW_TUTORIALS, SHOW_SUPPORT -> unavailable(context, availability);
+            case SHOW_TUTORIALS -> tutorialMenuHandler.handle(context);
+            case SHOW_SUPPORT -> supportMenuHandler.handle(context);
+            case RENEW_SERVICE, REQUEST_TRIAL, SHOW_WALLET -> unavailable(context, availability);
         };
     }
 

@@ -5,5 +5,8 @@ buy - خرید اشتراک جدید
 subscriptions - سرویس‌های من
 payments - پرداخت‌های من
 settings - تنظیمات اعلان‌ها
+tutorials - آموزش اتصال
+support - پشتیبانی
+faq - سوالات متداول
 help - راهنما
 cancel - لغو عملیات جاری

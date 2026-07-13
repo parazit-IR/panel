@@ -31,6 +31,7 @@ public class TelegramCallbackDataCodec {
                 encodeUuid(payload.subscriptionId()),
                 payload.configIndex() == null ? "" : payload.configIndex().toString(),
                 encodeUuid(payload.actionId()),
+                payload.reference(),
                 Long.toString(payload.expiresAt().getEpochSecond(), 36)
         );
         String encoded = unsigned + ":" + signer.sign(unsigned, telegramUserId);
@@ -45,14 +46,18 @@ public class TelegramCallbackDataCodec {
             throw new IllegalArgumentException("callback data is blank");
         }
         String[] parts = callbackData.split(":", -1);
-        if (parts.length != 7 || !VERSION.equals(parts[0])) {
+        if ((parts.length != 7 && parts.length != 8) || !VERSION.equals(parts[0])) {
             throw new IllegalArgumentException("unsupported callback data");
         }
-        String unsigned = String.join(":", parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]);
-        if (!signer.matches(unsigned, parts[6], telegramUserId)) {
+        boolean legacy = parts.length == 7;
+        String unsigned = legacy
+                ? String.join(":", parts[0], parts[1], parts[2], parts[3], parts[4], parts[5])
+                : String.join(":", parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6]);
+        String signature = legacy ? parts[6] : parts[7];
+        if (!signer.matches(unsigned, signature, telegramUserId)) {
             throw new IllegalArgumentException("callback signature mismatch");
         }
-        Instant expiresAt = Instant.ofEpochSecond(Long.parseLong(parts[5], 36));
+        Instant expiresAt = Instant.ofEpochSecond(Long.parseLong(legacy ? parts[5] : parts[6], 36));
         if (!now.isBefore(expiresAt)) {
             throw new IllegalArgumentException("callback data expired");
         }
@@ -62,6 +67,7 @@ public class TelegramCallbackDataCodec {
                 decodeUuid(parts[2]),
                 index,
                 decodeUuid(parts[4]),
+                legacy ? "" : parts[5],
                 expiresAt
         );
     }

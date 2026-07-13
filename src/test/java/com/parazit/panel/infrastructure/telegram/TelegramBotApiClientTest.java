@@ -10,6 +10,8 @@ import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboard;
 import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboardButton;
 import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboardRow;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
+import com.parazit.panel.application.telegram.model.TelegramInlineKeyboardRow;
+import com.parazit.panel.application.telegram.model.TelegramInlineButton;
 import com.parazit.panel.application.telegram.model.TelegramParseMode;
 import com.parazit.panel.application.telegram.model.TelegramUpdateType;
 import java.time.Duration;
@@ -100,6 +102,29 @@ class TelegramBotApiClientTest {
         assertThat(body).contains("\"is_persistent\":true");
         assertThat(body).contains("\"input_field_placeholder\":\"یکی از گزینه‌های منو را انتخاب کنید\"");
         assertThat(body).doesNotContain("inline_keyboard");
+    }
+
+    @Test
+    void serializesUrlButtonsWithoutCallbackData() throws Exception {
+        server.enqueue(json("""
+                {"ok":true,"result":{"message_id":79}}
+                """));
+
+        client.sendMessage(new SendTelegramMessageCommand(
+                42L,
+                "support",
+                TelegramParseMode.HTML,
+                TelegramInlineKeyboard.ofRows(List.of(new TelegramInlineKeyboardRow(List.of(
+                        TelegramInlineButton.url("☎️ ارسال پیام به پشتیبانی", "https://t.me/SupportUser")
+                )))),
+                true,
+                null
+        ));
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"inline_keyboard\"");
+        assertThat(body).contains("\"url\":\"https://t.me/SupportUser\"");
+        assertThat(body).doesNotContain("callback_data");
     }
 
     @Test

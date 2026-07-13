@@ -20,9 +20,12 @@ Reply keyboard policy:
 
 Feature behavior:
 
-- Buy and tariffs route to the active plan catalog.
+- Buy routes to the existing purchase entry point.
+- Tariffs route to a read-only active plan tariff catalog.
 - My services routes to the existing subscription list.
-- Renewal, trial, wallet, tutorials, and support remain visible but return localized unavailable messages until those domains are implemented.
+- Tutorials route to configured platform instructions and trusted download links.
+- Support routes to FAQ and configured Telegram support URL.
+- Renewal, trial, and wallet remain visible but return localized unavailable messages until those domains are implemented.
 
 ```mermaid
 flowchart TD
@@ -33,4 +36,11 @@ flowchart TD
     Action --> Enabled{Enabled?}
     Enabled -->|yes| Route[Route to existing handler]
     Enabled -->|no| Placeholder[Localized unavailable message]
+```
+
+```mermaid
+flowchart TD
+    Tariffs[💵 تعرفه اشتراک‌ها] --> ActivePlans[List active plans]
+    Tutorials[📚 آموزش] --> TutorialMenu[Platform tutorial menu]
+    Support[☎️ پشتیبانی] --> SupportPage[FAQ and support URL]
 ```

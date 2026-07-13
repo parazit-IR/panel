@@ -13,7 +13,20 @@ public enum TelegramCallbackAction {
     CANCEL_ROTATION("X"),
     BACK_TO_SUBSCRIPTIONS("B"),
     BACK_TO_MAIN("H"),
-    HELP("P");
+    HELP("P"),
+    SHOW_TARIFFS("T"),
+    SHOW_TARIFF_PAGE("N"),
+    SHOW_TUTORIALS("U"),
+    SHOW_TUTORIAL_PLATFORM("O"),
+    SHOW_DOWNLOAD_LINKS("D"),
+    SHOW_SUPPORT("W"),
+    SHOW_FAQ("F"),
+    SHOW_FAQ_PAGE("G"),
+    SHOW_FAQ_ITEM("I"),
+    BACK_TO_TUTORIALS("Y"),
+    BACK_TO_SUPPORT("J"),
+    BACK_TO_FAQ("K"),
+    BUY_SUBSCRIPTION("A");
 
     private final String code;
 

@@ -16,6 +16,13 @@ Back uses explicit signed callback actions and reloads server-side resources. Ca
 
 Close is modeled as `TelegramNavigationAction.CLOSE`; it is reserved for pages where removing inline controls is safe.
 
+Task 42 page routing:
+
+- Tariffs: `Main menu -> Tariffs -> Buy subscription | Home`.
+- Tutorials: `Main menu -> Tutorials -> Platform detail -> Back to tutorials | Home`.
+- FAQ: `Support -> FAQ list -> FAQ detail -> Back to FAQ -> Back to Support | Home`.
+- Support: `Main menu -> Support -> FAQ | t.me URL | Home`.
+
 ```mermaid
 flowchart TD
     Update[Telegram update] --> Private{Private chat?}
@@ -40,4 +47,17 @@ sequenceDiagram
     Bot->>Bot: clear UI navigation only
     Bot-->>User: main menu + reply keyboard
     Note over Domain: orders, payments, subscriptions unchanged
+```
+
+```mermaid
+flowchart TD
+    Callback[Signed callback] --> Action{Action}
+    Action --> Tariff[Reload tariff page]
+    Action --> Tutorial[Load configured tutorial]
+    Action --> FAQ[Load FAQ item by stable ID]
+    Action --> Support[Render support page]
+    Tariff --> Home
+    Tutorial --> Home
+    FAQ --> Home
+    Support --> Home
 ```

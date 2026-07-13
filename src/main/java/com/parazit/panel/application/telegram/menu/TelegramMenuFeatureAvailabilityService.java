@@ -52,10 +52,10 @@ public class TelegramMenuFeatureAvailabilityService {
                     ? availability(placeholderProperties.walletAvailable(), "telegram.feature.wallet_unavailable")
                     : TelegramMenuFeatureAvailability.hidden();
             case SHOW_TUTORIALS -> menuProperties.showTutorials()
-                    ? availability(placeholderProperties.tutorialsAvailable(), "telegram.feature.tutorial_unavailable")
+                    ? TelegramMenuFeatureAvailability.available()
                     : TelegramMenuFeatureAvailability.hidden();
             case SHOW_SUPPORT -> menuProperties.showSupport()
-                    ? availability(placeholderProperties.supportAvailable(), "telegram.feature.support_unavailable")
+                    ? TelegramMenuFeatureAvailability.available()
                     : TelegramMenuFeatureAvailability.hidden();
         };
     }

@@ -131,6 +131,23 @@ app:
       wallet-available: "${TELEGRAM_FEATURE_WALLET_AVAILABLE:false}"
       tutorials-available: "${TELEGRAM_FEATURE_TUTORIALS_AVAILABLE:false}"
       support-available: "${TELEGRAM_FEATURE_SUPPORT_AVAILABLE:false}"
+    tutorials:
+      enabled: "${TELEGRAM_TUTORIALS_ENABLED:true}"
+      trusted-hosts: "${TELEGRAM_TUTORIALS_TRUSTED_HOSTS:github.com,play.google.com,apps.apple.com,apps.microsoft.com,microsoft.com}"
+    faq:
+      enabled: "${TELEGRAM_FAQ_ENABLED:true}"
+      page-size: "${TELEGRAM_FAQ_PAGE_SIZE:6}"
+    support:
+      enabled: "${TELEGRAM_SUPPORT_ENABLED:true}"
+      display-name: "${TELEGRAM_SUPPORT_DISPLAY_NAME:}"
+      telegram-username: "${TELEGRAM_SUPPORT_TELEGRAM_USERNAME:}"
+      email: "${TELEGRAM_SUPPORT_EMAIL:}"
+      working-hours-text: "${TELEGRAM_SUPPORT_WORKING_HOURS_TEXT:}"
+      response-time-text: "${TELEGRAM_SUPPORT_RESPONSE_TIME_TEXT:}"
+      show-faq: "${TELEGRAM_SUPPORT_SHOW_FAQ:true}"
+      show-direct-message: "${TELEGRAM_SUPPORT_SHOW_DIRECT_MESSAGE:false}"
+      show-email: "${TELEGRAM_SUPPORT_SHOW_EMAIL:false}"
+      unavailable-message: "${TELEGRAM_SUPPORT_UNAVAILABLE_MESSAGE:}"
   panel:
     enabled: "${PANEL_ENABLED:false}"
     url: "${PANEL_URL}"
