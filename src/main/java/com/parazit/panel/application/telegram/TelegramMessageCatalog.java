@@ -285,6 +285,44 @@ public class TelegramMessageCatalog {
             case "telegram.service.status.REVOKED" -> fa ? "🔴 لغوشده" : "🔴 Revoked";
             case "telegram.service.status.FAILED" -> fa ? "❌ خطای ساخت" : "❌ Provisioning failed";
             case "telegram.service.status.UNKNOWN" -> fa ? "❔ نامشخص" : "❔ Unknown";
+            case "telegram.renewal.title" -> fa ? "♻️ تمدید سرویس" : "♻️ Renew service";
+            case "telegram.renewal.select_service" -> fa
+                    ? "سرویس موردنظر خود را برای تمدید انتخاب کنید."
+                    : "Choose the service you want to renew.";
+            case "telegram.renewal.no_service" -> fa
+                    ? "♻️ در حال حاضر سرویسی برای تمدید در حساب شما وجود ندارد.\n\nمی‌توانید از بخش «خرید اشتراک» یک سرویس جدید تهیه کنید."
+                    : "There is currently no renewable service in your account.\n\nYou can buy a new service from Buy subscription.";
+            case "telegram.renewal.service_name" -> fa ? "نام سرویس" : "Service name";
+            case "telegram.renewal.current_status" -> fa ? "وضعیت فعلی" : "Current status";
+            case "telegram.renewal.current_plan" -> fa ? "پلن فعلی" : "Current plan";
+            case "telegram.renewal.current_expiry" -> fa ? "تاریخ انقضای فعلی" : "Current expiry";
+            case "telegram.renewal.remaining_time" -> fa ? "زمان باقی‌مانده" : "Remaining time";
+            case "telegram.renewal.remaining_traffic" -> fa ? "حجم باقی‌مانده" : "Remaining traffic";
+            case "telegram.renewal.select_plan" -> fa ? "پلن تمدید را انتخاب کنید." : "Choose a renewal plan.";
+            case "telegram.renewal.no_plan" -> fa
+                    ? "در حال حاضر پلن سازگار برای تمدید این سرویس وجود ندارد."
+                    : "No compatible renewal plan is currently available for this service.";
+            case "telegram.renewal.plan_duration" -> fa ? "مدت تمدید" : "Renewal duration";
+            case "telegram.renewal.plan_traffic" -> fa ? "پلن تمدید" : "Renewal plan";
+            case "telegram.renewal.plan_price" -> fa ? "قیمت پلن" : "Plan price";
+            case "telegram.renewal.preinvoice_title" -> fa ? "🧾 پیش‌فاکتور تمدید سرویس" : "🧾 Renewal pre-invoice";
+            case "telegram.renewal.proposed_expiry" -> fa ? "تاریخ انقضای پیشنهادی" : "Proposed expiry";
+            case "telegram.renewal.traffic_policy" -> fa ? "حجم پس از تمدید" : "Traffic after renewal";
+            case "telegram.renewal.amount" -> fa ? "مبلغ قابل پرداخت" : "Payable amount";
+            case "telegram.renewal.pay_and_renew" -> fa ? "💰 پرداخت و تمدید سرویس" : "💰 Pay and renew service";
+            case "telegram.renewal.choose_other_plan" -> fa ? "⬅️ انتخاب پلن دیگر" : "⬅️ Choose another plan";
+            case "telegram.renewal.selection_expired" -> fa
+                    ? "این پیش‌فاکتور تمدید منقضی شده است.\n\nلطفاً دوباره سرویس و پلن تمدید را انتخاب کنید."
+                    : "This renewal pre-invoice has expired.\n\nPlease choose the service and renewal plan again.";
+            case "telegram.renewal.not_available" -> fa ? "♻️ تمدید سرویس در حال حاضر فعال نیست." : "♻️ Renewal is currently unavailable.";
+            case "telegram.renewal.existing_order" -> fa
+                    ? "برای این سرویس یک سفارش تمدید فعال وجود دارد. لطفاً پرداخت همان سفارش را ادامه دهید."
+                    : "This service already has an active renewal order. Please continue that payment.";
+            case "telegram.renewal.awaiting_payment" -> fa ? "💳 روش پرداخت تمدید را انتخاب کنید." : "💳 Choose a renewal payment method.";
+            case "telegram.renewal.cannot_renew" -> fa
+                    ? "این سرویس در وضعیت فعلی قابل تمدید نیست."
+                    : "This service cannot be renewed in its current state.";
+            case "telegram.renewal.buy_new_service" -> fa ? "خرید اشتراک" : "Buy subscription";
             default -> key;
         };
     }

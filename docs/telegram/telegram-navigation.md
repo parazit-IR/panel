@@ -93,3 +93,19 @@ Back is explicit by page:
 - Plan details back to plan catalog.
 
 Stale or expired purchase callbacks route to a safe expired-pre-invoice message.
+
+## Task 45 Renewal Navigation
+
+```mermaid
+flowchart TD
+    A[Renewable services] --> B[Renewal target]
+    B --> C[Renewal plans]
+    C --> D[Renewal pre-invoice]
+    D --> E[Payment methods]
+    E --> D
+    D --> C
+    C --> B
+    B --> A
+```
+
+Home restores the persistent main menu and does not cancel renewal orders or mutate subscriptions. Expired renewal selections are not revived.

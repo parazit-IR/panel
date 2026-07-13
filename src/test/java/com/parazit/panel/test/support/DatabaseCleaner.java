@@ -5,7 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 public final class DatabaseCleaner {
 
-    private static final String TELEGRAM_TABLES = "telegram_sensitive_actions, telegram_processed_updates, telegram_polling_state, ";
+    private static final String TELEGRAM_TABLES = "telegram_sensitive_actions, telegram_purchase_sessions, telegram_processed_updates, telegram_polling_state, ";
 
     private DatabaseCleaner() {
     }

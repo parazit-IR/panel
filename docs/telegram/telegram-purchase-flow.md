@@ -36,3 +36,17 @@ flowchart TD
 ```
 
 Callbacks are signed and expiring. They carry only bounded server-side references.
+
+## Task 45 Renewal Reuse
+
+Renewal reuses the purchase session and payment-method handoff with `PurchaseFlowType.RENEWAL`.
+
+```mermaid
+flowchart TD
+    A[Renewal selection] --> B[Renewal pre-invoice]
+    B --> C[Confirm renewal]
+    C --> D[OrderType.RENEWAL]
+    D --> E[Existing payment methods]
+```
+
+The new-purchase path remains `PurchaseFlowType.NEW_SUBSCRIPTION` and continues to use `OrderType.NEW_SUBSCRIPTION`.

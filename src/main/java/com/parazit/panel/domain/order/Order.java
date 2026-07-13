@@ -11,6 +11,8 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -31,6 +33,13 @@ public class Order extends BaseEntity {
 
     @Column(name = "plan_selection_id")
     private UUID planSelectionId;
+
+    @Column(name = "target_subscription_id")
+    private UUID targetSubscriptionId;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "renewal_snapshot", columnDefinition = "jsonb")
+    private RenewalSnapshot renewalSnapshot;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 40)
@@ -87,6 +96,32 @@ public class Order extends BaseEntity {
         this.type = Objects.requireNonNull(type, "type must not be null");
     }
 
+    private Order(
+            UUID userId,
+            UUID planId,
+            UUID planSelectionId,
+            UUID targetSubscriptionId,
+            RenewalSnapshot renewalSnapshot,
+            long amount,
+            String currency
+    ) {
+        this(userId, planId, planSelectionId, OrderType.RENEWAL, amount, currency);
+        this.targetSubscriptionId = Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null");
+        this.renewalSnapshot = Objects.requireNonNull(renewalSnapshot, "renewalSnapshot must not be null");
+        if (!this.targetSubscriptionId.equals(renewalSnapshot.targetSubscriptionId())) {
+            throw new IllegalArgumentException("targetSubscriptionId must match renewal snapshot");
+        }
+        if (!this.planId.equals(renewalSnapshot.sourcePlanId())) {
+            throw new IllegalArgumentException("planId must match renewal snapshot source plan");
+        }
+        if (this.finalAmount != renewalSnapshot.finalAmount().amount()) {
+            throw new IllegalArgumentException("order amount must match renewal snapshot final amount");
+        }
+        if (!this.currency.equals(renewalSnapshot.finalAmount().currency().name())) {
+            throw new IllegalArgumentException("order currency must match renewal snapshot final amount currency");
+        }
+    }
+
     public static Order create(UUID userId, long amount, String currency) {
         return new Order(userId, amount, currency);
     }
@@ -99,6 +134,18 @@ public class Order extends BaseEntity {
             String currency
     ) {
         return new Order(userId, planId, planSelectionId, OrderType.NEW_SUBSCRIPTION, amount, currency);
+    }
+
+    public static Order createRenewal(
+            UUID userId,
+            UUID planId,
+            UUID planSelectionId,
+            UUID targetSubscriptionId,
+            RenewalSnapshot renewalSnapshot,
+            long amount,
+            String currency
+    ) {
+        return new Order(userId, planId, planSelectionId, targetSubscriptionId, renewalSnapshot, amount, currency);
     }
 
     public void markPaymentPending() {
@@ -124,6 +171,9 @@ public class Order extends BaseEntity {
 
     public void markProvisioning(Instant now) {
         Objects.requireNonNull(now, "now must not be null");
+        if (!requiresProvisioning()) {
+            throw invalidTransition("mark provisioning");
+        }
         if (status == OrderStatus.PROVISIONING) {
             return;
         }
@@ -180,6 +230,10 @@ public class Order extends BaseEntity {
         return type == OrderType.NEW_SUBSCRIPTION && planId != null && planSelectionId != null;
     }
 
+    public boolean isRenewal() {
+        return type == OrderType.RENEWAL;
+    }
+
     public UUID getUserId() {
         return userId;
     }
@@ -190,6 +244,14 @@ public class Order extends BaseEntity {
 
     public UUID getPlanSelectionId() {
         return planSelectionId;
+    }
+
+    public UUID getTargetSubscriptionId() {
+        return targetSubscriptionId;
+    }
+
+    public RenewalSnapshot getRenewalSnapshot() {
+        return renewalSnapshot;
     }
 
     public OrderType getType() {

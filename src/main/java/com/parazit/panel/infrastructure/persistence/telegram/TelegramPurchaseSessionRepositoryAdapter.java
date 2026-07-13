@@ -1,6 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.telegram;
 
 import com.parazit.panel.domain.telegram.purchase.TelegramPurchaseSession;
+import com.parazit.panel.domain.telegram.purchase.PurchaseFlowType;
 import com.parazit.panel.domain.telegram.purchase.TelegramPurchaseSessionStatus;
 import com.parazit.panel.domain.telegram.purchase.repository.TelegramPurchaseSessionRepository;
 import com.parazit.panel.infrastructure.persistence.repository.JpaRepositoryAdapter;
@@ -42,16 +43,28 @@ public class TelegramPurchaseSessionRepositoryAdapter
 
     @Override
     public Optional<TelegramPurchaseSession> findActiveByUserId(UUID userId) {
-        return repository.findFirstByUserIdAndStatusInOrderByCreatedAtDesc(
+        return findActiveByUserIdAndFlowType(userId, PurchaseFlowType.NEW_SUBSCRIPTION);
+    }
+
+    @Override
+    public Optional<TelegramPurchaseSession> findActiveByUserIdAndFlowType(UUID userId, PurchaseFlowType flowType) {
+        return repository.findFirstByUserIdAndFlowTypeAndStatusInOrderByCreatedAtDesc(
                 Objects.requireNonNull(userId, "userId must not be null"),
+                Objects.requireNonNull(flowType, "flowType must not be null"),
                 ACTIVE_STATUSES
         );
     }
 
     @Override
     public List<TelegramPurchaseSession> findAllActiveByUserId(UUID userId) {
-        return repository.findAllByUserIdAndStatusInOrderByCreatedAtDesc(
+        return findAllActiveByUserIdAndFlowType(userId, PurchaseFlowType.NEW_SUBSCRIPTION);
+    }
+
+    @Override
+    public List<TelegramPurchaseSession> findAllActiveByUserIdAndFlowType(UUID userId, PurchaseFlowType flowType) {
+        return repository.findAllByUserIdAndFlowTypeAndStatusInOrderByCreatedAtDesc(
                 Objects.requireNonNull(userId, "userId must not be null"),
+                Objects.requireNonNull(flowType, "flowType must not be null"),
                 ACTIVE_STATUSES
         );
     }
@@ -60,6 +73,20 @@ public class TelegramPurchaseSessionRepositoryAdapter
     public Optional<TelegramPurchaseSession> findByPlanSelectionId(UUID planSelectionId) {
         return repository.findFirstByPlanSelectionIdOrderByCreatedAtDesc(
                 Objects.requireNonNull(planSelectionId, "planSelectionId must not be null")
+        );
+    }
+
+    @Override
+    public Optional<TelegramPurchaseSession> findActiveByUserIdAndFlowTypeAndTargetSubscriptionId(
+            UUID userId,
+            PurchaseFlowType flowType,
+            UUID targetSubscriptionId
+    ) {
+        return repository.findFirstByUserIdAndFlowTypeAndTargetSubscriptionIdAndStatusInOrderByCreatedAtDesc(
+                Objects.requireNonNull(userId, "userId must not be null"),
+                Objects.requireNonNull(flowType, "flowType must not be null"),
+                Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null"),
+                ACTIVE_STATUSES
         );
     }
 }

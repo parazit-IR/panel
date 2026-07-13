@@ -63,3 +63,14 @@ flowchart TD
 ```
 
 Manual payment copy buttons use Telegram `copy_text`; copied values are not callback data and must not be logged. Online payment URL buttons are rendered as URL buttons and are not callback data.
+
+## Task 45 Renewal Security
+
+Renewal callbacks must not carry:
+
+- Plan price, duration, traffic, or currency.
+- Service username as an authorization source.
+- Subscription token/hash, VLESS URI, XUI client ID, inbound ID, or panel credentials.
+- Proposed expiry or renewal amount.
+
+Every renewal action reloads the local `User`, `Subscription`, provision, Plan, selection, session, and order as needed, then rechecks ownership and eligibility server-side.

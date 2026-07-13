@@ -2,6 +2,7 @@ package com.parazit.panel.infrastructure.persistence.order;
 
 import com.parazit.panel.domain.order.Order;
 import com.parazit.panel.domain.order.OrderStatus;
+import com.parazit.panel.domain.order.OrderType;
 import com.parazit.panel.infrastructure.persistence.repository.SpringDataUuidRepository;
 import jakarta.persistence.LockModeType;
 import java.util.List;
@@ -21,5 +22,13 @@ public interface SpringDataOrderRepository extends SpringDataUuidRepository<Orde
 
     Optional<Order> findByPlanSelectionId(UUID planSelectionId);
 
+    Optional<Order> findFirstByTargetSubscriptionIdAndTypeAndStatusInOrderByCreatedAtDesc(
+            UUID targetSubscriptionId,
+            OrderType type,
+            List<OrderStatus> statuses
+    );
+
     boolean existsByPlanSelectionIdAndStatusIn(UUID planSelectionId, List<OrderStatus> statuses);
+
+    boolean existsByTargetSubscriptionIdAndTypeAndStatusIn(UUID targetSubscriptionId, OrderType type, List<OrderStatus> statuses);
 }

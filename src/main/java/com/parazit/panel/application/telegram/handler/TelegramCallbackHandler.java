@@ -42,6 +42,7 @@ import com.parazit.panel.application.telegram.account.TelegramCustomerAccountHan
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuAction;
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuHandler;
 import com.parazit.panel.application.telegram.purchase.TelegramPurchaseFlowHandler;
+import com.parazit.panel.application.telegram.renewal.TelegramRenewalFlowHandler;
 import com.parazit.panel.application.telegram.service.TelegramMyServicesHandler;
 import com.parazit.panel.application.telegram.service.TelegramServiceDetailsHandler;
 import com.parazit.panel.application.telegram.service.TelegramServiceSearchHandler;
@@ -93,6 +94,7 @@ public class TelegramCallbackHandler {
     private final PaymentsTelegramCommandHandler paymentsTelegramCommandHandler;
     private final SettingsTelegramCommandHandler settingsTelegramCommandHandler;
     private final TelegramPurchaseFlowHandler purchaseFlowHandler;
+    private final TelegramRenewalFlowHandler renewalFlowHandler;
 
     public TelegramCallbackHandler(
             TelegramCallbackDataCodec callbackDataCodec,
@@ -125,7 +127,8 @@ public class TelegramCallbackHandler {
             TelegramServiceSearchHandler serviceSearchHandler,
             PaymentsTelegramCommandHandler paymentsTelegramCommandHandler,
             SettingsTelegramCommandHandler settingsTelegramCommandHandler,
-            TelegramPurchaseFlowHandler purchaseFlowHandler
+            TelegramPurchaseFlowHandler purchaseFlowHandler,
+            TelegramRenewalFlowHandler renewalFlowHandler
     ) {
         this.callbackDataCodec = Objects.requireNonNull(callbackDataCodec, "callbackDataCodec must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
@@ -158,6 +161,7 @@ public class TelegramCallbackHandler {
         this.paymentsTelegramCommandHandler = Objects.requireNonNull(paymentsTelegramCommandHandler, "paymentsTelegramCommandHandler must not be null");
         this.settingsTelegramCommandHandler = Objects.requireNonNull(settingsTelegramCommandHandler, "settingsTelegramCommandHandler must not be null");
         this.purchaseFlowHandler = Objects.requireNonNull(purchaseFlowHandler, "purchaseFlowHandler must not be null");
+        this.renewalFlowHandler = Objects.requireNonNull(renewalFlowHandler, "renewalFlowHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, String callbackData) {
@@ -185,7 +189,7 @@ public class TelegramCallbackHandler {
             case CANCEL_ROTATION -> actions.add(cancelRotation(context, requireAction(payload)));
             case SHOW_ACCOUNT, BACK_TO_ACCOUNT -> actions.addAll(accountHandler.handle(context).actions());
             case SEARCH_MY_SERVICES -> actions.addAll(serviceSearchHandler.begin(context, configIndex(payload)).actions());
-            case REQUEST_RENEWAL -> actions.add(unavailable(context, "telegram.feature.renewal_unavailable"));
+            case REQUEST_RENEWAL -> actions.addAll(renewalFlowHandler.target(context, requireSubscription(payload), 1).actions());
             case SHOW_PAYMENTS -> actions.addAll(paymentsTelegramCommandHandler.handle(context).actions());
             case SHOW_NOTIFICATION_SETTINGS -> actions.addAll(settingsTelegramCommandHandler.handle(context).actions());
             case SHOW_TARIFFS -> actions.addAll(tariffCatalogHandler.handle(context, 1).actions());
@@ -200,6 +204,13 @@ public class TelegramCallbackHandler {
             case SELECT_ONLINE_PAYMENT -> actions.addAll(purchaseFlowHandler.selectOnline(context, requireSubscription(payload)).actions());
             case APPLY_DISCOUNT_PLACEHOLDER -> actions.addAll(purchaseFlowHandler.discountUnavailable(context).actions());
             case UPLOAD_MANUAL_RECEIPT, REFRESH_PAYMENT_STATUS, REQUEST_CANCEL_PAYMENT, VIEW_PAYMENT -> actions.addAll(purchaseFlowHandler.paymentActionUnavailable(context).actions());
+            case LIST_RENEWABLE_SERVICES -> actions.addAll(renewalFlowHandler.listServices(context, 1).actions());
+            case RENEWABLE_SERVICES_PAGE, BACK_TO_RENEWABLE_SERVICES -> actions.addAll(renewalFlowHandler.listServices(context, configIndex(payload)).actions());
+            case SHOW_RENEWAL_TARGET, BACK_TO_RENEWAL_TARGET -> actions.addAll(renewalFlowHandler.target(context, requireSubscription(payload), configIndex(payload)).actions());
+            case LIST_RENEWAL_PLANS, RENEWAL_PLANS_PAGE -> actions.addAll(renewalFlowHandler.plans(context, requireSubscription(payload), configIndex(payload)).actions());
+            case SELECT_RENEWAL_PLAN -> actions.addAll(renewalFlowHandler.selectPlanByIndex(context, requireSubscription(payload), configIndex(payload)).actions());
+            case SHOW_RENEWAL_PRE_INVOICE -> actions.addAll(renewalFlowHandler.preInvoice(context, requireSubscription(payload)).actions());
+            case CONFIRM_RENEWAL_ORDER -> actions.addAll(renewalFlowHandler.confirm(context, requireSubscription(payload)).actions());
             case SHOW_TUTORIALS, BACK_TO_TUTORIALS -> actions.addAll(tutorialMenuHandler.handle(context).actions());
             case SHOW_TUTORIAL_PLATFORM -> actions.addAll(tutorialDetailHandler.handle(context, requireReference(payload)).actions());
             case SHOW_DOWNLOAD_LINKS -> actions.addAll(downloadLinksHandler.handle(context).actions());

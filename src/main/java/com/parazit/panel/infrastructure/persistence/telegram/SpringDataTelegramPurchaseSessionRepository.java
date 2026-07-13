@@ -1,6 +1,7 @@
 package com.parazit.panel.infrastructure.persistence.telegram;
 
 import com.parazit.panel.domain.telegram.purchase.TelegramPurchaseSession;
+import com.parazit.panel.domain.telegram.purchase.PurchaseFlowType;
 import com.parazit.panel.domain.telegram.purchase.TelegramPurchaseSessionStatus;
 import com.parazit.panel.infrastructure.persistence.repository.SpringDataUuidRepository;
 import jakarta.persistence.LockModeType;
@@ -24,10 +25,29 @@ public interface SpringDataTelegramPurchaseSessionRepository
             Collection<TelegramPurchaseSessionStatus> statuses
     );
 
+    Optional<TelegramPurchaseSession> findFirstByUserIdAndFlowTypeAndStatusInOrderByCreatedAtDesc(
+            UUID userId,
+            PurchaseFlowType flowType,
+            Collection<TelegramPurchaseSessionStatus> statuses
+    );
+
     List<TelegramPurchaseSession> findAllByUserIdAndStatusInOrderByCreatedAtDesc(
             UUID userId,
             Collection<TelegramPurchaseSessionStatus> statuses
     );
 
+    List<TelegramPurchaseSession> findAllByUserIdAndFlowTypeAndStatusInOrderByCreatedAtDesc(
+            UUID userId,
+            PurchaseFlowType flowType,
+            Collection<TelegramPurchaseSessionStatus> statuses
+    );
+
     Optional<TelegramPurchaseSession> findFirstByPlanSelectionIdOrderByCreatedAtDesc(UUID planSelectionId);
+
+    Optional<TelegramPurchaseSession> findFirstByUserIdAndFlowTypeAndTargetSubscriptionIdAndStatusInOrderByCreatedAtDesc(
+            UUID userId,
+            PurchaseFlowType flowType,
+            UUID targetSubscriptionId,
+            Collection<TelegramPurchaseSessionStatus> statuses
+    );
 }

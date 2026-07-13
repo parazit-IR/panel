@@ -2,13 +2,19 @@ package com.parazit.panel.application.telegram.menu;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.parazit.panel.application.sales.SalesAvailabilityService;
 import com.parazit.panel.application.telegram.TelegramMessageCatalog;
+import com.parazit.panel.config.properties.ManualPaymentProperties;
 import com.parazit.panel.config.properties.PaymentProperties;
+import com.parazit.panel.config.properties.SalesControlProperties;
 import com.parazit.panel.config.properties.SubscriptionProperties;
 import com.parazit.panel.config.properties.TelegramFeaturePlaceholderProperties;
 import com.parazit.panel.config.properties.TelegramMenuProperties;
+import com.parazit.panel.config.properties.ZarinpalProperties;
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class TelegramMainReplyKeyboardFactoryTest {
@@ -45,7 +51,18 @@ class TelegramMainReplyKeyboardFactoryTest {
                 menuProperties(),
                 new TelegramFeaturePlaceholderProperties(false, false, false, false, false),
                 new PaymentProperties(false, "", Duration.ofMinutes(30)),
-                subscriptionProperties()
+                subscriptionProperties(),
+                salesAvailabilityService()
+        );
+    }
+
+    private static SalesAvailabilityService salesAvailabilityService() {
+        return new SalesAvailabilityService(
+                new SalesControlProperties(true, true, false, false, false, false, false, false, "", "", "", null),
+                new ManualPaymentProperties(false, Duration.ofMinutes(30), 1000, 9999, 10, "", "", "", "", true, Duration.ofMinutes(2)),
+                new ZarinpalProperties(false, "", null, null, null, null, null, null, null, null, Duration.ofSeconds(1), Duration.ofSeconds(1), 0, Duration.ofMillis(100), true, true),
+                List.of(),
+                () -> Instant.parse("2026-07-14T00:00:00Z")
         );
     }
 

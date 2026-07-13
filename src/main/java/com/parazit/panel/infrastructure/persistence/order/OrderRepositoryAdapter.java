@@ -2,6 +2,7 @@ package com.parazit.panel.infrastructure.persistence.order;
 
 import com.parazit.panel.domain.order.Order;
 import com.parazit.panel.domain.order.OrderStatus;
+import com.parazit.panel.domain.order.OrderType;
 import com.parazit.panel.domain.order.repository.OrderRepository;
 import com.parazit.panel.infrastructure.persistence.repository.JpaRepositoryAdapter;
 import java.util.List;
@@ -12,6 +13,14 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class OrderRepositoryAdapter extends JpaRepositoryAdapter<Order, UUID> implements OrderRepository {
+
+    private static final List<OrderStatus> ACTIVE_ORDER_STATUSES = List.of(
+            OrderStatus.CREATED,
+            OrderStatus.PAYMENT_PENDING,
+            OrderStatus.PAID,
+            OrderStatus.PROVISIONING,
+            OrderStatus.PROVISIONING_FAILED
+    );
 
     private final SpringDataOrderRepository repository;
 
@@ -43,10 +52,28 @@ public class OrderRepositoryAdapter extends JpaRepositoryAdapter<Order, UUID> im
     }
 
     @Override
+    public Optional<Order> findActiveByTargetSubscriptionIdAndType(UUID targetSubscriptionId, OrderType type) {
+        return repository.findFirstByTargetSubscriptionIdAndTypeAndStatusInOrderByCreatedAtDesc(
+                Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null"),
+                Objects.requireNonNull(type, "type must not be null"),
+                ACTIVE_ORDER_STATUSES
+        );
+    }
+
+    @Override
     public boolean existsPaidOrCompletedByPlanSelectionId(UUID planSelectionId) {
         return repository.existsByPlanSelectionIdAndStatusIn(
                 Objects.requireNonNull(planSelectionId, "planSelectionId must not be null"),
                 List.of(OrderStatus.PAID, OrderStatus.PROVISIONING, OrderStatus.COMPLETED)
+        );
+    }
+
+    @Override
+    public boolean existsActiveByTargetSubscriptionIdAndType(UUID targetSubscriptionId, OrderType type) {
+        return repository.existsByTargetSubscriptionIdAndTypeAndStatusIn(
+                Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null"),
+                Objects.requireNonNull(type, "type must not be null"),
+                ACTIVE_ORDER_STATUSES
         );
     }
 }

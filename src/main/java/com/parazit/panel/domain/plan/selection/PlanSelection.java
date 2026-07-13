@@ -35,6 +35,13 @@ public class PlanSelection extends BaseEntity {
     @Column(name = "plan_id", nullable = false, updatable = false)
     private UUID planId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "selection_type", nullable = false, length = 40, updatable = false)
+    private SelectionType selectionType;
+
+    @Column(name = "target_subscription_id", updatable = false)
+    private UUID targetSubscriptionId;
+
     @Column(name = "plan_code_snapshot", nullable = false, length = Plan.CODE_MAX_LENGTH, updatable = false)
     private String planCodeSnapshot;
 
@@ -74,10 +81,12 @@ public class PlanSelection extends BaseEntity {
     protected PlanSelection() {
     }
 
-    private PlanSelection(UUID userId, Plan plan, Instant selectedAt, Duration ttl) {
+    private PlanSelection(UUID userId, Plan plan, SelectionType selectionType, UUID targetSubscriptionId, Instant selectedAt, Duration ttl) {
         this.userId = requireUserId(userId);
         Plan requiredPlan = requireActivePlan(plan);
         this.planId = requirePlanId(requiredPlan);
+        this.selectionType = Objects.requireNonNull(selectionType, "selectionType must not be null");
+        this.targetSubscriptionId = normalizeTargetSubscriptionId(this.selectionType, targetSubscriptionId);
         this.planCodeSnapshot = requireText(requiredPlan.getCode(), "planCodeSnapshot", Plan.CODE_MAX_LENGTH);
         this.planNameSnapshot = requireText(requiredPlan.getName(), "planNameSnapshot", Plan.NAME_MAX_LENGTH);
         this.planTypeSnapshot = Objects.requireNonNull(requiredPlan.getType(), "planTypeSnapshot must not be null");
@@ -96,7 +105,11 @@ public class PlanSelection extends BaseEntity {
     }
 
     public static PlanSelection create(UUID userId, Plan plan, Instant selectedAt, Duration ttl) {
-        return new PlanSelection(userId, plan, selectedAt, ttl);
+        return new PlanSelection(userId, plan, SelectionType.NEW_SUBSCRIPTION, null, selectedAt, ttl);
+    }
+
+    public static PlanSelection createRenewal(UUID userId, UUID targetSubscriptionId, Plan plan, Instant selectedAt, Duration ttl) {
+        return new PlanSelection(userId, plan, SelectionType.RENEWAL, targetSubscriptionId, selectedAt, ttl);
     }
 
     public boolean isExpiredAt(Instant now) {
@@ -137,6 +150,14 @@ public class PlanSelection extends BaseEntity {
 
     public UUID getPlanId() {
         return planId;
+    }
+
+    public SelectionType getSelectionType() {
+        return selectionType;
+    }
+
+    public UUID getTargetSubscriptionId() {
+        return targetSubscriptionId;
     }
 
     public String getPlanCodeSnapshot() {
@@ -197,6 +218,16 @@ public class PlanSelection extends BaseEntity {
 
     private static UUID requirePlanId(Plan plan) {
         return Objects.requireNonNull(plan.getId(), "planId must not be null");
+    }
+
+    private static UUID normalizeTargetSubscriptionId(SelectionType selectionType, UUID targetSubscriptionId) {
+        if (selectionType == SelectionType.RENEWAL) {
+            return Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null for renewal selections");
+        }
+        if (targetSubscriptionId != null) {
+            throw new IllegalArgumentException("targetSubscriptionId must be null for new subscription selections");
+        }
+        return null;
     }
 
     private static String requireText(String value, String fieldName, int maxLength) {

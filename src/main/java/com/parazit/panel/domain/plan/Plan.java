@@ -71,6 +71,9 @@ public class Plan extends BaseEntity {
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 
+    @Column(name = "renewal_enabled", nullable = false)
+    private boolean renewalEnabled;
+
     protected Plan() {
     }
 
@@ -147,6 +150,20 @@ public class Plan extends BaseEntity {
         throw invalidTransition("archive");
     }
 
+    public void enableRenewal() {
+        if (status == PlanStatus.ARCHIVED) {
+            throw new IllegalStateException("archived plans cannot be enabled for renewal");
+        }
+        renewalEnabled = true;
+    }
+
+    public void disableRenewal() {
+        if (status == PlanStatus.ARCHIVED) {
+            throw new IllegalStateException("archived plans cannot be disabled for renewal");
+        }
+        renewalEnabled = false;
+    }
+
     public static String normalizeCode(String code) {
         Objects.requireNonNull(code, "code must not be null");
         String normalized = code.trim().toUpperCase(Locale.ROOT);
@@ -207,6 +224,10 @@ public class Plan extends BaseEntity {
 
     public int getDisplayOrder() {
         return displayOrder;
+    }
+
+    public boolean isRenewalEnabled() {
+        return renewalEnabled;
     }
 
     private void applyDetails(

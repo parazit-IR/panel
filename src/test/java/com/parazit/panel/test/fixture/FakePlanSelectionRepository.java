@@ -2,6 +2,7 @@ package com.parazit.panel.test.fixture;
 
 import com.parazit.panel.domain.plan.selection.PlanSelection;
 import com.parazit.panel.domain.plan.selection.PlanSelectionStatus;
+import com.parazit.panel.domain.plan.selection.SelectionType;
 import com.parazit.panel.domain.plan.selection.repository.PlanSelectionRepository;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -35,6 +36,31 @@ public class FakePlanSelectionRepository implements PlanSelectionRepository {
         return selectionsById.values()
                 .stream()
                 .filter(selection -> selection.getUserId().equals(userId))
+                .filter(selection -> selection.getStatus() == PlanSelectionStatus.ACTIVE)
+                .findFirst();
+    }
+
+    @Override
+    public Optional<PlanSelection> findActiveByUserIdAndType(UUID userId, SelectionType selectionType) {
+        return selectionsById.values()
+                .stream()
+                .filter(selection -> selection.getUserId().equals(userId))
+                .filter(selection -> selection.getSelectionType() == selectionType)
+                .filter(selection -> selection.getStatus() == PlanSelectionStatus.ACTIVE)
+                .findFirst();
+    }
+
+    @Override
+    public Optional<PlanSelection> findActiveByUserIdAndTypeAndTargetSubscriptionId(
+            UUID userId,
+            SelectionType selectionType,
+            UUID targetSubscriptionId
+    ) {
+        return selectionsById.values()
+                .stream()
+                .filter(selection -> selection.getUserId().equals(userId))
+                .filter(selection -> selection.getSelectionType() == selectionType)
+                .filter(selection -> targetSubscriptionId.equals(selection.getTargetSubscriptionId()))
                 .filter(selection -> selection.getStatus() == PlanSelectionStatus.ACTIVE)
                 .findFirst();
     }

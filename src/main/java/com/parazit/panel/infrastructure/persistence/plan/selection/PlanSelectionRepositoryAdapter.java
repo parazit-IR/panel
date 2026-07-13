@@ -2,6 +2,7 @@ package com.parazit.panel.infrastructure.persistence.plan.selection;
 
 import com.parazit.panel.domain.plan.selection.PlanSelection;
 import com.parazit.panel.domain.plan.selection.PlanSelectionStatus;
+import com.parazit.panel.domain.plan.selection.SelectionType;
 import com.parazit.panel.domain.plan.selection.repository.PlanSelectionRepository;
 import com.parazit.panel.infrastructure.persistence.repository.JpaRepositoryAdapter;
 import java.util.List;
@@ -29,6 +30,29 @@ public class PlanSelectionRepositoryAdapter extends JpaRepositoryAdapter<PlanSel
     public Optional<PlanSelection> findActiveByUserId(UUID userId) {
         return repository.findByUserIdAndStatus(
                 Objects.requireNonNull(userId, "userId must not be null"),
+                PlanSelectionStatus.ACTIVE
+        );
+    }
+
+    @Override
+    public Optional<PlanSelection> findActiveByUserIdAndType(UUID userId, SelectionType selectionType) {
+        return repository.findByUserIdAndSelectionTypeAndStatus(
+                Objects.requireNonNull(userId, "userId must not be null"),
+                Objects.requireNonNull(selectionType, "selectionType must not be null"),
+                PlanSelectionStatus.ACTIVE
+        );
+    }
+
+    @Override
+    public Optional<PlanSelection> findActiveByUserIdAndTypeAndTargetSubscriptionId(
+            UUID userId,
+            SelectionType selectionType,
+            UUID targetSubscriptionId
+    ) {
+        return repository.findByUserIdAndSelectionTypeAndTargetSubscriptionIdAndStatus(
+                Objects.requireNonNull(userId, "userId must not be null"),
+                Objects.requireNonNull(selectionType, "selectionType must not be null"),
+                Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null"),
                 PlanSelectionStatus.ACTIVE
         );
     }

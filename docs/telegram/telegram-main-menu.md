@@ -26,7 +26,8 @@ Feature behavior:
 - Account summary is available through `/account`, `/profile`, and the My Services page without adding another permanent main-menu row.
 - Tutorials route to configured platform instructions and trusted download links.
 - Support routes to FAQ and configured Telegram support URL.
-- Renewal, trial, and wallet remain visible but return localized unavailable messages until those domains are implemented.
+- Renewal opens the Task 45 renewal service flow when `app.sales.renewal-enabled=true`.
+- Trial and wallet remain visible but return localized unavailable messages until those domains are implemented.
 
 ```mermaid
 flowchart TD
@@ -50,3 +51,7 @@ flowchart TD
 The persistent `🔐 خرید اشتراک` button now opens the selectable purchase catalog.
 
 If new purchases are disabled by `app.sales.new-purchase-enabled=false`, the button remains visible but returns a safe localized disabled-sales message. No `PlanSelection`, `Order`, `Payment`, or Telegram purchase session is created in that state.
+
+## Task 45 Renewal Entry
+
+The persistent `♻️ تمدید سرویس` button lists renewable services owned by the Telegram user. When renewal sales are disabled, the button remains visible but returns a safe localized unavailable message and creates no session, selection, order, or payment.

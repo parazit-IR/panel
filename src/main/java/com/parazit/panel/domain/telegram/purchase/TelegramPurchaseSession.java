@@ -35,6 +35,13 @@ public class TelegramPurchaseSession extends BaseEntity {
     @Column(name = "plan_selection_id", nullable = false)
     private UUID planSelectionId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "flow_type", nullable = false, length = 40)
+    private PurchaseFlowType flowType;
+
+    @Column(name = "target_subscription_id")
+    private UUID targetSubscriptionId;
+
     @Column(name = "order_id")
     private UUID orderId;
 
@@ -51,19 +58,45 @@ public class TelegramPurchaseSession extends BaseEntity {
     protected TelegramPurchaseSession() {
     }
 
-    private TelegramPurchaseSession(UUID userId, long telegramUserId, UUID planSelectionId, Instant expiresAt) {
+    private TelegramPurchaseSession(
+            UUID userId,
+            long telegramUserId,
+            UUID planSelectionId,
+            PurchaseFlowType flowType,
+            UUID targetSubscriptionId,
+            Instant expiresAt
+    ) {
         if (telegramUserId <= 0) {
             throw new IllegalArgumentException("telegramUserId must be positive");
         }
         this.userId = Objects.requireNonNull(userId, "userId must not be null");
         this.telegramUserId = telegramUserId;
         this.planSelectionId = Objects.requireNonNull(planSelectionId, "planSelectionId must not be null");
+        this.flowType = Objects.requireNonNull(flowType, "flowType must not be null");
+        this.targetSubscriptionId = normalizeTargetSubscriptionId(this.flowType, targetSubscriptionId);
         this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt must not be null");
         this.status = TelegramPurchaseSessionStatus.PLAN_SELECTED;
     }
 
     public static TelegramPurchaseSession create(UUID userId, long telegramUserId, UUID planSelectionId, Instant expiresAt) {
-        return new TelegramPurchaseSession(userId, telegramUserId, planSelectionId, expiresAt);
+        return new TelegramPurchaseSession(userId, telegramUserId, planSelectionId, PurchaseFlowType.NEW_SUBSCRIPTION, null, expiresAt);
+    }
+
+    public static TelegramPurchaseSession createRenewal(
+            UUID userId,
+            long telegramUserId,
+            UUID planSelectionId,
+            UUID targetSubscriptionId,
+            Instant expiresAt
+    ) {
+        return new TelegramPurchaseSession(
+                userId,
+                telegramUserId,
+                planSelectionId,
+                PurchaseFlowType.RENEWAL,
+                targetSubscriptionId,
+                expiresAt
+        );
     }
 
     public boolean activeAt(Instant now) {
@@ -133,6 +166,14 @@ public class TelegramPurchaseSession extends BaseEntity {
         return planSelectionId;
     }
 
+    public PurchaseFlowType getFlowType() {
+        return flowType;
+    }
+
+    public UUID getTargetSubscriptionId() {
+        return targetSubscriptionId;
+    }
+
     public UUID getOrderId() {
         return orderId;
     }
@@ -152,5 +193,15 @@ public class TelegramPurchaseSession extends BaseEntity {
     @Override
     public String toString() {
         return "TelegramPurchaseSession[id=%s,status=%s]".formatted(getId(), status);
+    }
+
+    private static UUID normalizeTargetSubscriptionId(PurchaseFlowType flowType, UUID targetSubscriptionId) {
+        if (flowType == PurchaseFlowType.RENEWAL) {
+            return Objects.requireNonNull(targetSubscriptionId, "targetSubscriptionId must not be null for renewal sessions");
+        }
+        if (targetSubscriptionId != null) {
+            throw new IllegalArgumentException("targetSubscriptionId must be null for new subscription sessions");
+        }
+        return null;
     }
 }
