@@ -564,6 +564,27 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    void telegramMenuAndNavigationStayApplicationUiConcerns() throws IOException {
+        List<Path> violations = Stream.concat(
+                        javaFiles("com/parazit/panel/application/telegram/menu"),
+                        javaFiles("com/parazit/panel/application/telegram/navigation")
+                )
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("org.telegram")
+                            || source.contains("jakarta.persistence")
+                            || source.contains("JpaRepository")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("domain.payment.repository")
+                            || source.contains("domain.order.repository")
+                            || source.contains("domain.subscription.repository");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
     void telegramSdkTypesDoNotLeakOutsideInfrastructure() throws IOException {
         List<Path> violations = javaFiles("com/parazit/panel")
                 .filter(path -> source(path).contains("org.telegram"))

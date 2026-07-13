@@ -5,6 +5,7 @@ import com.parazit.panel.application.subscription.result.SubscriptionResult;
 import com.parazit.panel.application.telegram.TelegramKeyboardFactory;
 import com.parazit.panel.application.telegram.TelegramMessageCatalog;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
+import com.parazit.panel.application.telegram.menu.TelegramMainReplyKeyboardFactory;
 import com.parazit.panel.application.telegram.model.TelegramCallbackAction;
 import com.parazit.panel.application.telegram.model.TelegramCommand;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
@@ -27,17 +28,20 @@ public class MySubscriptionsTelegramCommandHandler implements TelegramCommandHan
     private final ListUserSubscriptionsUseCase listUserSubscriptionsUseCase;
     private final TelegramMessageCatalog catalog;
     private final TelegramKeyboardFactory keyboardFactory;
+    private final TelegramMainReplyKeyboardFactory replyKeyboardFactory;
     private final TelegramBotProperties properties;
 
     public MySubscriptionsTelegramCommandHandler(
             ListUserSubscriptionsUseCase listUserSubscriptionsUseCase,
             TelegramMessageCatalog catalog,
             TelegramKeyboardFactory keyboardFactory,
+            TelegramMainReplyKeyboardFactory replyKeyboardFactory,
             TelegramBotProperties properties
     ) {
         this.listUserSubscriptionsUseCase = Objects.requireNonNull(listUserSubscriptionsUseCase, "listUserSubscriptionsUseCase must not be null");
         this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
+        this.replyKeyboardFactory = Objects.requireNonNull(replyKeyboardFactory, "replyKeyboardFactory must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
     }
 
@@ -55,7 +59,18 @@ public class MySubscriptionsTelegramCommandHandler implements TelegramCommandHan
                 .limit(PAGE_SIZE)
                 .toList();
         if (subscriptions.isEmpty()) {
-            return message(context, catalog.text(context.language(), "no_subscriptions"), TelegramInlineKeyboard.empty());
+            return new TelegramResponsePlan(List.of(TelegramResponseAction.sendMessage(
+                    new SendTelegramMessageCommand(
+                            context.chatId(),
+                            catalog.text(context.language(), "no_subscriptions"),
+                            TelegramParseMode.NONE,
+                            TelegramInlineKeyboard.empty(),
+                            replyKeyboardFactory.mainKeyboard(context.language()),
+                            properties.disableLinkPreview(),
+                            null
+                    ),
+                    false
+            )), "command:subscriptions");
         }
         List<TelegramInlineKeyboardRow> rows = subscriptions.stream()
                 .map(subscription -> keyboardFactory.row(keyboardFactory.button(
@@ -87,6 +102,6 @@ public class MySubscriptionsTelegramCommandHandler implements TelegramCommandHan
 
     private static String label(SubscriptionResult result) {
         String plan = result.planName() == null || result.planName().isBlank() ? "Subscription" : result.planName();
-        return plan + " - " + result.status();
+        return plan;
     }
 }

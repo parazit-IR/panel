@@ -8,6 +8,9 @@ import com.parazit.panel.application.telegram.command.EditTelegramMessageCommand
 import com.parazit.panel.application.telegram.command.GetTelegramUpdatesCommand;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
 import com.parazit.panel.application.telegram.command.SendTelegramPhotoCommand;
+import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboard;
+import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboardButton;
+import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboardRow;
 import com.parazit.panel.application.telegram.model.TelegramActor;
 import com.parazit.panel.application.telegram.model.TelegramCallbackQuery;
 import com.parazit.panel.application.telegram.model.TelegramChat;
@@ -62,7 +65,7 @@ public class TelegramBotApiClient implements TelegramBotClient {
         body.put("text", command.text());
         putParseMode(body, command.parseMode());
         body.put("disable_web_page_preview", command.disableLinkPreview());
-        putKeyboard(body, command.keyboard());
+        putKeyboard(body, command);
         JsonNode result = postJson("sendMessage", body);
         JsonNode message = result.path("result");
         return new TelegramSendResult(command.chatId(), message.path("message_id").asLong(), Instant.now(), TelegramMessageKind.TEXT, true);
@@ -259,6 +262,16 @@ public class TelegramBotApiClient implements TelegramBotClient {
         }
     }
 
+    private void putKeyboard(Map<String, Object> body, SendTelegramMessageCommand command) {
+        Object inline = keyboard(command.keyboard());
+        Object reply = replyKeyboard(command.replyKeyboard());
+        if (inline != null) {
+            body.put("reply_markup", inline);
+        } else if (reply != null) {
+            body.put("reply_markup", reply);
+        }
+    }
+
     private Object keyboard(TelegramInlineKeyboard keyboard) {
         if (keyboard == null || keyboard.rows().isEmpty()) {
             return null;
@@ -276,6 +289,30 @@ public class TelegramBotApiClient implements TelegramBotClient {
             rows.add(buttons);
         }
         return Map.of("inline_keyboard", rows);
+    }
+
+    private Object replyKeyboard(TelegramReplyKeyboard keyboard) {
+        if (keyboard == null || keyboard.empty()) {
+            return null;
+        }
+        List<List<Map<String, Object>>> rows = new ArrayList<>();
+        for (TelegramReplyKeyboardRow row : keyboard.rows()) {
+            List<Map<String, Object>> buttons = new ArrayList<>();
+            for (TelegramReplyKeyboardButton button : row.buttons()) {
+                buttons.add(Map.of("text", button.text()));
+            }
+            rows.add(buttons);
+        }
+        Map<String, Object> markup = new java.util.LinkedHashMap<>();
+        markup.put("keyboard", rows);
+        markup.put("resize_keyboard", keyboard.resizeKeyboard());
+        markup.put("one_time_keyboard", keyboard.oneTimeKeyboard());
+        markup.put("is_persistent", keyboard.persistent());
+        markup.put("selective", keyboard.selective());
+        if (keyboard.inputFieldPlaceholder() != null && !keyboard.inputFieldPlaceholder().isBlank()) {
+            markup.put("input_field_placeholder", keyboard.inputFieldPlaceholder());
+        }
+        return markup;
     }
 
     private String path(String method) {

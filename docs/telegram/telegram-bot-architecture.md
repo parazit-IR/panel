@@ -21,6 +21,25 @@ sequenceDiagram
 
 The application and domain layers use internal Telegram models only. Telegram HTTP DTOs and `RestClient` stay in infrastructure.
 
+## Task 41 Menu Routing
+
+The persistent main menu is a Telegram application concern. Domain services do not depend on menu actions, page models, or keyboard classes.
+
+```mermaid
+sequenceDiagram
+    participant TG as Telegram
+    participant P as Update processor
+    participant R as Text router
+    participant M as Main menu handler
+    participant U as Use case
+    TG->>P: Persian reply keyboard text
+    P->>R: normalize and exact-match
+    R-->>P: TelegramMainMenuAction
+    P->>M: route action
+    M->>U: call existing use case when implemented
+    M-->>TG: message with reply or inline keyboard
+```
+
 ## Idempotency
 
 `telegram_processed_updates` stores one row per Telegram `update_id`. A processed update is terminal and replay does not resend messages. Failed updates can be retried until the configured attempt limit, then become `DEAD`.
@@ -40,4 +59,3 @@ Telegram send operations do not provide a general caller idempotency key. A time
 ## Transactions
 
 Update claim, completion, failure, polling offset updates, and sensitive-action completion are short database transactions. Telegram HTTP calls, QR rendering, and long-poll waits happen outside those transactions.
-

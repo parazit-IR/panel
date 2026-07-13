@@ -3,6 +3,10 @@ package com.parazit.panel.application.telegram;
 import com.parazit.panel.application.port.in.telegram.ProcessTelegramUpdateUseCase;
 import com.parazit.panel.application.telegram.handler.TelegramCallbackHandler;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
+import com.parazit.panel.application.telegram.menu.TelegramMainMenuAction;
+import com.parazit.panel.application.telegram.menu.TelegramMainMenuHandler;
+import com.parazit.panel.application.telegram.menu.TelegramMainMenuTextRouter;
+import com.parazit.panel.application.telegram.menu.TelegramMenuMetrics;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
 import com.parazit.panel.application.telegram.model.TelegramCommand;
 import com.parazit.panel.application.telegram.model.TelegramInteractionContext;
@@ -11,6 +15,7 @@ import com.parazit.panel.application.telegram.model.TelegramResponseAction;
 import com.parazit.panel.application.telegram.model.TelegramParseMode;
 import com.parazit.panel.application.telegram.model.TelegramUpdate;
 import com.parazit.panel.application.telegram.model.TelegramUpdateType;
+import java.util.Optional;
 import com.parazit.panel.application.user.result.RegisterUserResult;
 import java.util.Objects;
 import java.util.List;
@@ -33,6 +38,9 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
     private final TelegramResponseExecutor responseExecutor;
     private final TelegramFailureClassifier failureClassifier;
     private final TelegramMessageCatalog catalog;
+    private final TelegramMainMenuTextRouter mainMenuTextRouter;
+    private final TelegramMainMenuHandler mainMenuHandler;
+    private final TelegramMenuMetrics metrics;
 
     public TelegramUpdateProcessor(
             ClaimTelegramUpdateTransaction claimTransaction,
@@ -44,7 +52,10 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
             TelegramCallbackHandler callbackHandler,
             TelegramResponseExecutor responseExecutor,
             TelegramFailureClassifier failureClassifier,
-            TelegramMessageCatalog catalog
+            TelegramMessageCatalog catalog,
+            TelegramMainMenuTextRouter mainMenuTextRouter,
+            TelegramMainMenuHandler mainMenuHandler,
+            TelegramMenuMetrics metrics
     ) {
         this.claimTransaction = Objects.requireNonNull(claimTransaction, "claimTransaction must not be null");
         this.completeTransaction = Objects.requireNonNull(completeTransaction, "completeTransaction must not be null");
@@ -56,6 +67,9 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
         this.responseExecutor = Objects.requireNonNull(responseExecutor, "responseExecutor must not be null");
         this.failureClassifier = Objects.requireNonNull(failureClassifier, "failureClassifier must not be null");
         this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
+        this.mainMenuTextRouter = Objects.requireNonNull(mainMenuTextRouter, "mainMenuTextRouter must not be null");
+        this.mainMenuHandler = Objects.requireNonNull(mainMenuHandler, "mainMenuHandler must not be null");
+        this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
     }
 
     @Override
@@ -113,16 +127,26 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
                 update.chat().chatId(),
                 update.chat().type(),
                 registered.language().name(),
+                update.actor().firstName(),
                 update.callbackQuery() == null ? null : update.callbackQuery().sourceMessageId(),
                 update.callbackQuery() == null ? null : update.callbackQuery().callbackQueryId(),
                 update.receivedAt()
         );
-        if (update.type() == TelegramUpdateType.MESSAGE) {
-            TelegramCommand command = commandParser.parse(update.message() == null ? "" : update.message().text());
-            return commandRouter.route(command, context);
-        }
         if (update.type() == TelegramUpdateType.CALLBACK_QUERY) {
             return callbackHandler.handle(context, update.callbackQuery().data());
+        }
+        if (update.type() == TelegramUpdateType.MESSAGE) {
+            String text = update.message() == null ? "" : update.message().text();
+            TelegramCommand command = commandParser.parse(text);
+            if (command != TelegramCommand.UNKNOWN) {
+                return commandRouter.route(command, context);
+            }
+            Optional<TelegramMainMenuAction> action = mainMenuTextRouter.route(context.language(), text);
+            if (action.isPresent()) {
+                return mainMenuHandler.handle(context, action.get());
+            }
+            metrics.recordUnknownMessage(context.chatType().name());
+            return mainMenuHandler.showHome(context, "telegram.error.unknown_message", "message:unknown");
         }
         return TelegramResponsePlan.empty("ignored:unsupported");
     }
@@ -137,6 +161,7 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
                 update.chat().chatId(),
                 update.chat().type(),
                 update.actor().languageCode(),
+                update.actor().firstName(),
                 null,
                 update.callbackQuery() == null ? null : update.callbackQuery().callbackQueryId(),
                 update.receivedAt()

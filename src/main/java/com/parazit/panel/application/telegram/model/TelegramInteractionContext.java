@@ -8,6 +8,7 @@ public record TelegramInteractionContext(
         long chatId,
         TelegramChatType chatType,
         String language,
+        String firstName,
         Long sourceMessageId,
         String callbackQueryId,
         Instant receivedAt
@@ -22,6 +23,7 @@ public record TelegramInteractionContext(
         }
         chatType = chatType == null ? TelegramChatType.UNKNOWN : chatType;
         language = language == null || language.isBlank() ? "EN" : language.trim().toUpperCase();
+        firstName = firstName == null ? "" : firstName.trim();
     }
 
     public boolean privateChat() {

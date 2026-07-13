@@ -1,8 +1,8 @@
 package com.parazit.panel.application.telegram.handler;
 
+import com.parazit.panel.application.telegram.TelegramMessageCatalog;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
 import com.parazit.panel.application.telegram.menu.TelegramMainReplyKeyboardFactory;
-import com.parazit.panel.application.telegram.menu.TelegramWelcomeMessageFormatter;
 import com.parazit.panel.application.telegram.model.TelegramCommand;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
 import com.parazit.panel.application.telegram.model.TelegramInteractionContext;
@@ -15,40 +15,37 @@ import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 @Component
-public class StartTelegramCommandHandler implements TelegramCommandHandler {
+public class PaymentsTelegramCommandHandler implements TelegramCommandHandler {
 
-    private final TelegramWelcomeMessageFormatter welcomeMessageFormatter;
+    private final TelegramMessageCatalog catalog;
     private final TelegramMainReplyKeyboardFactory replyKeyboardFactory;
     private final TelegramBotProperties properties;
 
-    public StartTelegramCommandHandler(
-            TelegramWelcomeMessageFormatter welcomeMessageFormatter,
+    public PaymentsTelegramCommandHandler(
+            TelegramMessageCatalog catalog,
             TelegramMainReplyKeyboardFactory replyKeyboardFactory,
             TelegramBotProperties properties
     ) {
-        this.welcomeMessageFormatter = Objects.requireNonNull(welcomeMessageFormatter, "welcomeMessageFormatter must not be null");
+        this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
         this.replyKeyboardFactory = Objects.requireNonNull(replyKeyboardFactory, "replyKeyboardFactory must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
     }
 
     @Override
     public TelegramCommand command() {
-        return TelegramCommand.START;
+        return TelegramCommand.PAYMENTS;
     }
 
     @Override
     public TelegramResponsePlan handle(TelegramInteractionContext context) {
-        return new TelegramResponsePlan(List.of(TelegramResponseAction.sendMessage(
-                new SendTelegramMessageCommand(
-                        context.chatId(),
-                        welcomeMessageFormatter.format(context.language(), context.firstName()),
-                        TelegramParseMode.HTML,
-                        TelegramInlineKeyboard.empty(),
-                        replyKeyboardFactory.mainKeyboard(context.language()),
-                        properties.disableLinkPreview(),
-                        null
-                ),
-                false
-        )), "command:start");
+        return new TelegramResponsePlan(List.of(TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
+                context.chatId(),
+                catalog.text(context.language(), "telegram.feature.payments_unavailable"),
+                TelegramParseMode.NONE,
+                TelegramInlineKeyboard.empty(),
+                replyKeyboardFactory.mainKeyboard(context.language()),
+                properties.disableLinkPreview(),
+                null
+        ), false)), "command:payments");
     }
 }

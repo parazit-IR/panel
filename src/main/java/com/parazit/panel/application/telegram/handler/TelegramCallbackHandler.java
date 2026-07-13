@@ -26,6 +26,8 @@ import com.parazit.panel.application.telegram.TelegramSensitiveActionService;
 import com.parazit.panel.application.telegram.command.AnswerTelegramCallbackCommand;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
 import com.parazit.panel.application.telegram.command.SendTelegramPhotoCommand;
+import com.parazit.panel.application.telegram.menu.TelegramMainReplyKeyboardFactory;
+import com.parazit.panel.application.telegram.menu.TelegramMenuLabelProvider;
 import com.parazit.panel.application.telegram.model.TelegramCallbackAction;
 import com.parazit.panel.application.telegram.model.TelegramCallbackPayload;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
@@ -50,6 +52,8 @@ public class TelegramCallbackHandler {
     private final TelegramKeyboardFactory keyboardFactory;
     private final TelegramMessageCatalog catalog;
     private final TelegramMessageFormatter formatter;
+    private final TelegramMainReplyKeyboardFactory replyKeyboardFactory;
+    private final TelegramMenuLabelProvider labelProvider;
     private final TelegramBotProperties telegramProperties;
     private final QrCodeProperties qrProperties;
     private final GetSubscriptionDeliverySummaryUseCase getSummaryUseCase;
@@ -66,6 +70,8 @@ public class TelegramCallbackHandler {
             TelegramKeyboardFactory keyboardFactory,
             TelegramMessageCatalog catalog,
             TelegramMessageFormatter formatter,
+            TelegramMainReplyKeyboardFactory replyKeyboardFactory,
+            TelegramMenuLabelProvider labelProvider,
             TelegramBotProperties telegramProperties,
             QrCodeProperties qrProperties,
             GetSubscriptionDeliverySummaryUseCase getSummaryUseCase,
@@ -81,6 +87,8 @@ public class TelegramCallbackHandler {
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
         this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
         this.formatter = Objects.requireNonNull(formatter, "formatter must not be null");
+        this.replyKeyboardFactory = Objects.requireNonNull(replyKeyboardFactory, "replyKeyboardFactory must not be null");
+        this.labelProvider = Objects.requireNonNull(labelProvider, "labelProvider must not be null");
         this.telegramProperties = Objects.requireNonNull(telegramProperties, "telegramProperties must not be null");
         this.qrProperties = Objects.requireNonNull(qrProperties, "qrProperties must not be null");
         this.getSummaryUseCase = Objects.requireNonNull(getSummaryUseCase, "getSummaryUseCase must not be null");
@@ -127,18 +135,20 @@ public class TelegramCallbackHandler {
         List<TelegramInlineKeyboardRow> rows = new ArrayList<>();
         for (SubscriptionDeliveryEntry entry : summary.entries()) {
             rows.add(keyboardFactory.row(
-                    keyboardFactory.button("Config " + entry.index(), TelegramCallbackAction.SHOW_CONFIG, context.telegramUserId(), subscriptionId, entry.index(), null, context.receivedAt()),
-                    keyboardFactory.button("Config QR " + entry.index(), TelegramCallbackAction.SHOW_CONFIG_QR, context.telegramUserId(), subscriptionId, entry.index(), null, context.receivedAt())
+                    keyboardFactory.button(catalog.text(context.language(), "telegram.subscription.config") + " " + entry.index(), TelegramCallbackAction.SHOW_CONFIG, context.telegramUserId(), subscriptionId, entry.index(), null, context.receivedAt()),
+                    keyboardFactory.button(catalog.text(context.language(), "telegram.subscription.config_qr") + " " + entry.index(), TelegramCallbackAction.SHOW_CONFIG_QR, context.telegramUserId(), subscriptionId, entry.index(), null, context.receivedAt())
             ));
         }
-        rows.add(keyboardFactory.row(keyboardFactory.button("Generate new link", TelegramCallbackAction.REQUEST_SUBSCRIPTION_LINK, context.telegramUserId(), subscriptionId, null, null, context.receivedAt())));
-        rows.add(keyboardFactory.row(keyboardFactory.button("Back", TelegramCallbackAction.BACK_TO_SUBSCRIPTIONS, context.telegramUserId(), null, null, null, context.receivedAt())));
-        String text = "Subscription\n"
-                + "Plan: " + formatter.html(summary.planName()) + "\n"
-                + "Status: " + summary.status() + "\n"
-                + "Expires: " + formatter.formatDate(summary.expiresAt()) + "\n"
-                + "Configs: " + summary.configCount() + "\n"
-                + "Token version: " + summary.tokenVersion();
+        rows.add(keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.subscription.new_link"), TelegramCallbackAction.REQUEST_SUBSCRIPTION_LINK, context.telegramUserId(), subscriptionId, null, null, context.receivedAt())));
+        rows.add(keyboardFactory.row(
+                keyboardFactory.button(labelProvider.label(context.language(), com.parazit.panel.application.telegram.navigation.TelegramNavigationAction.BACK), TelegramCallbackAction.BACK_TO_SUBSCRIPTIONS, context.telegramUserId(), null, null, null, context.receivedAt()),
+                keyboardFactory.button(labelProvider.label(context.language(), com.parazit.panel.application.telegram.navigation.TelegramNavigationAction.HOME), TelegramCallbackAction.BACK_TO_MAIN, context.telegramUserId(), null, null, null, context.receivedAt())
+        ));
+        String text = catalog.text(context.language(), "telegram.subscription.details_title") + "\n"
+                + catalog.text(context.language(), "telegram.subscription.plan") + ": " + formatter.html(summary.planName()) + "\n"
+                + catalog.text(context.language(), "telegram.subscription.status") + ": " + statusLabel(context.language(), summary.status().name()) + "\n"
+                + catalog.text(context.language(), "telegram.subscription.expires") + ": " + formatter.formatDate(summary.expiresAt()) + "\n"
+                + catalog.text(context.language(), "telegram.subscription.configs") + ": " + summary.configCount();
         return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
                 context.chatId(),
                 text,
@@ -151,7 +161,7 @@ public class TelegramCallbackHandler {
 
     private TelegramResponseAction configText(TelegramInteractionContext context, UUID subscriptionId, int configIndex) {
         SubscriptionConfigEntryResult result = getConfigEntryUseCase.get(context.telegramUserId(), subscriptionId, configIndex);
-        String text = "VLESS config " + configIndex + "\n<code>" + formatter.html(result.uri()) + "</code>";
+        String text = catalog.text(context.language(), "telegram.subscription.config") + " " + configIndex + "\n<code>" + formatter.html(result.uri()) + "</code>";
         return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
                 context.chatId(),
                 text,
@@ -174,7 +184,7 @@ public class TelegramCallbackHandler {
                 context.chatId(),
                 result.bytes(),
                 result.filename(),
-                "VLESS config " + configIndex,
+                catalog.text(context.language(), "telegram.subscription.config_qr") + " " + configIndex,
                 TelegramParseMode.NONE,
                 TelegramInlineKeyboard.empty()
         ), true);
@@ -184,7 +194,7 @@ public class TelegramCallbackHandler {
         TelegramSensitiveAction action = sensitiveActionService.createRotation(context.telegramUserId(), subscriptionId);
         TelegramInlineKeyboard keyboard = keyboardFactory.rows(List.of(
                 keyboardFactory.row(keyboardFactory.button(
-                        "Confirm",
+                        catalog.text(context.language(), "telegram.action.confirm"),
                         TelegramCallbackAction.CONFIRM_ROTATE_SUBSCRIPTION_TOKEN,
                         context.telegramUserId(),
                         null,
@@ -193,7 +203,7 @@ public class TelegramCallbackHandler {
                         context.receivedAt()
                 )),
                 keyboardFactory.row(keyboardFactory.button(
-                        "Cancel",
+                        catalog.text(context.language(), "telegram.navigation.close"),
                         TelegramCallbackAction.CANCEL_ROTATION,
                         context.telegramUserId(),
                         null,
@@ -276,9 +286,10 @@ public class TelegramCallbackHandler {
     private TelegramResponseAction menuMessage(TelegramInteractionContext context) {
         return TelegramResponseAction.sendMessage(new SendTelegramMessageCommand(
                 context.chatId(),
-                catalog.text(context.language(), "main_menu_title"),
+                catalog.text(context.language(), "telegram.menu.returned"),
                 TelegramParseMode.NONE,
-                keyboardFactory.mainMenu(context.telegramUserId(), context.receivedAt()),
+                TelegramInlineKeyboard.empty(),
+                replyKeyboardFactory.mainKeyboard(context.language()),
                 telegramProperties.disableLinkPreview(),
                 null
         ), false);
@@ -290,6 +301,7 @@ public class TelegramCallbackHandler {
                 catalog.text(context.language(), "help"),
                 TelegramParseMode.NONE,
                 TelegramInlineKeyboard.empty(),
+                replyKeyboardFactory.mainKeyboard(context.language()),
                 telegramProperties.disableLinkPreview(),
                 null
         ), false);
@@ -326,5 +338,9 @@ public class TelegramCallbackHandler {
 
     private static int configIndex(TelegramCallbackPayload payload) {
         return payload.configIndex() == null ? 1 : payload.configIndex();
+    }
+
+    private String statusLabel(String language, String status) {
+        return catalog.text(language, "telegram.subscription.status." + status);
     }
 }

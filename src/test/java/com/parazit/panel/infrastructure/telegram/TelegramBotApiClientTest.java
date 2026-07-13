@@ -6,10 +6,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.parazit.panel.application.telegram.TelegramTestProperties;
 import com.parazit.panel.application.telegram.command.GetTelegramUpdatesCommand;
 import com.parazit.panel.application.telegram.command.SendTelegramMessageCommand;
+import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboard;
+import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboardButton;
+import com.parazit.panel.application.telegram.keyboard.TelegramReplyKeyboardRow;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
 import com.parazit.panel.application.telegram.model.TelegramParseMode;
 import com.parazit.panel.application.telegram.model.TelegramUpdateType;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -60,6 +64,42 @@ class TelegramBotApiClientTest {
 
         assertThat(result.messageId()).isEqualTo(77L);
         assertThat(server.takeRequest().getPath()).isEqualTo("/bot123456:test-token/sendMessage");
+    }
+
+    @Test
+    void sendsPersistentReplyKeyboardMarkup() throws Exception {
+        server.enqueue(json("""
+                {"ok":true,"result":{"message_id":78}}
+                """));
+
+        client.sendMessage(new SendTelegramMessageCommand(
+                42L,
+                "menu",
+                TelegramParseMode.NONE,
+                TelegramInlineKeyboard.empty(),
+                new TelegramReplyKeyboard(
+                        List.of(new TelegramReplyKeyboardRow(List.of(
+                                new TelegramReplyKeyboardButton("🔐 خرید اشتراک"),
+                                new TelegramReplyKeyboardButton("♻️ تمدید سرویس")
+                        ))),
+                        true,
+                        false,
+                        true,
+                        false,
+                        "یکی از گزینه‌های منو را انتخاب کنید"
+                ),
+                true,
+                null
+        ));
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"reply_markup\"");
+        assertThat(body).contains("\"keyboard\"");
+        assertThat(body).contains("\"resize_keyboard\":true");
+        assertThat(body).contains("\"one_time_keyboard\":false");
+        assertThat(body).contains("\"is_persistent\":true");
+        assertThat(body).contains("\"input_field_placeholder\":\"یکی از گزینه‌های منو را انتخاب کنید\"");
+        assertThat(body).doesNotContain("inline_keyboard");
     }
 
     @Test

@@ -39,8 +39,14 @@ public class TelegramCommandParser {
         return switch (command) {
             case "start" -> TelegramCommand.START;
             case "menu" -> TelegramCommand.MENU;
+            case "plans", "tariffs" -> TelegramCommand.PLANS;
+            case "buy" -> TelegramCommand.BUY;
             case "subscriptions" -> TelegramCommand.MY_SUBSCRIPTIONS;
+            case "services" -> TelegramCommand.MY_SUBSCRIPTIONS;
+            case "payments" -> TelegramCommand.PAYMENTS;
+            case "settings" -> TelegramCommand.SETTINGS;
             case "help" -> TelegramCommand.HELP;
+            case "cancel" -> TelegramCommand.CANCEL;
             default -> TelegramCommand.UNKNOWN;
         };
     }

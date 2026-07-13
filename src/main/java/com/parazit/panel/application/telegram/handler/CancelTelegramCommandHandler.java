@@ -8,21 +8,21 @@ import java.util.Objects;
 import org.springframework.stereotype.Component;
 
 @Component
-public class UnknownTelegramCommandHandler implements TelegramCommandHandler {
+public class CancelTelegramCommandHandler implements TelegramCommandHandler {
 
     private final TelegramMainMenuHandler mainMenuHandler;
 
-    public UnknownTelegramCommandHandler(TelegramMainMenuHandler mainMenuHandler) {
+    public CancelTelegramCommandHandler(TelegramMainMenuHandler mainMenuHandler) {
         this.mainMenuHandler = Objects.requireNonNull(mainMenuHandler, "mainMenuHandler must not be null");
     }
 
     @Override
     public TelegramCommand command() {
-        return TelegramCommand.UNKNOWN;
+        return TelegramCommand.CANCEL;
     }
 
     @Override
     public TelegramResponsePlan handle(TelegramInteractionContext context) {
-        return mainMenuHandler.showHome(context, "telegram.error.unknown_message", "command:unknown");
+        return mainMenuHandler.showHome(context, "telegram.cancel.success", "command:cancel");
     }
 }
