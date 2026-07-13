@@ -55,6 +55,13 @@ import com.parazit.panel.application.payment.zarinpal.ZarinpalVerificationUnknow
 import com.parazit.panel.application.referral.ReferralAlreadyAssignedException;
 import com.parazit.panel.application.referral.ReferralCodeNotFoundException;
 import com.parazit.panel.application.referral.SelfReferralNotAllowedException;
+import com.parazit.panel.application.subscription.SubscriptionEndpointConfigurationException;
+import com.parazit.panel.application.subscription.SubscriptionNotAccessibleException;
+import com.parazit.panel.application.subscription.SubscriptionNotFoundException;
+import com.parazit.panel.application.subscription.SubscriptionOwnershipException;
+import com.parazit.panel.application.subscription.SubscriptionRenderingException;
+import com.parazit.panel.application.subscription.SubscriptionTokenInvalidException;
+import com.parazit.panel.application.subscription.UnsupportedInboundConfigurationException;
 import com.parazit.panel.application.user.UserNotFoundException;
 import com.parazit.panel.application.xui.inbound.XuiEligibleInboundNotFoundException;
 import com.parazit.panel.application.xui.inbound.XuiInboundAmbiguousException;
@@ -277,7 +284,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             PaymentOrderNotFoundException.class,
             ManualPaymentInstructionNotFoundException.class,
             ManualPaymentReceiptNotFoundException.class,
-            ZarinpalAuthorityNotFoundException.class
+            ZarinpalAuthorityNotFoundException.class,
+            SubscriptionNotFoundException.class,
+            SubscriptionOwnershipException.class
     })
     public ResponseEntity<ApiErrorResponse> handleXuiInboundNotFound(
             RuntimeException exception,
@@ -330,7 +339,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             ZarinpalPaymentNotAllowedException.class,
             ZarinpalAmountMismatchException.class,
             PaymentAlreadyApprovedException.class,
-            PaymentVerificationConflictException.class
+            PaymentVerificationConflictException.class,
+            SubscriptionNotAccessibleException.class,
+            SubscriptionTokenInvalidException.class
     })
     public ResponseEntity<ApiErrorResponse> handlePlanConflict(
             RuntimeException exception,
@@ -388,6 +399,25 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ProvisioningOutboxException.class)
     public ResponseEntity<ApiErrorResponse> handleProvisioningOutbox(
             ProvisioningOutboxException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(UnsupportedInboundConfigurationException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnsupportedSubscriptionInbound(
+            UnsupportedInboundConfigurationException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.UNPROCESSABLE_ENTITY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler({
+            SubscriptionRenderingException.class,
+            SubscriptionEndpointConfigurationException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleSubscriptionUnavailable(
+            RuntimeException exception,
             HttpServletRequest request
     ) {
         return buildResponse(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage(), request);

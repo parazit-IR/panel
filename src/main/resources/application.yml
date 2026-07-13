@@ -182,6 +182,26 @@ app:
   xui-client-provisioning:
     default-flow: "${XUI_CLIENT_DEFAULT_FLOW:xtls-rprx-vision}"
     reconciliation-attempts: "${XUI_CLIENT_RECONCILIATION_ATTEMPTS:1}"
+  subscription:
+    enabled: "${SUBSCRIPTION_ENABLED:true}"
+    public-base-url: "${SUBSCRIPTION_PUBLIC_BASE_URL:http://localhost:8081}"
+    token-bytes: "${SUBSCRIPTION_TOKEN_BYTES:32}"
+    token-prefix-length: "${SUBSCRIPTION_TOKEN_PREFIX_LENGTH:12}"
+    max-token-length: "${SUBSCRIPTION_MAX_TOKEN_LENGTH:160}"
+    metadata-remote-timeout: "${SUBSCRIPTION_METADATA_REMOTE_TIMEOUT:PT5S}"
+    include-usage-headers: "${SUBSCRIPTION_INCLUDE_USAGE_HEADERS:true}"
+    allow-plain-format: "${SUBSCRIPTION_ALLOW_PLAIN_FORMAT:true}"
+    allow-base64-format: "${SUBSCRIPTION_ALLOW_BASE64_FORMAT:true}"
+    default-format: "${SUBSCRIPTION_DEFAULT_FORMAT:base64}"
+    profile-title: "${SUBSCRIPTION_PROFILE_TITLE:Panel VPN}"
+    profile-update-interval-hours: "${SUBSCRIPTION_PROFILE_UPDATE_INTERVAL_HOURS:24}"
+    support-url: "${SUBSCRIPTION_SUPPORT_URL:http://localhost:8081/support}"
+    endpoint:
+      public-host: "${SUBSCRIPTION_PUBLIC_HOST:localhost}"
+      override-port: "${SUBSCRIPTION_OVERRIDE_PORT:0}"
+      default-fingerprint: "${SUBSCRIPTION_DEFAULT_FINGERPRINT:chrome}"
+      default-remark-prefix: "${SUBSCRIPTION_DEFAULT_REMARK_PREFIX:Panel}"
+      prefer-ipv6: "${SUBSCRIPTION_PREFER_IPV6:false}"
   referral:
     enabled: "${REFERRAL_ENABLED:true}"
     code-length: "${REFERRAL_CODE_LENGTH:10}"

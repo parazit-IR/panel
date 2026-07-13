@@ -376,6 +376,86 @@ class ArchitectureRulesTest {
         assertThat(apiViolations).isEmpty();
     }
 
+    @Test
+    void subscriptionDomainAndApplicationStayInsideCleanArchitectureBoundaries() throws IOException {
+        List<Path> domainViolations = javaFiles("com/parazit/panel/domain/subscription")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.api.")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("org.springframework");
+                })
+                .toList();
+        List<Path> applicationViolations = javaFiles("com/parazit/panel/application/subscription")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("org.springframework.web.client")
+                            || source.contains("jakarta.persistence")
+                            || source.contains("JpaRepository")
+                            || source.contains("RestClient");
+                })
+                .toList();
+
+        assertThat(domainViolations).isEmpty();
+        assertThat(applicationViolations).isEmpty();
+    }
+
+    @Test
+    void subscriptionControllersDependOnInputPortsAndDoNotExposeEntitiesOrSecrets() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/api")
+                .filter(path -> path.toString().contains("/subscription/"))
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.domain.subscription.Subscription;")
+                            || source.contains("com.parazit.panel.domain.subscription.repository")
+                            || source.contains("com.parazit.panel.infrastructure.")
+                            || source.contains("SpringData")
+                            || source.contains("JpaRepository")
+                            || source.contains("accessTokenHash")
+                            || source.contains("tokenHash")
+                            || source.contains("privateKey")
+                            || source.contains("cookie");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void subscriptionTaskDoesNotIntroduceQrTelegramOrPaymentMutationCoupling() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel")
+                .filter(path -> path.toString().contains("/subscription/"))
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("QRCode")
+                            || source.contains("QrCode")
+                            || source.contains("org.telegram")
+                            || source.contains("TelegramBot")
+                            || source.contains("TelegramLongPollingBot")
+                            || source.contains("PaymentApprovalService")
+                            || source.contains("markPaid")
+                            || source.contains("markCompleted");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
+    @Test
+    void subscriptionRenderingDoesNotDependOnApiDtosOrExposeRealityPrivateKey() throws IOException {
+        List<Path> violations = javaFiles("com/parazit/panel/application/subscription/render")
+                .filter(path -> {
+                    String source = source(path);
+                    return source.contains("com.parazit.panel.api.")
+                            || source.contains("privateKey")
+                            || source.contains("Reality private");
+                })
+                .toList();
+
+        assertThat(violations).isEmpty();
+    }
+
     private static Stream<Path> javaFiles(String packagePath) throws IOException {
         Path root = packagePath.isBlank() ? MAIN_JAVA : MAIN_JAVA.resolve(packagePath);
         return Files.walk(root)

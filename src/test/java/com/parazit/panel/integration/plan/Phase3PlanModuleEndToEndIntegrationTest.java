@@ -198,7 +198,7 @@ class Phase3PlanModuleEndToEndIntegrationTest extends PostgreSqlContainerSupport
                 SELECT table_name
                 FROM information_schema.tables
                 WHERE table_schema = 'public'
-                  AND table_name IN ('subscriptions', 'vpn_clients')
+                  AND table_name IN ('vpn_clients')
                 """, String.class));
     }
 }
