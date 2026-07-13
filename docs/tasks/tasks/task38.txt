@@ -1,0 +1,2306 @@
+You are a senior Java 21, Spring Boot, scheduling, background-job, transactional-outbox, concurrency, and operational-reliability engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 38 — Scheduled Jobs, Cleanup, Retry, and Reconciliation Framework
+
+## Goal
+
+Implement a reliable scheduling and background-job framework for the VPN Automation Platform.
+
+After this task, the application must be able to run bounded, observable, idempotent, and concurrency-safe background jobs for:
+
+* expiring stale Plan selections;
+* expiring unpaid Payments;
+* expiring manual card-payment instructions;
+* expiring Telegram purchase sessions;
+* expiring Telegram conversation states;
+* expiring Telegram sensitive actions;
+* retrying failed Telegram update processing where safe;
+* retrying failed or unknown provisioning outbox records;
+* recovering stuck PROCESSING outbox records;
+* reconciling Telegram receipt-upload attempts;
+* reconciling uncertain payment/provider states where an existing safe reconciliation use case already exists;
+* cleaning stale temporary receipt-upload artifacts;
+* marking stale states as expired without deleting business history;
+* preserving one active scheduler execution across multiple application instances;
+* exposing safe operational status for jobs;
+* supporting disabled mode for local/test environments;
+* keeping all external network calls outside long database transactions.
+
+Do not implement:
+
+* payment reminders;
+* subscription-expiry reminders;
+* Telegram user notifications;
+* campaign broadcasts;
+* admin dashboards;
+* cron expressions configurable by users;
+* distributed job queues;
+* Quartz;
+* Kafka;
+* Redis-based locks;
+* workflow engines;
+* refund jobs;
+* automatic receipt approval;
+* automatic Payment approval based on time;
+* new business features;
+* deployment.
+
+Stop after completing Task 38.
+
+Do not begin Task 39.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before changing anything.
+* Preserve all working behavior from Tasks 1–37.
+* Reuse:
+
+  * SystemClockPort;
+  * existing repository abstractions;
+  * existing Task 31 provisioning outbox processor;
+  * Task 35 Telegram processed-update model;
+  * Task 36 Telegram purchase sessions;
+  * Task 37 conversation states and receipt-upload attempts;
+  * current scheduling support;
+  * PostgreSQL;
+  * Flyway;
+  * Testcontainers;
+  * logging;
+  * traceId;
+  * exception handling;
+  * transaction conventions.
+* Use Java 21.
+* Use the current Spring Boot and build-tool versions.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into schedulers.
+* Schedulers must call application use cases or job executors.
+* Do not put business logic directly inside `@Scheduled` methods.
+* Do not hold database transactions open during:
+
+  * Telegram API calls;
+  * Zarinpal calls;
+  * 3x-ui calls;
+  * file downloads;
+  * file inspection;
+  * file deletion;
+  * QR generation.
+* Do not rely on JVM-local locks for multi-instance correctness.
+* Use PostgreSQL-based locking.
+* Do not physically delete business records unless the task explicitly identifies non-business temporary data.
+* Do not delete:
+
+  * Payments;
+  * Orders;
+  * receipts;
+  * reviews;
+  * subscriptions;
+  * provisioning outbox history;
+  * Telegram processed updates;
+  * purchase sessions;
+  * upload attempts.
+* Do not begin Task 39.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* current `@Scheduled` usage;
+* provisioning outbox scheduler;
+* retry configuration;
+* stale PROCESSING recovery;
+* manual lazy-expiry logic;
+* PlanSelection expiry behavior;
+* Payment expiry behavior;
+* manual instruction expiry behavior;
+* Subscription expiry behavior;
+* Telegram processed-update retry behavior;
+* Telegram purchase-session expiry behavior;
+* Telegram conversation-state expiry behavior;
+* sensitive-action expiry behavior;
+* Telegram receipt-upload attempt reconciliation;
+* temporary file cleanup behavior;
+* current database-locking patterns;
+* optimistic/pessimistic locking;
+* PostgreSQL advisory lock usage, if any;
+* current job observability;
+* Actuator availability;
+* current migration history;
+* current test clock and scheduler test support.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Job inventory
+3. Jobs already implemented
+4. Jobs missing
+5. Scheduler architecture
+6. Distributed-lock strategy
+7. Job-run persistence strategy
+8. Retry strategy
+9. Transaction-boundary design
+10. Cleanup policy
+11. Reconciliation strategy
+12. Observability design
+13. Planned files to create
+14. Planned files to modify
+15. Migration and operational risks
+
+---
+
+# 3. Scheduling architecture
+
+Create a clear separation between:
+
+* trigger;
+* lock;
+* execution;
+* item claiming;
+* item processing;
+* completion;
+* observability.
+
+Recommended structure:
+
+`@Scheduled` trigger
+-> JobCoordinator
+-> distributed job lock
+-> application job executor
+-> bounded batch
+-> per-item short transactions
+-> result summary
+-> job-run completion
+
+Rules:
+
+* Scheduler classes contain no business decision logic.
+* Job executor may call use cases.
+* Each job has a stable unique key.
+* Every job execution is bounded.
+* Every job supports disabled mode.
+* Every job logs start and completion.
+* Failure of one item must not necessarily fail the whole batch.
+* One application instance may run the same job at a time.
+* Multiple different jobs may run concurrently if safe.
+* No global lock covering all jobs.
+
+---
+
+# 4. Job key model
+
+Create:
+
+ScheduledJobKey
+
+Suggested package:
+
+com.parazit.panel.domain.job
+
+Recommended values:
+
+EXPIRE_PLAN_SELECTIONS
+
+EXPIRE_PAYMENTS
+
+EXPIRE_MANUAL_PAYMENT_INSTRUCTIONS
+
+EXPIRE_SUBSCRIPTIONS
+
+EXPIRE_TELEGRAM_PURCHASE_SESSIONS
+
+EXPIRE_TELEGRAM_CONVERSATION_STATES
+
+EXPIRE_TELEGRAM_SENSITIVE_ACTIONS
+
+RETRY_TELEGRAM_UPDATES
+
+RECONCILE_TELEGRAM_RECEIPT_UPLOADS
+
+PROCESS_PROVISIONING_OUTBOX
+
+RECOVER_STUCK_PROVISIONING_OUTBOX
+
+CLEANUP_RECEIPT_TEMP_FILES
+
+RECONCILE_ZARINPAL_PAYMENTS
+
+Use only jobs supported by current code.
+
+If a safe Zarinpal reconciliation use case does not exist:
+
+* do not invent automatic verification;
+* omit `RECONCILE_ZARINPAL_PAYMENTS`;
+* document it as future work.
+
+---
+
+# 5. Job execution status
+
+Create:
+
+ScheduledJobRunStatus
+
+Values:
+
+RUNNING
+
+SUCCEEDED
+
+PARTIALLY_SUCCEEDED
+
+FAILED
+
+SKIPPED
+
+ABANDONED
+
+Rules:
+
+* RUNNING on claim.
+* SUCCEEDED when all processed items succeed.
+* PARTIALLY_SUCCEEDED when some items fail but execution completes.
+* FAILED for job-level failure.
+* SKIPPED when disabled or lock unavailable.
+* ABANDONED for stale runs recovered after instance crash.
+* Terminal states cannot transition again.
+* No generic setter.
+
+---
+
+# 6. Scheduled job run aggregate
+
+Create:
+
+ScheduledJobRun
+
+Suggested package:
+
+com.parazit.panel.domain.job
+
+Fields:
+
+UUID id
+
+ScheduledJobKey jobKey
+
+ScheduledJobRunStatus status
+
+String instanceId
+
+String lockOwner
+
+Instant scheduledAt
+
+Instant startedAt
+
+Instant completedAt
+
+Instant heartbeatAt
+
+long scannedCount
+
+long claimedCount
+
+long successCount
+
+long failureCount
+
+long skippedCount
+
+String failureCode
+
+String failureMessage
+
+Duration duration
+
+Instant createdAt
+
+Instant updatedAt
+
+Rules:
+
+* one row per execution attempt;
+* counters nonnegative;
+* success + failure + skipped must not exceed claimed;
+* RUNNING requires startedAt;
+* terminal state requires completedAt;
+* safe bounded failure fields;
+* no stack trace;
+* no business-sensitive payload;
+* history preserved;
+* no physical deletion in Task 38.
+
+---
+
+# 7. Job run repository
+
+Create:
+
+ScheduledJobRunRepository
+
+Methods:
+
+ScheduledJobRun save(ScheduledJobRun run)
+
+Optional<ScheduledJobRun> findById(UUID id)
+
+Optional<ScheduledJobRun> findLatestByJobKey(ScheduledJobKey key)
+
+List<ScheduledJobRun> findRecentByJobKey(
+ScheduledJobKey key,
+int limit
+)
+
+List<ScheduledJobRun> findStaleRunning(
+Instant heartbeatBefore,
+int limit
+)
+
+No Spring Data leakage.
+
+Create Spring Data repository and adapter.
+
+---
+
+# 8. Job run migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V18__create_scheduled_job_runs.sql
+
+Adjust version to the actual migration order.
+
+Create table:
+
+scheduled_job_runs
+
+Columns:
+
+id UUID primary key
+
+job_key VARCHAR(100) not null
+
+status VARCHAR(32) not null
+
+instance_id VARCHAR(128) not null
+
+lock_owner VARCHAR(128) null
+
+scheduled_at TIMESTAMPTZ not null
+
+started_at TIMESTAMPTZ null
+
+completed_at TIMESTAMPTZ null
+
+heartbeat_at TIMESTAMPTZ null
+
+scanned_count BIGINT not null
+
+claimed_count BIGINT not null
+
+success_count BIGINT not null
+
+failure_count BIGINT not null
+
+skipped_count BIGINT not null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* valid job_key;
+* valid status;
+* counters nonnegative;
+* RUNNING requires started_at;
+* terminal states require completed_at;
+* success/failure/skipped counts consistent.
+
+Indexes:
+
+job_key, started_at desc
+
+status
+
+heartbeat_at
+
+created_at
+
+Do not edit old migrations.
+
+---
+
+# 9. Distributed job lock
+
+Use PostgreSQL.
+
+Preferred:
+
+PostgreSQL advisory locks.
+
+Create:
+
+ScheduledJobLock
+
+Suggested package:
+
+com.parazit.panel.application.port.out.job
+
+Methods:
+
+Optional<JobLockHandle> tryAcquire(
+ScheduledJobKey jobKey,
+String owner
+)
+
+Create:
+
+JobLockHandle extends AutoCloseable
+
+Requirements:
+
+* one stable lock key per job;
+* no hash collisions across defined job keys;
+* same database session must hold and release the lock if session-level locks are used;
+* release in finally;
+* safe behavior after connection loss;
+* no long DB transaction required merely to hold the lock;
+* lock acquisition is non-blocking;
+* lock-unavailable execution records SKIPPED or logs according to design.
+
+Alternative:
+
+Database lock table with leases.
+
+Use it only if advisory locks conflict with connection-pool behavior.
+
+Document the decision.
+
+Do not use:
+
+* `synchronized`;
+* static lock maps;
+* Redis lock;
+* external lock dependency.
+
+---
+
+# 10. Advisory lock implementation
+
+Create:
+
+PostgresScheduledJobLock
+
+Suggested package:
+
+com.parazit.panel.infrastructure.job.lock
+
+Implementation requirements:
+
+* use dedicated JDBC connection for lock lifetime;
+* compute deterministic 64-bit key;
+* avoid Java `hashCode()` as the only key;
+* use a fixed namespace plus stable enum mapping;
+* call `pg_try_advisory_lock`;
+* call `pg_advisory_unlock`;
+* close connection in all paths;
+* no Spring transaction required;
+* safe pool usage;
+* configurable lock-acquisition timeout only if supported safely;
+* no blocking advisory lock in scheduler thread.
+
+Test with PostgreSQL Testcontainers.
+
+---
+
+# 11. Scheduler properties
+
+Create:
+
+ScheduledJobsProperties
+
+Prefix:
+
+app.jobs
+
+Fields:
+
+boolean enabled
+
+String instanceId
+
+Duration defaultLockTimeout
+
+Duration staleRunTimeout
+
+int defaultBatchSize
+
+int maxBatchSize
+
+boolean persistRuns
+
+Nested per-job properties:
+
+enabled
+
+Duration fixedDelay
+
+Duration initialDelay
+
+int batchSize
+
+int maxAttempts
+
+Duration retryDelay
+
+Optional:
+
+String cron
+
+Preferred Task 38:
+
+Use fixed delays, not arbitrary cron expressions.
+
+Example nested configuration:
+
+app.jobs.expire-plan-selections.enabled
+
+app.jobs.expire-plan-selections.fixed-delay
+
+app.jobs.expire-plan-selections.batch-size
+
+Requirements:
+
+* safe defaults;
+* batch size bounded;
+* delay positive;
+* instance ID generated or configured safely;
+* no secret values;
+* disabled startup supported;
+* update `.env.example`.
+
+---
+
+# 12. Job instance identity
+
+Create:
+
+ApplicationInstanceIdProvider
+
+Behavior:
+
+* use configured instance ID when present;
+* otherwise generate a startup-stable random ID;
+* safe format;
+* do not use hostname alone as a globally unique identity;
+* no sensitive infrastructure data required.
+
+Use instance ID for:
+
+* job-run records;
+* lock owner;
+* logs.
+
+Do not expose private IP or machine secrets.
+
+---
+
+# 13. Generic job executor contract
+
+Create:
+
+ScheduledJobExecutor
+
+Methods:
+
+ScheduledJobKey jobKey()
+
+ScheduledJobExecutionResult execute(
+ScheduledJobExecutionContext context
+)
+
+Create:
+
+ScheduledJobExecutionContext
+
+Fields:
+
+UUID runId
+
+ScheduledJobKey jobKey
+
+String instanceId
+
+Instant scheduledAt
+
+Instant startedAt
+
+int batchSize
+
+SystemClockPort or time value
+
+Create:
+
+ScheduledJobExecutionResult
+
+Fields:
+
+long scannedCount
+
+long claimedCount
+
+long successCount
+
+long failureCount
+
+long skippedCount
+
+List<String> safeFailureCodes
+
+boolean moreAvailable
+
+Requirements:
+
+* immutable;
+* no entity details;
+* no secrets;
+* bounded failure-code list;
+* exact counter validation.
+
+---
+
+# 14. Job coordinator
+
+Create:
+
+ScheduledJobCoordinator
+
+Responsibilities:
+
+1. Check global and per-job enabled flags.
+2. Try to acquire job lock.
+3. Persist RUNNING job run if enabled.
+4. Execute one bounded batch.
+5. Update heartbeat where needed.
+6. Complete job run:
+
+   * SUCCEEDED;
+   * PARTIALLY_SUCCEEDED;
+   * FAILED.
+7. Release lock.
+8. Log summary.
+9. Never leak item-sensitive data.
+
+If lock unavailable:
+
+* optionally persist SKIPPED run;
+* do not treat as error;
+* log DEBUG.
+
+---
+
+# 15. Job trigger classes
+
+Create focused scheduler trigger classes.
+
+Examples:
+
+ExpirationJobsScheduler
+
+TelegramRecoveryJobsScheduler
+
+ProvisioningJobsScheduler
+
+CleanupJobsScheduler
+
+Preferred:
+
+One trigger class per logical area, not one huge scheduler.
+
+Each `@Scheduled` method:
+
+* calls `ScheduledJobCoordinator.run(jobKey)`;
+* contains no repository call;
+* contains no business logic;
+* contains no network call.
+
+Use property placeholders or SchedulingConfigurer if needed.
+
+Do not duplicate job execution logic.
+
+---
+
+# 16. Batch processing principles
+
+All jobs must:
+
+* query at most batchSize;
+* use stable deterministic ordering;
+* avoid loading all rows;
+* process items independently where possible;
+* use short transactions;
+* release locks quickly;
+* support moreAvailable;
+* let next scheduled run continue;
+* not recursively loop until empty;
+* avoid starvation through deterministic ordering;
+* handle one poison item without blocking every later item forever.
+
+Recommended ordering:
+
+oldest expiry/availability first, then ID.
+
+---
+
+# 17. Expire Plan selections job
+
+Create:
+
+ExpirePlanSelectionsJob
+
+Behavior:
+
+* find ACTIVE PlanSelections with expiresAt <= now;
+* claim bounded rows;
+* transition to EXPIRED using existing domain method;
+* preserve history;
+* do not create Order or Payment;
+* skip already terminal rows;
+* concurrency-safe against user selection/replacement.
+
+Requirements:
+
+* database query filters expired ACTIVE rows;
+* no full-table scan;
+* use locking or optimistic version;
+* exact boundary:
+
+  * `expiresAt <= now` expires.
+
+Test race:
+
+* selection replaced while job runs.
+
+---
+
+# 18. Expire unpaid Payments job
+
+Create:
+
+ExpirePaymentsJob
+
+Behavior:
+
+* find eligible unpaid Payments with expiresAt <= now;
+* use existing Payment expiry use case/domain transition;
+* allowed states only;
+* do not expire APPROVED Payment;
+* do not expire Payment waiting for operator review if policy forbids it;
+* apply current business policy exactly;
+* preserve history;
+* reconcile related Order only through existing policy;
+* do not create outbox;
+* do not provision;
+* do not refund.
+
+Required status-policy assessment:
+
+* CREATED;
+* WAITING_FOR_PAYMENT;
+* PROCESSING;
+* WAITING_FOR_REVIEW;
+* UNKNOWN;
+* FAILED.
+
+Document which states expire automatically.
+
+Do not invent a policy silently.
+
+---
+
+# 19. Expire manual instructions job
+
+Create:
+
+ExpireManualPaymentInstructionsJob
+
+Behavior:
+
+* find ACTIVE instructions with expiresAt <= now;
+* transition ACTIVE -> EXPIRED;
+* release active unique amount reservation through status change;
+* preserve instruction history;
+* reconcile Payment only if existing domain policy requires it;
+* do not alter receipt-pending or completed instructions;
+* no receipt deletion;
+* no approval.
+
+Race tests:
+
+* receipt upload versus expiry;
+* payment cancellation versus expiry.
+
+---
+
+# 20. Expire Subscriptions job
+
+Create only if Subscription expiry is not already safely reconciled elsewhere.
+
+Create:
+
+ExpireSubscriptionsJob
+
+Behavior:
+
+* find ACTIVE/SUSPENDED Subscriptions with expiresAt <= now;
+* transition to EXPIRED;
+* public endpoint becomes unavailable;
+* do not disable or delete XUI client automatically;
+* do not alter Payment;
+* do not alter Order;
+* preserve history.
+
+If Subscription expiry is already lazy and sufficient:
+
+still implement bounded proactive expiry for operational consistency.
+
+---
+
+# 21. Expire Telegram purchase sessions job
+
+Create:
+
+ExpireTelegramPurchaseSessionsJob
+
+Behavior:
+
+* find active sessions with expiresAt <= now;
+* reconcile trusted Payment/Order state first;
+* do not expire a session whose Payment is APPROVED or Order is COMPLETED;
+* otherwise mark EXPIRED;
+* do not cancel Payment automatically unless existing policy explicitly says so;
+* do not cancel active manual instruction automatically;
+* preserve session history.
+
+Important:
+
+Purchase session expiry is UI orchestration expiry, not financial cancellation.
+
+---
+
+# 22. Expire Telegram conversation states job
+
+Create:
+
+ExpireTelegramConversationStatesJob
+
+Behavior:
+
+* find active conversation states with expiresAt <= now;
+* mark expired or clear according to current model;
+* do not change Payment;
+* do not change instruction;
+* do not delete submitted receipt;
+* preserve state history if model supports it;
+* release the active-state uniqueness slot.
+
+Handle:
+
+AWAITING_RECEIPT_UPLOAD
+
+RECEIPT_UPLOAD_PROCESSING
+
+For stale PROCESSING:
+
+* do not expire blindly;
+* route to receipt-upload reconciliation first;
+* mark UNKNOWN or recover according to Task 37 rules.
+
+---
+
+# 23. Expire Telegram sensitive actions job
+
+Create:
+
+ExpireTelegramSensitiveActionsJob
+
+Behavior:
+
+* find PENDING sensitive actions with expiresAt <= now;
+* transition to EXPIRED;
+* preserve completed actions;
+* no business mutation;
+* bounded batch.
+
+Covers:
+
+* token rotation confirmation;
+* Plan selection confirmation;
+* Payment-method confirmation;
+* cancellation confirmation;
+* receipt-upload action.
+
+---
+
+# 24. Retry Telegram updates job
+
+Create:
+
+RetryTelegramUpdatesJob
+
+Use only existing retry-safe update-processing behavior.
+
+Behavior:
+
+* find FAILED TelegramProcessedUpdate rows below max attempts;
+* claim bounded rows;
+* rehydrate/retrieve the original update only if safe data is available.
+
+Critical assessment:
+
+If original update payload is not persisted:
+
+* the job cannot safely reconstruct it;
+* do not invent retry.
+* Instead, Task 38 should only:
+
+  * recover stale PROCESSING updates;
+  * mark unretryable FAILED rows DEAD;
+  * document the limitation.
+
+If a sanitized or complete original update payload is persisted safely:
+
+* use it according to Task 35 design;
+* ensure no token/receipt bytes/sensitive message data are persisted.
+
+Preferred Task 38 behavior:
+
+* retry only records that have a safe retry payload/reference;
+* otherwise classify and dead-letter operationally.
+
+Do not persist raw receipt bytes merely to support retries.
+
+---
+
+# 25. Recover stale Telegram PROCESSING updates
+
+Create:
+
+RecoverStaleTelegramUpdatesJob
+
+or include in retry job.
+
+Behavior:
+
+* find PROCESSING updates older than processingTimeout;
+* determine whether response/domain action completed:
+
+  * inspect safe response fingerprint;
+  * inspect related sensitive action/session/domain state.
+* mark:
+
+  * PROCESSED if completion is confirmed;
+  * FAILED/UNKNOWN if retry may be safe;
+  * DEAD if unrecoverable.
+* do not blindly resend financial or credential messages.
+
+Document exactly-once limitation.
+
+---
+
+# 26. Reconcile Telegram receipt uploads job
+
+Create:
+
+ReconcileTelegramReceiptUploadsJob
+
+Behavior:
+
+* find upload attempts in:
+
+  * DOWNLOADING;
+  * DOWNLOADED;
+  * SUBMITTING;
+  * UNKNOWN;
+    older than timeout.
+* inspect:
+
+  * receipt by receiptRequestId;
+  * conversation state;
+  * Payment;
+  * instruction.
+* if receipt exists and queued:
+
+  * mark attempt SUBMITTED;
+  * complete conversation/session reconciliation.
+* if no receipt and safe retry is possible:
+
+  * mark FAILED and allow user retry.
+* if temporary file exists:
+
+  * clean it according to temp-file policy.
+* do not redownload Telegram file unless file reference is safely available and retry policy explicitly supports it.
+* never create a second receipt blindly.
+
+---
+
+# 27. Provisioning outbox processing integration
+
+Task 31 already implemented outbox polling.
+
+Task 38 must:
+
+* integrate it into the shared job framework;
+* avoid two separate schedulers processing the same outbox;
+* preserve existing behavior;
+* reuse:
+
+  * ProvisioningOutboxProcessor;
+  * row-level claiming;
+  * retry;
+  * stale PROCESSING recovery.
+
+Preferred:
+
+Replace direct outbox `@Scheduled` trigger with:
+
+PROCESS_PROVISIONING_OUTBOX job.
+
+Create separate:
+
+RECOVER_STUCK_PROVISIONING_OUTBOX job
+
+only if recovery is not already part of processing.
+
+Do not rewrite the outbox processor unnecessarily.
+
+---
+
+# 28. Provisioning job behavior
+
+`PROCESS_PROVISIONING_OUTBOX`:
+
+* lock at job level to reduce duplicate pollers;
+* processor still uses row-level DB claims as final multi-instance protection;
+* process bounded batch;
+* no long transaction during XUI call;
+* preserve retries and DEAD behavior.
+
+`RECOVER_STUCK_PROVISIONING_OUTBOX`:
+
+* find stale PROCESSING;
+* use existing recovery;
+* schedule retry;
+* no duplicate client because Task 24 idempotency remains final guard.
+
+Job-level lock is not a substitute for item-level locking.
+
+---
+
+# 29. Zarinpal reconciliation job
+
+Implement only if existing Task 28 code already supports safe reconciliation.
+
+Potential eligible states:
+
+* UNKNOWN;
+* PROCESSING;
+* request accepted but completion uncertain.
+
+Requirements:
+
+* do not call Verify without persisted authority and exact persisted amount;
+* do not approve based on elapsed time;
+* use server-to-server Verify;
+* bounded attempts;
+* no Telegram dependency;
+* approval still uses shared PaymentApprovalService;
+* one outbox;
+* no direct provisioning;
+* provider calls outside DB transaction.
+
+If safe reconciliation cannot be implemented with current data:
+
+* do not add this job;
+* document the missing capability.
+
+---
+
+# 30. Temporary receipt-file cleanup job
+
+Create:
+
+CleanupReceiptTemporaryFilesJob
+
+Only clean non-business temporary files.
+
+Requirements:
+
+* clean files older than configured retention;
+* operate only inside configured temporary root;
+* root confinement;
+* no symlink following;
+* no traversal;
+* never clean permanent receipt storage;
+* never clean arbitrary OS temp files;
+* safe generated filenames only;
+* bounded files per run;
+* failure of one file does not abort all;
+* no filename logging if it may reveal metadata;
+* no token/file ID in paths.
+
+Preferred:
+
+Temporary-file manager exposes:
+
+listStaleTemporaryArtifacts
+
+deleteTemporaryArtifact
+
+Do not let scheduler manipulate raw Path outside infrastructure.
+
+---
+
+# 31. Cleanup properties
+
+Create:
+
+TemporaryArtifactCleanupProperties
+
+Prefix:
+
+app.jobs.temp-cleanup
+
+Fields:
+
+boolean enabled
+
+Duration retention
+
+int batchSize
+
+Duration fixedDelay
+
+boolean dryRun
+
+Validation:
+
+* retention positive;
+* batch bounded;
+* dry-run default false or true according to safety policy;
+* root comes from existing storage properties;
+* no arbitrary root configured twice.
+
+Update `.env.example`.
+
+---
+
+# 32. Stale job-run recovery
+
+Create:
+
+RecoverStaleJobRunsJob
+
+or perform during coordinator startup.
+
+Behavior:
+
+* find RUNNING job runs with heartbeat older than staleRunTimeout;
+* mark ABANDONED;
+* set completedAt;
+* safe failure code:
+
+  * `STALE_JOB_RUN`.
+* do not assume business item failure;
+* actual item reconciliation remains job-specific.
+
+Avoid recursive self-monitoring if this job records its own run.
+
+Preferred:
+
+Run stale-run recovery during coordinator startup or before each job without creating a separate persisted run.
+
+---
+
+# 33. Job heartbeat
+
+Use heartbeat only for jobs that may exceed staleRunTimeout.
+
+Requirements:
+
+* update heartbeat periodically or after each item;
+* short transaction;
+* failure to heartbeat logs warning;
+* does not keep DB transaction open;
+* no extra thread required unless justified;
+* short jobs may set heartbeat at start and completion only.
+
+Do not create high-frequency write load.
+
+---
+
+# 34. Per-item processing model
+
+Create an internal reusable pattern if useful:
+
+BatchItemProcessor<T>
+
+ItemProcessingResult
+
+But do not over-engineer.
+
+Each item result:
+
+SUCCESS
+
+SKIPPED
+
+RETRYABLE_FAILURE
+
+PERMANENT_FAILURE
+
+UNKNOWN
+
+Job summary aggregates counts.
+
+Never persist stack traces in job run.
+
+---
+
+# 35. Error classification
+
+Create:
+
+ScheduledJobFailureClassifier
+
+or reuse domain-specific classifiers.
+
+Classify:
+
+## Job-level failures
+
+* lock infrastructure unavailable;
+* database unavailable;
+* invalid configuration;
+* executor wiring error.
+
+## Item-level retryable
+
+* optimistic-lock conflict;
+* temporary database issue;
+* temporary provider outage;
+* temporary filesystem failure.
+
+## Item-level non-retryable
+
+* invalid relationship;
+* corrupt state;
+* unsupported status;
+* missing required entity.
+
+Requirements:
+
+* no infinite retry;
+* safe failure codes;
+* detailed stack trace only in logs;
+* job may be PARTIALLY_SUCCEEDED.
+
+---
+
+# 36. Transaction boundaries
+
+## Job run creation/completion
+
+Short transactions.
+
+## Item claiming
+
+Short transaction.
+
+## External call
+
+Outside transaction.
+
+## Item completion
+
+Short transaction.
+
+## Cleanup file deletion
+
+Outside DB transaction.
+
+## Reconciliation
+
+Use short reads/updates and existing service boundaries.
+
+Do not annotate the whole job executor with one transaction.
+
+Avoid self-invocation issues.
+
+Create focused transaction helpers where needed.
+
+---
+
+# 37. Job-level versus item-level locking
+
+Use both where appropriate.
+
+Job-level lock:
+
+* prevents multiple instances from running the same scan simultaneously;
+* reduces duplicate work.
+
+Item-level lock/constraint:
+
+* remains final correctness mechanism;
+* protects against:
+
+  * manual requests;
+  * API calls;
+  * race with another job;
+  * retry after crash.
+
+Do not remove existing row-level locking because advisory job lock exists.
+
+---
+
+# 38. Scheduler shutdown behavior
+
+Requirements:
+
+* stop accepting new scheduled runs during application shutdown;
+* in-progress job may finish within graceful shutdown timeout;
+* release advisory lock;
+* close dedicated lock connection;
+* mark run according to actual outcome if possible;
+* no hanging non-daemon threads;
+* no lost thread interruption.
+
+Use Spring lifecycle conventions.
+
+---
+
+# 39. Operational endpoints
+
+Create internal read-only endpoints:
+
+GET /internal/admin/jobs
+
+GET /internal/admin/jobs/{jobKey}
+
+GET /internal/admin/jobs/{jobKey}/runs
+
+GET /internal/admin/jobs/runs/{runId}
+
+Optional:
+
+POST /internal/admin/jobs/{jobKey}/run
+
+Manual trigger requirements:
+
+* disabled by default;
+* internal-only;
+* does not bypass job lock;
+* uses same coordinator;
+* returns accepted/execution summary according to synchronous/asynchronous design.
+
+Preferred Task 38:
+
+Implement read-only endpoints.
+
+Optional manual trigger only if existing admin-security assumptions permit it.
+
+Do not expose raw exception stack traces.
+
+---
+
+# 40. Job status response
+
+Create:
+
+ScheduledJobStatusResult
+
+Fields:
+
+ScheduledJobKey jobKey
+
+boolean enabled
+
+Instant lastStartedAt
+
+Instant lastCompletedAt
+
+ScheduledJobRunStatus lastStatus
+
+long lastSuccessCount
+
+long lastFailureCount
+
+Duration lastDuration
+
+boolean currentlyRunning
+
+String instanceId
+
+Optional:
+
+Instant nextEstimatedRunAt
+
+Requirements:
+
+* no lock internals;
+* no database connection details;
+* no host private data;
+* no sensitive business IDs.
+
+---
+
+# 41. Actuator integration
+
+If Actuator exists, create:
+
+ScheduledJobsHealthIndicator
+
+Health behavior:
+
+UP:
+
+* scheduler enabled;
+* no recently failed critical jobs.
+
+DEGRADED or DOWN only according to current health conventions.
+
+Recommended:
+
+Do not mark application DOWN merely because one optional cleanup job failed.
+
+Expose details safely:
+
+* failed job key;
+* last status;
+* last completion time.
+
+Do not expose failure message if it may contain internals.
+
+Optional:
+
+Micrometer metrics.
+
+---
+
+# 42. Metrics
+
+If Micrometer exists, add:
+
+`scheduled_job_runs_total`
+
+Tags:
+
+job
+
+status
+
+`scheduled_job_duration_seconds`
+
+Tag:
+
+job
+
+`scheduled_job_items_total`
+
+Tags:
+
+job
+
+result
+
+`scheduled_job_lock_misses_total`
+
+Tag:
+
+job
+
+Requirements:
+
+* low-cardinality tags only;
+* no run ID;
+* no entity ID;
+* no User ID;
+* no Payment ID;
+* no exception message.
+
+Reuse existing meter conventions.
+
+---
+
+# 43. Logging
+
+INFO:
+
+* job started;
+* job completed;
+* job partially completed;
+* stale run abandoned;
+* expired records count;
+* reconciliation count;
+* temporary files cleaned;
+* provisioning batch processed.
+
+DEBUG:
+
+* lock acquired;
+* lock unavailable;
+* batch size;
+* moreAvailable;
+* item skipped;
+* idempotent terminal item.
+
+WARN:
+
+* item retryable failure;
+* stale PROCESSING record;
+* cleanup failure;
+* job heartbeat failure;
+* job partial success;
+* lock release failure.
+
+ERROR:
+
+* job-level failure;
+* job run persistence failure;
+* database lock infrastructure failure;
+* repeated poison item;
+* reconciliation inconsistency.
+
+Include:
+
+jobKey
+
+jobRunId
+
+instanceId
+
+batchSize
+
+scannedCount
+
+claimedCount
+
+successCount
+
+failureCount
+
+skippedCount
+
+duration
+
+traceId if available
+
+Never include:
+
+Bot token
+
+Telegram file IDs/paths
+
+payment authority
+
+card number
+
+receipt content/hash
+
+Subscription token
+
+VLESS URI
+
+XUI credentials
+
+raw provider responses
+
+temporary file full path
+
+---
+
+# 44. Expiration job unit tests
+
+Plan selection:
+
+* exact expiry boundary;
+* active only;
+* terminal skipped;
+* optimistic-lock conflict.
+
+Payment:
+
+* eligible unpaid status;
+* approved skipped;
+* waiting-review policy;
+* exact boundary;
+* no outbox.
+
+Manual instruction:
+
+* active expiry;
+* reservation release;
+* receipt-pending skipped.
+
+Subscription:
+
+* active/suspended expiry;
+* revoked skipped;
+* no XUI mutation.
+
+Telegram session/state/action:
+
+* exact expiry;
+* trusted-state reconciliation;
+* active uniqueness released.
+
+Use fixed clock.
+
+---
+
+# 45. Coordinator unit tests
+
+Test:
+
+* globally disabled;
+* job disabled;
+* lock unavailable;
+* lock acquired;
+* successful job;
+* partial success;
+* job-level failure;
+* run persistence;
+* counters;
+* lock released on success;
+* lock released on failure;
+* safe failure message;
+* metrics emitted;
+* no execution without lock.
+
+Use fake lock and fake run repository.
+
+---
+
+# 46. Advisory lock integration tests
+
+Using PostgreSQL Testcontainers:
+
+* acquire lock;
+* second connection cannot acquire same job lock;
+* different job lock can be acquired;
+* release;
+* connection close releases session lock;
+* no key collision across enum values;
+* concurrent instances;
+* lock unavailable does not block;
+* pool connection returned.
+
+Do not mock PostgreSQL behavior.
+
+---
+
+# 47. Job-run repository integration tests
+
+Test:
+
+* save RUNNING;
+* complete SUCCEEDED;
+* PARTIALLY_SUCCEEDED;
+* FAILED;
+* SKIPPED;
+* ABANDONED;
+* counters;
+* timestamps;
+* recent history ordering;
+* stale-running query;
+* constraints;
+* invalid counters rejected;
+* Hibernate validation.
+
+Flush persistence context.
+
+---
+
+# 48. Expiration integration tests
+
+Using real PostgreSQL:
+
+* multiple expired and non-expired PlanSelections;
+* bounded batch;
+* next run continues;
+* concurrent user replacement;
+* unpaid Payment expiry;
+* APPROVED Payment preserved;
+* manual instruction reservation released;
+* active receipt state preserved;
+* Subscription expiry;
+* purchase session expiry;
+* sensitive action expiry;
+* conversation expiry.
+
+Verify no business history is deleted.
+
+---
+
+# 49. Provisioning job integration tests
+
+Use mock 3x-ui.
+
+Test:
+
+* PROCESS_PROVISIONING_OUTBOX through coordinator;
+* one lock holder;
+* bounded batch;
+* successful provisioning;
+* retryable failure;
+* next run retry;
+* stale PROCESSING recovery;
+* multiple app instances;
+* one remote client;
+* existing item-level claims preserved;
+* job run counters correct.
+
+---
+
+# 50. Receipt reconciliation integration tests
+
+Test:
+
+* stale SUBMITTING attempt with existing queued receipt;
+* marks SUBMITTED;
+* state/session reconciled;
+* no second receipt.
+* stale attempt without receipt;
+* returns to retryable/failed state.
+* stale PROCESSING conversation;
+* no blind expiry.
+* temporary file cleanup.
+* no Telegram redownload without safe reference.
+
+---
+
+# 51. Temporary cleanup integration tests
+
+Create test files:
+
+* fresh temporary file;
+* stale temporary file;
+* nested safe file;
+* symlink;
+* file outside root;
+* permanent receipt-storage file.
+
+Verify:
+
+* stale temporary file deleted;
+* fresh preserved;
+* symlink not followed;
+* outside-root untouched;
+* permanent receipt untouched;
+* batch limit;
+* dry run;
+* failure counted safely.
+
+---
+
+# 52. Multi-instance scheduler integration tests
+
+Simulate two application instances with:
+
+* different instance IDs;
+* same PostgreSQL database;
+* same job.
+
+Verify:
+
+* one job-level lock winner;
+* one execution;
+* one business-item transition;
+* loser skips safely;
+* after release, next instance may execute;
+* no static/JVM lock dependency.
+
+Use separate lock connections.
+
+---
+
+# 53. Race-condition integration tests
+
+Required:
+
+* PlanSelection expiry versus replacement;
+* Payment expiry versus approval;
+* manual instruction expiry versus receipt upload;
+* purchase-session expiry versus status refresh;
+* conversation expiry versus receipt upload;
+* sensitive-action expiry versus confirmation;
+* outbox processing versus stale recovery;
+* temp cleanup versus active upload.
+
+Requirements:
+
+* deterministic barriers/latches;
+* real PostgreSQL;
+* separate transactions;
+* no `Thread.sleep`;
+* executor shutdown;
+* explicit timeouts.
+
+Final state must be valid regardless of winner.
+
+---
+
+# 54. Scheduler tests
+
+Test trigger classes:
+
+* properties disabled;
+* enabled;
+* correct job key;
+* no business logic;
+* exception does not terminate scheduling infrastructure;
+* one coordinator call per trigger.
+
+Do not test real passage of time with long sleeps.
+
+Call trigger methods directly or use controlled scheduler tests.
+
+---
+
+# 55. Property tests
+
+Test:
+
+* global disabled default;
+* per-job enablement;
+* invalid delay;
+* invalid batch size;
+* max batch;
+* stale-run timeout;
+* instance ID;
+* cleanup retention;
+* outbox job integration;
+* no secrets in `toString`.
+
+Application must start with all jobs disabled.
+
+Application must start with safe selected jobs enabled.
+
+---
+
+# 56. Architecture verification
+
+Verify:
+
+* scheduler triggers do not inject repositories;
+* scheduler triggers depend on coordinator only;
+* job executors depend on application ports/use cases;
+* domain does not depend on scheduling annotations;
+* infrastructure advisory lock does not leak JDBC into application;
+* no one-transaction entire batch;
+* no external call inside job-run transaction;
+* no direct Telegram/XUI/provider calls from scheduler trigger;
+* no static locks;
+* no field injection;
+* no service locator;
+* no physical deletion of business history;
+* existing provisioning processor reused.
+
+Extend ArchUnit tests.
+
+---
+
+# 57. Documentation
+
+Create:
+
+docs/jobs/scheduled-jobs-architecture.md
+
+Document:
+
+* trigger/coordinator/executor separation;
+* job keys;
+* advisory locks;
+* job runs;
+* item-level claiming;
+* transactions;
+* multi-instance behavior;
+* shutdown.
+
+Create:
+
+docs/jobs/scheduled-jobs-catalog.md
+
+For every job document:
+
+* purpose;
+* enabled default;
+* delay;
+* batch size;
+* eligible states;
+* side effects;
+* retry behavior;
+* failure behavior;
+* metrics;
+* operational risks.
+
+Create:
+
+docs/jobs/job-locking-and-concurrency.md
+
+Document:
+
+* advisory lock;
+* dedicated connection;
+* job-level versus row-level locking;
+* race handling;
+* stale runs;
+* instance IDs.
+
+Create:
+
+docs/jobs/job-operations.md
+
+Document:
+
+* configuration;
+* internal endpoints;
+* logs;
+* metrics;
+* health;
+* manual diagnosis;
+* safe restart;
+* poison-item handling.
+
+Create:
+
+docs/jobs/job-idempotency-matrix.md
+
+Columns:
+
+Job
+
+Candidate query
+
+Item claim
+
+Idempotency rule
+
+Replay behavior
+
+Crash recovery
+
+External side effect
+
+Cover every implemented job.
+
+Include Mermaid diagrams for:
+
+* normal job run;
+* lock miss;
+* batch item processing;
+* crash recovery;
+* outbox job;
+* receipt reconciliation;
+* multi-instance competition.
+
+---
+
+# 58. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/job/
+ScheduledJobKey.java
+ScheduledJobRun.java
+ScheduledJobRunStatus.java
+
+src/main/java/com/parazit/panel/domain/job/repository/
+ScheduledJobRunRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/job/
+ScheduledJobLock.java
+JobLockHandle.java
+ApplicationInstanceIdProvider.java
+
+src/main/java/com/parazit/panel/application/job/
+ScheduledJobCoordinator.java
+ScheduledJobExecutor.java
+ScheduledJobExecutionContext.java
+ScheduledJobExecutionResult.java
+ScheduledJobFailureClassifier.java
+ScheduledJobRunService.java
+JobRunHeartbeatService.java
+
+src/main/java/com/parazit/panel/application/job/expiration/
+ExpirePlanSelectionsJob.java
+ExpirePaymentsJob.java
+ExpireManualPaymentInstructionsJob.java
+ExpireSubscriptionsJob.java
+ExpireTelegramPurchaseSessionsJob.java
+ExpireTelegramConversationStatesJob.java
+ExpireTelegramSensitiveActionsJob.java
+
+src/main/java/com/parazit/panel/application/job/telegram/
+RecoverStaleTelegramUpdatesJob.java
+RetryTelegramUpdatesJob.java
+ReconcileTelegramReceiptUploadsJob.java
+
+src/main/java/com/parazit/panel/application/job/provisioning/
+ProcessProvisioningOutboxJob.java
+RecoverStuckProvisioningOutboxJob.java
+
+src/main/java/com/parazit/panel/application/job/cleanup/
+CleanupReceiptTemporaryFilesJob.java
+
+src/main/java/com/parazit/panel/infrastructure/job/lock/
+PostgresScheduledJobLock.java
+DefaultApplicationInstanceIdProvider.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/job/
+SpringDataScheduledJobRunRepository.java
+ScheduledJobRunRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/infrastructure/scheduling/
+ExpirationJobsScheduler.java
+TelegramRecoveryJobsScheduler.java
+ProvisioningJobsScheduler.java
+CleanupJobsScheduler.java
+
+src/main/java/com/parazit/panel/api/internal/job/
+ScheduledJobController.java
+ScheduledJobStatusResponse.java
+ScheduledJobRunResponse.java
+ScheduledJobApiMapper.java
+
+src/main/java/com/parazit/panel/config/properties/
+ScheduledJobsProperties.java
+TemporaryArtifactCleanupProperties.java
+
+src/main/java/com/parazit/panel/observability/
+ScheduledJobsHealthIndicator.java
+ScheduledJobMetrics.java
+
+src/main/resources/db/migration/
+V18__create_scheduled_job_runs.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/job/
+ScheduledJobRunTest.java
+
+src/test/java/com/parazit/panel/application/job/
+ScheduledJobCoordinatorTest.java
+ScheduledJobExecutionResultTest.java
+
+src/test/java/com/parazit/panel/application/job/expiration/
+ExpirePlanSelectionsJobTest.java
+ExpirePaymentsJobTest.java
+ExpireManualPaymentInstructionsJobTest.java
+ExpireSubscriptionsJobTest.java
+ExpireTelegramPurchaseSessionsJobTest.java
+ExpireTelegramConversationStatesJobTest.java
+ExpireTelegramSensitiveActionsJobTest.java
+
+src/test/java/com/parazit/panel/application/job/telegram/
+RecoverStaleTelegramUpdatesJobTest.java
+ReconcileTelegramReceiptUploadsJobTest.java
+
+src/test/java/com/parazit/panel/application/job/provisioning/
+ProcessProvisioningOutboxJobTest.java
+RecoverStuckProvisioningOutboxJobTest.java
+
+src/test/java/com/parazit/panel/application/job/cleanup/
+CleanupReceiptTemporaryFilesJobTest.java
+
+src/test/java/com/parazit/panel/infrastructure/job/lock/
+PostgresScheduledJobLockIntegrationTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/job/
+ScheduledJobRunRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/job/
+ScheduledExpirationJobsIntegrationTest.java
+ScheduledProvisioningJobIntegrationTest.java
+ScheduledReceiptReconciliationIntegrationTest.java
+MultiInstanceScheduledJobIntegrationTest.java
+ScheduledJobRaceIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/job/
+ScheduledJobControllerTest.java
+
+docs/jobs/
+scheduled-jobs-architecture.md
+scheduled-jobs-catalog.md
+job-locking-and-concurrency.md
+job-operations.md
+job-idempotency-matrix.md
+
+Adapt packages, names, and migration versions to the existing project conventions.
+
+---
+
+# 59. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* job-domain tests pass;
+* coordinator tests pass;
+* advisory-lock integration tests pass;
+* expiration tests pass;
+* provisioning-job tests pass;
+* receipt-reconciliation tests pass;
+* cleanup tests pass;
+* multi-instance tests pass;
+* race tests pass;
+* scheduler-property tests pass;
+* architecture tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* application starts with jobs disabled;
+* application starts with selected jobs enabled;
+* one instance runs each job at a time;
+* batches are bounded;
+* business history is preserved;
+* approved Payments are not expired;
+* receipt submission is not auto-approved;
+* no duplicate VPN client is created;
+* no stale temp file outside the configured root is deleted;
+* no external call occurs inside long DB transactions;
+* no tests are disabled.
+
+---
+
+# 60. Optional manual verification
+
+Use only local/test data.
+
+1. Configure very short test delays.
+2. Create:
+
+   * expired PlanSelection;
+   * expired unpaid Payment;
+   * expired manual instruction;
+   * expired Telegram purchase session;
+   * expired conversation state;
+   * expired sensitive action;
+   * failed provisioning outbox;
+   * stale receipt-upload attempt;
+   * stale temporary file.
+3. Start one application instance.
+4. Verify each enabled job runs and updates only eligible records.
+5. Start a second instance with the same database.
+6. Verify one job-lock winner.
+7. Stop the winning instance during a test job.
+8. Verify:
+
+   * advisory lock is released after connection close;
+   * stale job run becomes ABANDONED;
+   * next instance can continue.
+9. Verify outbox retry creates no duplicate VPN client.
+10. Verify receipt reconciliation creates no duplicate receipt.
+11. Inspect internal job endpoints, logs, health, and metrics.
+12. Confirm no sensitive data is logged.
+13. Confirm no business record is physically deleted.
+14. Confirm only stale temporary artifacts are removed.
+
+Do not use production Payments, receipts, Bot tokens, or XUI clients.
+
+---
+
+# 61. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Job inventory
+3. Scheduler/coordinator design
+4. Job-run aggregate design
+5. Distributed-lock design
+6. Batch-processing design
+7. Expiration-job policies
+8. Telegram recovery design
+9. Receipt-reconciliation design
+10. Provisioning-outbox integration design
+11. Temporary cleanup design
+12. Job-run recovery design
+13. Transaction-boundary design
+14. Observability design
+15. Planned files to create
+16. Planned files to modify
+17. Migration and operational risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Job coordinator behavior
+6. Job locking behavior
+7. Job-run persistence
+8. Expiration jobs
+9. Telegram recovery jobs
+10. Receipt reconciliation
+11. Provisioning outbox integration
+12. Temporary-file cleanup
+13. Stale-run recovery
+14. Batch and retry behavior
+15. Transaction boundaries
+16. Multi-instance behavior
+17. Operational APIs
+18. Health and metrics
+19. Security and logging
+20. Unit-test results
+21. Advisory-lock test results
+22. Repository-test results
+23. Expiration integration-test results
+24. Provisioning-job test results
+25. Receipt-reconciliation test results
+26. Cleanup-test results
+27. Multi-instance test results
+28. Race-test results
+29. Architecture-test results
+30. Flyway and Hibernate results
+31. Build result
+32. Commands executed
+33. Remaining issues
+34. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(jobs): add scheduled cleanup retry and reconciliation framework
+
+Stop after completing Task 38.
+
+Do not begin Task 39.
+

@@ -1,0 +1,2938 @@
+You are a senior Java 21, Spring Boot, Telegram Bot API, secure-message-delivery, and distributed-systems engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 35 — Telegram Bot Foundation and Secure Subscription Delivery
+
+## Goal
+
+Implement the Telegram Bot integration foundation and connect it to the existing User and Subscription modules.
+
+After this task, the Telegram Bot must be able to:
+
+* receive Telegram updates through one selected delivery mode;
+* register or refresh the Telegram User safely;
+* support the `/start` command;
+* support a minimal main menu;
+* list the user’s Subscriptions;
+* show Subscription metadata;
+* deliver a Subscription URL only when a raw token is available;
+* deliver individual VLESS configuration text;
+* deliver Subscription URL QR Code;
+* deliver VLESS configuration QR Code;
+* preserve token, URI, and QR confidentiality;
+* avoid duplicate message delivery when Telegram retries an update;
+* process updates idempotently;
+* recover safely from Telegram API failures;
+* avoid calling Telegram while holding a long database transaction;
+* reuse existing User, Subscription, delivery, and QR use cases;
+* remain independent from Payment creation and payment-provider flows.
+
+Do not implement:
+
+* Plan purchase through Telegram;
+* Payment creation;
+* Zarinpal payment initiation;
+* manual card-to-card instructions;
+* receipt upload through Telegram;
+* operator review;
+* renewal purchase;
+* traffic add-on purchase;
+* referral rewards;
+* admin Telegram commands;
+* scheduled reminders;
+* mass messaging;
+* campaign broadcasting;
+* webhook deployment automation;
+* production reverse-proxy configuration.
+
+Stop after completing Task 35.
+
+Do not begin Task 36.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before changing anything.
+* Preserve all working behavior from Tasks 1–34.
+* Reuse:
+
+  * RegisterUserUseCase;
+  * GetUserProfileUseCase;
+  * GetUserLanguageUseCase;
+  * ListUserSubscriptionsUseCase;
+  * GetUserSubscriptionUseCase;
+  * GetSubscriptionDeliverySummaryUseCase;
+  * BuildSubscriptionUrlUseCase;
+  * GetSubscriptionConfigEntryUseCase;
+  * GenerateSubscriptionUrlQrCodeUseCase;
+  * GenerateVlessConfigQrCodeUseCase;
+  * RotateSubscriptionTokenUseCase;
+  * RevokeSubscriptionUseCase;
+  * User;
+  * Subscription;
+  * SubscriptionDelivery models;
+  * QR models;
+  * standard exception handling;
+  * SystemClockPort;
+  * logging;
+  * traceId;
+  * Testcontainers;
+  * current architecture conventions.
+* Use Java 21.
+* Use the current Spring Boot and build-tool versions.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into handlers or application services.
+* Do not embed business rules in Telegram handlers.
+* Do not duplicate Subscription URL, VLESS URI, QR, or ownership logic.
+* Do not log Telegram Bot token.
+* Do not log Subscription token.
+* Do not log complete Subscription URL.
+* Do not log complete VLESS URI.
+* Do not log QR bytes.
+* Do not trust Telegram display names, usernames, callback payloads, or message text as authorization.
+* Telegram numeric user ID is the trusted external user identity.
+* Telegram chat ID and Telegram user ID are not always the same concept; model them separately.
+* Do not store Telegram Bot token in source control.
+* Do not call Telegram API from inside database transactions.
+* Do not begin Task 36.
+
+---
+
+# 2. Verify current Telegram Bot API behavior
+
+Before implementation, inspect the current official Telegram Bot API documentation for:
+
+* update delivery;
+* webhook behavior;
+* long polling behavior;
+* update_id semantics;
+* callback queries;
+* answerCallbackQuery;
+* sendMessage;
+* sendPhoto;
+* editMessageText;
+* editMessageReplyMarkup;
+* parse modes;
+* inline keyboards;
+* file size limits;
+* rate-limit responses;
+* retry_after;
+* webhook secret token;
+* allowed_updates.
+
+Use official Telegram documentation as the source of truth.
+
+Record:
+
+* Bot API version consulted;
+* date checked;
+* selected Java client approach;
+* update-delivery mode;
+* rate-limit behavior;
+* message-length limits;
+* image-upload behavior;
+* security assumptions.
+
+Do not rely on an outdated tutorial.
+
+---
+
+# 3. Current-state assessment
+
+Inspect and report:
+
+* current User registration API;
+* Telegram user ID mapping;
+* User language support;
+* Subscription APIs;
+* Subscription URL token behavior;
+* QR use cases;
+* VLESS config delivery use case;
+* exception handling;
+* logging and trace IDs;
+* async executor support;
+* scheduling support;
+* HTTP client conventions;
+* Redis availability;
+* current idempotency patterns;
+* current migration history;
+* test infrastructure;
+* whether a Telegram SDK already exists;
+* whether webhook endpoints already exist;
+* whether long polling is already configured.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Telegram client strategy
+3. Update-delivery strategy
+4. User identity strategy
+5. Update idempotency strategy
+6. Conversation-state strategy
+7. Command-routing design
+8. Callback-data design
+9. Subscription-delivery design
+10. Sensitive-data handling
+11. Telegram retry strategy
+12. Transaction-boundary design
+13. Planned files to create
+14. Planned files to modify
+15. Dependency and operational risks
+
+---
+
+# 4. Telegram client library decision
+
+Select one approach.
+
+Preferred options:
+
+* an actively maintained Java Telegram Bot API library;
+* direct Telegram Bot API integration using Spring RestClient.
+
+Choose the approach that best fits the current architecture.
+
+Preferred architectural rule:
+
+Application and domain layers must not depend on Telegram SDK classes.
+
+If a Telegram library is used:
+
+* keep all SDK types inside infrastructure;
+* map updates into internal application models;
+* pin the dependency version;
+* document license and maintenance status;
+* avoid libraries requiring global static registration;
+* avoid hidden background threads where lifecycle cannot be controlled;
+* ensure testing without real Telegram.
+
+If direct RestClient integration is used:
+
+* define Telegram outbound ports;
+* create infrastructure DTOs;
+* implement safe JSON serialization;
+* handle Telegram HTTP and logical API errors separately.
+
+Do not expose Telegram library DTOs outside infrastructure/API adapters.
+
+---
+
+# 5. Update delivery mode
+
+Support exactly one primary mode in Task 35.
+
+Preferred for local development:
+
+LONG_POLLING
+
+Preferred for production:
+
+WEBHOOK
+
+Choose based on the existing project direction.
+
+Best design:
+
+Create an abstraction supporting both modes eventually, but implement only one active mode now.
+
+Create:
+
+TelegramUpdateReceiver
+
+Possible implementations:
+
+TelegramLongPollingReceiver
+
+or:
+
+TelegramWebhookController
+
+Do not run both modes simultaneously.
+
+Configuration must prevent conflicting activation.
+
+---
+
+# 6. Recommended Task 35 delivery choice
+
+Preferred implementation:
+
+Webhook-capable architecture with long polling enabled for local development only.
+
+However, to keep Task 35 focused, choose one:
+
+Option A — Long polling first:
+
+* simpler local testing;
+* no public HTTPS endpoint required;
+* background polling worker;
+* offset management required.
+
+Option B — Webhook first:
+
+* stateless request handling;
+* easier horizontal scaling with deduplication;
+* requires public HTTPS in production;
+* secret-token validation required.
+
+Recommended for the current project stage:
+
+Long polling first, because deployment is not yet part of Task 35.
+
+Requirements:
+
+* polling may be disabled through properties;
+* offset must advance only after update is durably accepted;
+* duplicate updates still handled idempotently;
+* graceful shutdown;
+* bounded polling timeout;
+* bounded batch size;
+* no busy loop;
+* Telegram API calls outside DB transactions.
+
+Document how webhook mode can replace it later.
+
+---
+
+# 7. Telegram properties
+
+Create:
+
+TelegramBotProperties
+
+Prefix:
+
+app.telegram.bot
+
+Suggested fields:
+
+boolean enabled
+
+String token
+
+String username
+
+TelegramUpdateMode updateMode
+
+Duration pollingTimeout
+
+Duration pollingBackoff
+
+int updateBatchSize
+
+Set<String> allowedUpdates
+
+int maxMessageLength
+
+int maxCallbackDataBytes
+
+Duration apiConnectTimeout
+
+Duration apiReadTimeout
+
+int maxRetryAttempts
+
+Duration initialRetryDelay
+
+Duration maxRetryDelay
+
+double retryMultiplier
+
+boolean sendQrAsPhoto
+
+boolean disableLinkPreview
+
+String webhookSecretToken
+
+Optional:
+
+String webhookPath
+
+Validation:
+
+* token required only when enabled;
+* username normalized without `@`;
+* polling timeout positive;
+* callback-data limit within Telegram limit;
+* retries bounded;
+* webhook secret required only for webhook mode;
+* polling and webhook mutually exclusive;
+* no secret in `toString`.
+
+Update `.env.example`.
+
+Example:
+
+TELEGRAM_BOT_ENABLED=false
+
+TELEGRAM_BOT_TOKEN=
+
+TELEGRAM_BOT_USERNAME=
+
+TELEGRAM_BOT_UPDATE_MODE=LONG_POLLING
+
+TELEGRAM_BOT_POLLING_TIMEOUT=PT30S
+
+TELEGRAM_BOT_POLLING_BACKOFF=PT2S
+
+TELEGRAM_BOT_UPDATE_BATCH_SIZE=50
+
+TELEGRAM_BOT_MAX_RETRY_ATTEMPTS=5
+
+TELEGRAM_BOT_INITIAL_RETRY_DELAY=PT1S
+
+TELEGRAM_BOT_MAX_RETRY_DELAY=PT30S
+
+TELEGRAM_BOT_RETRY_MULTIPLIER=2.0
+
+TELEGRAM_BOT_SEND_QR_AS_PHOTO=true
+
+TELEGRAM_BOT_DISABLE_LINK_PREVIEW=true
+
+---
+
+# 8. Internal Telegram update model
+
+Create internal application models independent of Telegram SDK.
+
+Create:
+
+TelegramUpdate
+
+Fields:
+
+long updateId
+
+TelegramUpdateType type
+
+TelegramActor actor
+
+TelegramChat chat
+
+TelegramMessage message
+
+TelegramCallbackQuery callbackQuery
+
+Instant receivedAt
+
+Create:
+
+TelegramUpdateType
+
+Values:
+
+MESSAGE
+
+CALLBACK_QUERY
+
+UNSUPPORTED
+
+Create:
+
+TelegramActor
+
+Fields:
+
+long telegramUserId
+
+String username
+
+String firstName
+
+String lastName
+
+String languageCode
+
+boolean bot
+
+Create:
+
+TelegramChat
+
+Fields:
+
+long chatId
+
+TelegramChatType type
+
+String title
+
+Create:
+
+TelegramChatType
+
+Values:
+
+PRIVATE
+
+GROUP
+
+SUPERGROUP
+
+CHANNEL
+
+UNKNOWN
+
+Create:
+
+TelegramMessage
+
+Fields:
+
+long messageId
+
+String text
+
+Instant sentAt
+
+Create:
+
+TelegramCallbackQuery
+
+Fields:
+
+String callbackQueryId
+
+long sourceMessageId
+
+String data
+
+Requirements:
+
+* immutable;
+* bounded strings;
+* null-safe;
+* safe `toString`;
+* no complete sensitive callback payload in logs.
+
+---
+
+# 9. Supported chat policy
+
+Task 35 should support private chats only.
+
+Behavior:
+
+* PRIVATE chat:
+
+  * allowed.
+* GROUP, SUPERGROUP, CHANNEL:
+
+  * ignore safely or reply with a minimal private-chat instruction.
+* Do not deliver Subscription credentials to group chats.
+* Do not send raw VLESS URI, Subscription URL, or QR to non-private chats.
+* Do not infer private-chat safety only from `chatId == userId`; use Telegram chat type.
+
+Add tests.
+
+---
+
+# 10. Update idempotency aggregate
+
+Create:
+
+TelegramProcessedUpdate
+
+Suggested package:
+
+com.parazit.panel.domain.telegram
+
+Fields:
+
+Long updateId
+
+TelegramUpdateProcessingStatus status
+
+Instant receivedAt
+
+Instant processingStartedAt
+
+Instant processedAt
+
+Instant failedAt
+
+int attemptCount
+
+String handlerKey
+
+String failureCode
+
+String failureMessage
+
+String responseFingerprint
+
+Instant createdAt
+
+Instant updatedAt
+
+Statuses:
+
+RECEIVED
+
+PROCESSING
+
+PROCESSED
+
+FAILED
+
+DEAD
+
+Rules:
+
+* updateId unique.
+* PROCESSING claim must be concurrency-safe.
+* PROCESSED is terminal.
+* FAILED can be retried.
+* max attempts -> DEAD.
+* safe failure metadata only.
+* no message body.
+* no callback data containing secrets.
+* no Subscription token.
+* no VLESS URI.
+
+Use BaseEntity only if Long Telegram update ID can coexist cleanly; otherwise define a dedicated entity.
+
+---
+
+# 11. Update-processing migration
+
+Create the next migration.
+
+Suggested:
+
+V15__create_telegram_processed_updates.sql
+
+Adjust version to actual migration order.
+
+Create table:
+
+telegram_processed_updates
+
+Columns:
+
+update_id BIGINT primary key
+
+status VARCHAR(32) not null
+
+received_at TIMESTAMPTZ not null
+
+processing_started_at TIMESTAMPTZ null
+
+processed_at TIMESTAMPTZ null
+
+failed_at TIMESTAMPTZ null
+
+attempt_count INTEGER not null
+
+handler_key VARCHAR(100) null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+response_fingerprint VARCHAR(128) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* update_id >= 0;
+* attempt_count >= 0;
+* valid status;
+* PROCESSING requires processing_started_at;
+* PROCESSED requires processed_at;
+* FAILED/DEAD require failed_at.
+
+Indexes:
+
+status
+
+received_at
+
+processed_at
+
+Use no foreign key to User because registration may happen during processing.
+
+Do not edit old migrations.
+
+---
+
+# 12. Processed-update repository
+
+Create:
+
+TelegramProcessedUpdateRepository
+
+Methods:
+
+Optional<TelegramProcessedUpdate> findByUpdateId(long updateId)
+
+boolean existsProcessed(long updateId)
+
+List<TelegramProcessedUpdate> findRetryable(
+Instant now,
+int limit
+)
+
+Create adapter and Spring Data repository.
+
+Claiming must be concurrency-safe.
+
+Use:
+
+* insert-on-conflict;
+* optimistic version;
+* conditional update;
+* or row locking.
+
+Do not rely on an in-memory set.
+
+---
+
+# 13. Long-polling offset state
+
+If long polling is selected, create:
+
+TelegramPollingState
+
+Fields:
+
+String botIdentity
+
+long nextOffset
+
+Instant updatedAt
+
+Requirements:
+
+* persisted state;
+* one state row per bot;
+* nextOffset monotonic;
+* offset advanced only after updates are durably accepted or safely deduplicated;
+* crash recovery does not lose updates;
+* duplicate delivery remains safe;
+* multiple pollers prevented or coordinated.
+
+Alternative:
+
+Use the maximum committed update ID from processed-update storage.
+
+Preferred:
+
+Persist explicit offset state.
+
+Create a migration if needed.
+
+Do not keep offset only in memory.
+
+---
+
+# 14. Telegram outbound port
+
+Create:
+
+TelegramBotClient
+
+Suggested package:
+
+com.parazit.panel.application.port.out.telegram
+
+Methods:
+
+TelegramSendResult sendMessage(
+SendTelegramMessageCommand command
+)
+
+TelegramSendResult sendPhoto(
+SendTelegramPhotoCommand command
+)
+
+TelegramEditResult editMessage(
+EditTelegramMessageCommand command
+)
+
+void answerCallbackQuery(
+AnswerTelegramCallbackCommand command
+)
+
+TelegramUpdatesResult getUpdates(
+GetTelegramUpdatesCommand command
+)
+
+Only include methods required by the selected update mode.
+
+Commands must be application-owned models.
+
+Do not expose Telegram SDK types.
+
+---
+
+# 15. Outbound command models
+
+Create:
+
+SendTelegramMessageCommand
+
+Fields:
+
+long chatId
+
+String text
+
+TelegramParseMode parseMode
+
+TelegramInlineKeyboard keyboard
+
+boolean disableLinkPreview
+
+Long replyToMessageId
+
+Create:
+
+SendTelegramPhotoCommand
+
+Fields:
+
+long chatId
+
+byte[] photoBytes
+
+String filename
+
+String caption
+
+TelegramParseMode parseMode
+
+TelegramInlineKeyboard keyboard
+
+Create:
+
+EditTelegramMessageCommand
+
+Fields:
+
+long chatId
+
+long messageId
+
+String text
+
+TelegramParseMode parseMode
+
+TelegramInlineKeyboard keyboard
+
+Create:
+
+AnswerTelegramCallbackCommand
+
+Fields:
+
+String callbackQueryId
+
+String text
+
+boolean showAlert
+
+Requirements:
+
+* defensive byte copies;
+* bounded text;
+* safe filename;
+* no token in `toString`;
+* no QR byte logging;
+* no arbitrary file path;
+* no user-provided parse mode.
+
+---
+
+# 16. Parse mode strategy
+
+Preferred:
+
+HTML
+
+Use a dedicated escaper:
+
+TelegramHtmlEscaper
+
+Requirements:
+
+* escape:
+
+  * `&`
+  * `<`
+  * `>`
+  * quotes where required;
+* never interpolate user-provided names without escaping;
+* never interpolate Plan names, server names, or errors without escaping;
+* avoid MarkdownV2 unless escaping is thoroughly implemented;
+* no raw HTML from database;
+* no link built from untrusted input.
+
+Alternatively use no parse mode where rich formatting is unnecessary.
+
+---
+
+# 17. Inline keyboard model
+
+Create application-owned models:
+
+TelegramInlineKeyboard
+
+TelegramInlineKeyboardRow
+
+TelegramInlineButton
+
+Button types:
+
+CALLBACK
+
+URL
+
+Task 35 preferred:
+
+Use CALLBACK buttons for navigation.
+
+Use URL button only for the Subscription URL when the raw token is currently available.
+
+Requirements:
+
+* callback data bounded to Telegram limit;
+* no raw Subscription token in callback data;
+* no full VLESS URI;
+* no User ID if it can be derived from update actor;
+* no sensitive database IDs without signing or server-side state;
+* button text escaped and bounded.
+
+---
+
+# 18. Callback-data codec
+
+Create:
+
+TelegramCallbackDataCodec
+
+Create:
+
+TelegramCallbackAction
+
+Suggested actions:
+
+MAIN_MENU
+
+MY_SUBSCRIPTIONS
+
+VIEW_SUBSCRIPTION
+
+SHOW_CONFIG
+
+SHOW_CONFIG_QR
+
+SHOW_SUBSCRIPTION_QR
+
+BACK_TO_SUBSCRIPTIONS
+
+BACK_TO_MAIN
+
+Callback payload must be compact.
+
+Recommended format:
+
+v1|action|resourceAlias|index
+
+Do not include:
+
+* raw token;
+* Subscription URL;
+* VLESS URI;
+* Telegram Bot token;
+* Payment reference;
+* private keys.
+
+Because callback data is visible to the user, treat it as untrusted.
+
+Recommended protection:
+
+Use a signed callback payload.
+
+Create:
+
+TelegramCallbackSigner
+
+Use:
+
+HMAC-SHA-256
+
+Store signing secret in configuration.
+
+Payload structure may contain:
+
+version
+
+action
+
+short resource ID or UUID
+
+config index
+
+expiry epoch
+
+signature prefix
+
+Requirements:
+
+* verify signature;
+* validate actor ownership separately;
+* bounded TTL;
+* reject tampered data;
+* safe generic response;
+* do not treat signature as authorization by itself;
+* no sensitive content.
+
+If a signing secret is too large a change, use opaque server-side callback sessions. Prefer signed callback data for Task 35.
+
+---
+
+# 19. Callback signing properties
+
+Add:
+
+String callbackSigningSecret
+
+Duration callbackTtl
+
+Validation:
+
+* signing secret required when Telegram enabled;
+* minimum secret length;
+* no logging;
+* no default production secret;
+* callback TTL positive;
+* update `.env.example`.
+
+Example:
+
+TELEGRAM_BOT_CALLBACK_SIGNING_SECRET=
+
+TELEGRAM_BOT_CALLBACK_TTL=PT15M
+
+---
+
+# 20. Telegram update processor
+
+Create:
+
+ProcessTelegramUpdateUseCase
+
+Implementation:
+
+TelegramUpdateProcessor
+
+Behavior:
+
+1. Validate update ID.
+2. Persist or claim processed-update record.
+3. If already PROCESSED:
+
+   * return idempotently;
+   * do not resend messages.
+4. If another worker is PROCESSING:
+
+   * skip or return conflict internally.
+5. Reject updates from bot actors.
+6. Reject non-private credential-delivery flows.
+7. Map update to command or callback handler.
+8. Execute handler outside the claim transaction.
+9. Send Telegram response outside DB transaction.
+10. Mark update PROCESSED after successful intended response.
+11. On retryable Telegram failure:
+
+* mark FAILED;
+* preserve retry metadata.
+
+12. On non-retryable invalid update:
+
+* mark PROCESSED with ignored handler.
+
+13. On repeated failure:
+
+* mark DEAD after configured attempts.
+
+Do not wrap the complete handler and Telegram network call in one DB transaction.
+
+---
+
+# 21. Update-processing transaction phases
+
+Use focused transaction components:
+
+ClaimTelegramUpdateTransaction
+
+CompleteTelegramUpdateTransaction
+
+FailTelegramUpdateTransaction
+
+Phase A:
+
+* insert/claim update;
+* short DB transaction.
+
+Phase B:
+
+* register User;
+* invoke use cases;
+* build response;
+* call Telegram API;
+* no long transaction.
+
+Phase C:
+
+* mark processed or failed;
+* short DB transaction.
+
+If User registration is transactional, let its use case own its transaction.
+
+Do not hold processed-update row locks during Telegram HTTP calls.
+
+---
+
+# 22. Response uncertainty
+
+Telegram send requests may time out after Telegram accepted the message.
+
+This creates an uncertain result.
+
+Choose and document a policy.
+
+Recommended Task 35 policy:
+
+* generate a deterministic response fingerprint from:
+
+  * updateId;
+  * handler action;
+  * chatId;
+  * safe payload metadata;
+* store fingerprint;
+* on uncertain send:
+
+  * mark FAILED with `TELEGRAM_SEND_UNKNOWN`;
+  * retry conservatively;
+  * acknowledge that Telegram Bot API does not provide a general client-defined idempotency key for sendMessage.
+
+To reduce duplicate sensitive delivery:
+
+* prefer editing an existing menu message where possible;
+* for QR and credential delivery, require explicit button action;
+* on timeout after send, do not immediately retry sensitive content blindly unless policy allows a possible duplicate;
+* mark the update for manual or bounded retry strategy.
+
+Document that exactly-once outbound delivery cannot be guaranteed.
+
+Never claim exactly-once Telegram sending.
+
+---
+
+# 23. Telegram retry classification
+
+Create:
+
+TelegramFailureClassifier
+
+Retryable:
+
+* connection timeout;
+* temporary DNS failure;
+* HTTP 429;
+* HTTP 500;
+* HTTP 502;
+* HTTP 503;
+* HTTP 504;
+* Telegram retry_after;
+* temporary network interruption.
+
+Non-retryable:
+
+* invalid bot token;
+* chat not found;
+* bot blocked by user;
+* malformed request;
+* message too long after application validation;
+* invalid callback query ID;
+* unsupported media;
+* invalid chat type.
+
+Unknown:
+
+* timeout after request transmission;
+* connection reset after payload sent.
+
+Requirements:
+
+* bounded exponential backoff;
+* respect retry_after;
+* no immediate infinite retry;
+* safe failure codes;
+* no raw Telegram response persistence;
+* stack traces only in server logs.
+
+---
+
+# 24. User registration from Telegram
+
+Create:
+
+RegisterTelegramActorService
+
+or reuse RegisterUserUseCase directly from handler.
+
+Input mapping:
+
+telegramUserId -> trusted Telegram numeric User ID
+
+username
+
+firstName
+
+lastName
+
+languageCode
+
+Behavior:
+
+* register new User idempotently;
+* refresh mutable Telegram profile fields;
+* preserve application-managed fields;
+* preserve referral, settings, subscription, and payment data;
+* ignore bot actors;
+* normalize language according to existing User rules;
+* do not treat username as identity;
+* username may be null or changed.
+
+Call registration before handling supported commands.
+
+---
+
+# 25. Command parser
+
+Create:
+
+TelegramCommandParser
+
+Create:
+
+TelegramCommand
+
+Supported commands:
+
+START
+
+MENU
+
+MY_SUBSCRIPTIONS
+
+HELP
+
+UNKNOWN
+
+Rules:
+
+* support `/start`;
+* support `/start@BotUsername`;
+* support `/menu`;
+* support `/subscriptions`;
+* support `/help`;
+* trim safe whitespace;
+* commands case-insensitive where appropriate;
+* bounded input;
+* ignore arbitrary free text or show menu;
+* `/start` payload supported but not used for sensitive operations in Task 35.
+
+Do not implement referral deep-link behavior unless it already exists and is explicitly safe.
+
+---
+
+# 26. Command router
+
+Create:
+
+TelegramCommandHandler
+
+Create handlers:
+
+StartTelegramCommandHandler
+
+MainMenuTelegramCommandHandler
+
+MySubscriptionsTelegramCommandHandler
+
+HelpTelegramCommandHandler
+
+UnknownTelegramCommandHandler
+
+Create:
+
+TelegramCommandRouter
+
+Requirements:
+
+* one handler per command;
+* duplicate command registration fails startup;
+* handlers depend on application use cases;
+* no repository injection;
+* no large switch in the main processor;
+* handlers return an internal response plan rather than calling Telegram directly where practical.
+
+---
+
+# 27. Telegram response plan
+
+Create:
+
+TelegramResponsePlan
+
+Possible actions:
+
+SEND_MESSAGE
+
+SEND_PHOTO
+
+EDIT_MESSAGE
+
+ANSWER_CALLBACK
+
+COMPOSITE
+
+Create:
+
+TelegramResponseAction
+
+Requirements:
+
+* immutable;
+* no Telegram SDK types;
+* safe `toString`;
+* payload sensitivity marker;
+* bounded number of actions;
+* deterministic order.
+
+Recommended:
+
+Handlers build plans.
+
+A separate:
+
+TelegramResponseExecutor
+
+executes them using TelegramBotClient.
+
+This improves testing and separates business orchestration from HTTP transport.
+
+---
+
+# 28. `/start` command
+
+Behavior:
+
+1. Register or refresh User.
+2. Send localized welcome message.
+3. Display main menu.
+
+Suggested buttons:
+
+📦 My subscriptions
+
+ℹ️ Help
+
+Task 35 should not show purchase or payment buttons yet.
+
+If the user has no Subscription:
+
+* show a safe message;
+* do not expose admin/internal API details;
+* optionally state that no active subscription exists.
+
+Do not leak whether another Telegram user owns a particular resource.
+
+---
+
+# 29. Localization
+
+Reuse User language from prior tasks.
+
+Support at least the project’s existing languages.
+
+Likely:
+
+FA
+
+EN
+
+Create:
+
+TelegramMessageCatalog
+
+or reuse existing localization abstraction.
+
+Message keys:
+
+welcome
+
+main_menu_title
+
+my_subscriptions
+
+no_subscriptions
+
+subscription_summary
+
+subscription_active
+
+subscription_expired
+
+subscription_suspended
+
+show_config
+
+show_config_qr
+
+show_subscription_qr
+
+back
+
+help
+
+temporary_error
+
+not_available
+
+invalid_action
+
+Requirements:
+
+* no hardcoded scattered strings;
+* UTF-8;
+* safe HTML escaping;
+* fallback language;
+* tests for fallback;
+* do not implement full external translation management.
+
+---
+
+# 30. Main menu
+
+Create a minimal inline keyboard:
+
+* My Subscriptions
+* Help
+
+Optional:
+
+* Refresh
+
+Do not include:
+
+* Buy Plan
+* Payment
+* Upload Receipt
+* Referral Reward
+* Admin
+* Broadcast
+
+Navigation callbacks must be signed and time-bounded.
+
+---
+
+# 31. List Subscriptions flow
+
+When the user selects My Subscriptions:
+
+1. Resolve User by Telegram ID.
+2. Call ListUserSubscriptionsUseCase.
+3. Show only user-owned Subscriptions.
+4. Include ACTIVE, SUSPENDED, EXPIRED, and REVOKED according to UX policy.
+5. Prefer ACTIVE first, then newest.
+6. Use one button per Subscription.
+7. Button label:
+
+   * plan name;
+   * safe status;
+   * expiry summary.
+8. Callback data contains signed Subscription ID reference.
+9. Paginate if list exceeds Telegram message/button limits.
+
+Task 35 may implement simple bounded pagination.
+
+Recommended page size:
+
+5
+
+Do not load unbounded history.
+
+---
+
+# 32. Subscription details flow
+
+When a Subscription is selected:
+
+Display safe metadata:
+
+* Plan name
+* Status
+* Expiry
+* Configuration count
+* Token version
+* Last safe access time if useful
+
+Buttons:
+
+* Show configuration
+* Configuration QR
+* Subscription QR
+* Back
+
+Important:
+
+Subscription QR requires the raw token.
+
+Since raw tokens are not stored, the bot cannot regenerate Subscription URL QR from Subscription ID alone.
+
+Therefore Task 35 must choose a correct delivery strategy.
+
+---
+
+# 33. Raw token delivery limitation
+
+Task 33 correctly stores only a token hash.
+
+Therefore a previously created Subscription URL cannot be reconstructed later.
+
+Task 35 must not weaken this security rule.
+
+Implement one of these strategies:
+
+Option A — token rotation on delivery:
+
+* When user asks for Subscription link or QR, explicitly rotate the token.
+* Receive the new raw token once.
+* Build Subscription URL.
+* Send URL or QR.
+* Old token becomes invalid.
+
+Option B — encrypted secret vault:
+
+* Store encrypted raw token.
+* Not recommended because no secret-vault requirement exists yet.
+
+Preferred Task 35 strategy:
+
+Option A — explicit token rotation.
+
+UX:
+
+Button:
+
+“Generate new subscription link”
+
+Warning:
+
+“Generating a new link will invalidate the previous link.”
+
+Confirmation callback:
+
+CONFIRM_ROTATE_SUBSCRIPTION_TOKEN
+
+Then:
+
+1. Call RotateSubscriptionTokenUseCase.
+2. Receive raw token.
+3. Build trusted Subscription URL.
+4. Send URL and/or QR.
+5. Never persist raw token in Telegram module.
+6. Do not include token in callback data.
+7. Do not log it.
+
+Document this clearly.
+
+---
+
+# 34. Generate Subscription link flow
+
+Create callback actions:
+
+REQUEST_SUBSCRIPTION_LINK
+
+CONFIRM_ROTATE_SUBSCRIPTION_TOKEN
+
+CANCEL_ROTATION
+
+Flow:
+
+1. User requests Subscription link.
+2. Bot explains that a new link invalidates the previous one.
+3. User confirms.
+4. Rotate token.
+5. Build URL.
+6. Send URL in private chat.
+7. Disable link preview.
+8. Optionally provide QR button generated immediately from the same raw token.
+9. Raw token exists only in memory during response construction.
+10. Clear references naturally after request completion.
+
+Do not put the token in callback data.
+
+---
+
+# 35. Subscription URL QR delivery
+
+After token rotation:
+
+* call GenerateSubscriptionUrlQrCodeUseCase with:
+
+  * Telegram user ID;
+  * Subscription ID;
+  * raw token;
+  * safe default QR options.
+* send PNG through Telegram sendPhoto.
+* safe filename.
+* caption includes plan name and expiry only.
+* no token in caption.
+* no URL in caption unless intentionally sending it as a separate protected message.
+* no QR bytes persisted.
+* no token logged.
+
+Preferred:
+
+Send both:
+
+1. Subscription URL text
+2. QR image
+
+Only after explicit confirmation.
+
+---
+
+# 36. VLESS configuration text delivery
+
+When user requests config:
+
+1. Call GetSubscriptionConfigEntryUseCase.
+2. Verify Subscription ACTIVE.
+3. Return one VLESS URI.
+4. Send in a code block or plain text safely.
+5. Disable link preview.
+6. Ensure Telegram message length limit.
+7. Do not log URI.
+8. Do not store URI in Telegram update records.
+9. Do not include URI in callback data.
+
+Because VLESS URI is sensitive:
+
+* private chat only;
+* no forwarding protection can be guaranteed;
+* add a short user warning if appropriate.
+
+---
+
+# 37. VLESS QR delivery
+
+When user requests config QR:
+
+1. Call GenerateVlessConfigQrCodeUseCase.
+2. Use default PNG options.
+3. Send as photo.
+4. Caption includes:
+
+   * Plan name;
+   * Config index;
+   * Expiry.
+5. Do not include URI.
+6. Do not include private keys.
+7. Do not persist bytes.
+8. Do not log bytes.
+
+If QR payload is too large:
+
+* send a safe error;
+* optionally offer plain config text;
+* do not truncate the URI.
+
+---
+
+# 38. Multiple configuration entries
+
+If one Subscription has multiple config entries:
+
+* show a config list;
+* use one-based indexes;
+* button per entry;
+* deterministic ordering;
+* signed callback includes Subscription ID and config index;
+* verify index on every action;
+* never trust callback index alone;
+* verify ownership again.
+
+If only one config exists:
+
+* show direct buttons.
+
+---
+
+# 39. Callback query handling
+
+Create:
+
+TelegramCallbackHandler
+
+Implement handlers for:
+
+MAIN_MENU
+
+MY_SUBSCRIPTIONS
+
+VIEW_SUBSCRIPTION
+
+SHOW_CONFIG
+
+SHOW_CONFIG_QR
+
+REQUEST_SUBSCRIPTION_LINK
+
+CONFIRM_ROTATE_SUBSCRIPTION_TOKEN
+
+CANCEL_ROTATION
+
+BACK_TO_SUBSCRIPTIONS
+
+BACK_TO_MAIN
+
+Requirements:
+
+* verify callback signature;
+* verify callback TTL;
+* verify Telegram actor;
+* verify private chat;
+* verify resource ownership;
+* call answerCallbackQuery promptly;
+* do not leave Telegram loading spinner active;
+* answer generic error on invalid/tampered callback;
+* do not expose signature details.
+
+---
+
+# 40. Callback replay behavior
+
+Callback queries may be repeated.
+
+Requirements:
+
+* callback query ID may be tracked if necessary;
+* update ID idempotency usually prevents duplicate processing;
+* token-rotation confirmation must be protected against replay.
+
+Critical:
+
+Repeated CONFIRM_ROTATE_SUBSCRIPTION_TOKEN must not rotate repeatedly.
+
+Implement a request ID in callback payload:
+
+rotationRequestId
+
+Use the idempotent token-rotation support from Task 33 if implemented.
+
+If Task 33 rotation is not idempotent:
+
+Add a Telegram sensitive-action record.
+
+Create:
+
+TelegramSensitiveAction
+
+Fields:
+
+UUID actionId
+
+long telegramUserId
+
+UUID subscriptionId
+
+SensitiveActionType type
+
+SensitiveActionStatus status
+
+Instant expiresAt
+
+Instant completedAt
+
+String resultFingerprint
+
+Types:
+
+ROTATE_SUBSCRIPTION_TOKEN
+
+Statuses:
+
+PENDING
+
+COMPLETED
+
+EXPIRED
+
+CANCELLED
+
+Use actionId in signed callback.
+
+One confirmation completes exactly once.
+
+Do not store raw token or URL in this record.
+
+---
+
+# 41. Sensitive-action migration
+
+If required, create the next migration or include it with Telegram tables.
+
+Create:
+
+telegram_sensitive_actions
+
+Columns:
+
+id UUID primary key
+
+telegram_user_id BIGINT not null
+
+subscription_id UUID not null
+
+type VARCHAR(64) not null
+
+status VARCHAR(32) not null
+
+expires_at TIMESTAMPTZ not null
+
+completed_at TIMESTAMPTZ null
+
+result_fingerprint VARCHAR(128) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* valid status/type;
+* expiry after creation;
+* completed requires completed_at;
+* foreign key to Subscription;
+* no token fields.
+
+Indexes:
+
+telegram_user_id
+
+subscription_id
+
+status
+
+expires_at
+
+---
+
+# 42. Message size and formatting
+
+Telegram text is bounded.
+
+Create:
+
+TelegramMessageFormatter
+
+Responsibilities:
+
+* HTML escape;
+* enforce maximum text length;
+* format timestamps;
+* format traffic values if shown;
+* split only non-sensitive long informational messages;
+* never split a VLESS URI into invalid fragments;
+* reject oversized VLESS text safely;
+* truncate display names only;
+* never truncate credentials.
+
+For config URI:
+
+* send as one message;
+* if too large:
+
+  * prefer QR;
+  * return safe error.
+
+---
+
+# 43. Telegram API infrastructure adapter
+
+Create:
+
+TelegramBotApiClient
+
+Suggested package:
+
+com.parazit.panel.infrastructure.telegram
+
+Responsibilities:
+
+* call official Telegram Bot API;
+* attach token safely in URL or authorization method according to API;
+* never log full request URL;
+* serialize request DTOs;
+* support multipart photo upload;
+* parse Telegram envelope:
+
+  * ok;
+  * result;
+  * error_code;
+  * description;
+  * parameters.retry_after.
+* classify errors;
+* apply timeouts;
+* no automatic unsafe retry inside low-level client unless coordinated with application retry policy;
+* redact secrets.
+
+Infrastructure DTOs must remain in infrastructure.
+
+---
+
+# 44. Long-polling worker
+
+If long polling is selected, create:
+
+TelegramLongPollingWorker
+
+Responsibilities:
+
+1. Read persisted nextOffset.
+2. Call getUpdates.
+3. Persist/accept returned updates.
+4. Process updates in ascending updateId order.
+5. Advance offset safely.
+6. Respect backoff.
+7. Graceful shutdown.
+8. Prevent overlapping poll loops in one instance.
+9. Prevent multiple active pollers through DB claim/advisory lock if multi-instance support is expected.
+
+Recommended Task 35:
+
+Single active poller using PostgreSQL advisory lock.
+
+Do not add an external distributed-lock dependency.
+
+When disabled:
+
+* no polling thread;
+* application starts normally.
+
+---
+
+# 45. Update ordering
+
+Telegram update IDs are ordered but application processing may fail.
+
+Choose:
+
+Sequential processing for Task 35.
+
+Reason:
+
+* simpler conversation consistency;
+* easier offset handling;
+* safer sensitive-action ordering.
+
+Requirements:
+
+* batch updates sorted ascending;
+* process one at a time;
+* failed update policy documented;
+* do not permanently block all later updates forever.
+
+Recommended:
+
+* retry failed update bounded times;
+* after DEAD, advance and continue;
+* log alert;
+* no sensitive raw payload persistence.
+
+Future tasks may introduce partitioned processing by chat ID.
+
+---
+
+# 46. Telegram delivery result
+
+Create:
+
+TelegramSendResult
+
+Fields:
+
+long chatId
+
+long messageId
+
+Instant sentAt
+
+TelegramMessageKind kind
+
+boolean accepted
+
+Create:
+
+TelegramMessageKind
+
+Values:
+
+TEXT
+
+PHOTO
+
+EDIT
+
+Requirements:
+
+* safe;
+* no message text;
+* no photo bytes;
+* no token;
+* no URI.
+
+Use result for response fingerprint and observability.
+
+---
+
+# 47. Bot blocked and chat unavailable behavior
+
+When Telegram reports:
+
+* bot blocked;
+* user deactivated;
+* chat not found;
+* forbidden;
+
+Behavior:
+
+* mark current response non-retryable;
+* mark update processed with safe ignored/failure outcome;
+* optionally update User communication availability if such a field exists;
+* do not deactivate User account;
+* do not revoke Subscription;
+* do not retry indefinitely.
+
+Do not add a full notification-preference system in Task 35.
+
+---
+
+# 48. Rate limiting
+
+Telegram enforces rate limits.
+
+Implement:
+
+TelegramRateLimitPolicy
+
+Requirements:
+
+* respect `retry_after`;
+* bounded retries;
+* avoid burst loops;
+* sequential processing naturally limits rate;
+* no global sleep inside database transaction;
+* use injected Sleeper/Delay port if sleeping is needed;
+* test with fixed/fake delay;
+* do not use Thread.sleep in tests.
+
+Do not implement complex distributed rate limiting unless required.
+
+---
+
+# 49. Telegram Sleeper port
+
+If synchronous retry delay is used, create:
+
+DelayPort
+
+Method:
+
+void delay(Duration duration)
+
+Production:
+
+ThreadSleepDelayAdapter or scheduled retry mechanism.
+
+Tests:
+
+RecordingDelayPort
+
+Preferred:
+
+Do not sleep application request threads for long delays.
+
+For polling:
+
+backoff may sleep worker thread.
+
+For outbound send:
+
+prefer returning a retryable failure to update processor.
+
+Keep retry ownership clear and avoid nested retries.
+
+---
+
+# 50. Error UX
+
+User-facing errors must be generic and localized.
+
+Examples:
+
+* “This action is no longer valid.”
+* “This subscription is unavailable.”
+* “Temporary error. Please try again.”
+* “No active subscription found.”
+* “This link was regenerated. Your old link is no longer valid.”
+
+Do not send:
+
+* stack trace;
+* exception class;
+* database ID unless needed;
+* XUI error;
+* token hash;
+* Telegram API description;
+* Payment details;
+* internal endpoint URLs.
+
+---
+
+# 51. Telegram-specific security
+
+Verify:
+
+* Bot token secret-safe.
+* Callback data signed.
+* Callback TTL enforced.
+* Telegram user ID matched to User.
+* Private chat required for credentials.
+* Ownership checked for every Subscription action.
+* Token not in callback.
+* VLESS URI not in callback.
+* Token not in processed-update table.
+* Token not in logs.
+* QR bytes not persisted.
+* Telegram username not used for authorization.
+* Message ID not used as identity.
+* Forwarded messages not trusted.
+* Reply-to metadata not trusted.
+* `/start` payload not trusted for ownership.
+* No group delivery of credentials.
+* No arbitrary Telegram chat ID from callback/request.
+* Outbound chat ID comes from validated current update context.
+
+---
+
+# 52. Request-context model
+
+Create:
+
+TelegramInteractionContext
+
+Fields:
+
+long updateId
+
+long telegramUserId
+
+long chatId
+
+TelegramChatType chatType
+
+String language
+
+Long sourceMessageId
+
+String callbackQueryId
+
+Instant receivedAt
+
+Requirements:
+
+* immutable;
+* safe;
+* no token;
+* built from validated update;
+* passed to handlers;
+* prevents repeated extraction of SDK DTOs.
+
+---
+
+# 53. Audit and observability
+
+Log safe structured events.
+
+INFO:
+
+* update received;
+* User registered/refreshed;
+* command handled;
+* callback handled;
+* Subscription list delivered;
+* config delivered;
+* config QR delivered;
+* token rotation confirmed;
+* Subscription URL delivered;
+* Subscription QR delivered;
+* update processed.
+
+DEBUG:
+
+* router selection;
+* callback action;
+* keyboard page;
+* Telegram retry classification;
+* response type;
+* polling offset.
+
+WARN:
+
+* tampered callback;
+* expired callback;
+* wrong chat type;
+* ownership failure;
+* Telegram rate limit;
+* bot blocked;
+* uncertain send;
+* dead update.
+
+ERROR:
+
+* unexpected handler failure;
+* Telegram client failure;
+* polling failure;
+* update persistence inconsistency.
+
+Include:
+
+updateId
+
+telegramUserId
+
+chatId where privacy policy permits
+
+command
+
+callbackAction
+
+subscriptionId
+
+configIndex
+
+messageKind
+
+attemptCount
+
+traceId
+
+Never include:
+
+Bot token
+
+callback signature secret
+
+raw callback payload if sensitive
+
+Subscription token
+
+Subscription URL
+
+VLESS URI
+
+QR bytes
+
+Telegram request JSON containing secrets
+
+XUI credentials
+
+Payment data
+
+---
+
+# 54. Unit tests — command parser
+
+Test:
+
+* `/start`
+* `/start@BotName`
+* `/menu`
+* `/subscriptions`
+* `/help`
+* unknown command
+* empty text
+* plain text
+* case behavior
+* whitespace
+* very long text
+* bot username mismatch
+* safe parsing
+
+---
+
+# 55. Unit tests — callback codec
+
+Test:
+
+* encode/decode;
+* signature;
+* tampering;
+* expiry;
+* wrong actor if actor binding is implemented;
+* unsupported version;
+* invalid action;
+* oversized payload;
+* config index;
+* Subscription ID;
+* no token;
+* safe toString.
+
+Use fixed clock and deterministic HMAC key.
+
+---
+
+# 56. Unit tests — handlers
+
+Start:
+
+* registers User;
+* sends welcome;
+* main menu.
+
+Subscriptions:
+
+* empty list;
+* one Subscription;
+* multiple Subscriptions;
+* pagination;
+* status labels;
+* only owner data.
+
+Details:
+
+* ACTIVE;
+* EXPIRED;
+* SUSPENDED;
+* REVOKED;
+* buttons.
+
+Config:
+
+* exact URI passed to outbound response plan;
+* no logs;
+* private chat only.
+
+Config QR:
+
+* exact QR bytes passed to photo command;
+* safe caption.
+
+Subscription link:
+
+* warning before rotation;
+* confirmation required;
+* one rotation;
+* URL delivered;
+* QR delivered;
+* old link behavior delegated to Subscription module.
+
+---
+
+# 57. Unit tests — update processor
+
+Test:
+
+* new update;
+* duplicate processed update;
+* concurrent processing claim;
+* unsupported update;
+* bot actor;
+* group chat;
+* handler success;
+* handler failure;
+* Telegram retryable failure;
+* non-retryable failure;
+* uncertain send;
+* max attempts;
+* DEAD;
+* no long transaction during send;
+* processed marker after success.
+
+---
+
+# 58. Unit tests — Telegram client
+
+Using MockWebServer or WireMock:
+
+* sendMessage success;
+* sendPhoto multipart success;
+* edit message;
+* answer callback;
+* getUpdates;
+* logical API error with HTTP 200 and `ok=false`;
+* HTTP 429 and retry_after;
+* 401 invalid token;
+* 403 bot blocked;
+* 500;
+* timeout;
+* malformed JSON;
+* missing result;
+* secret redaction;
+* multipart filename safety.
+
+Do not call real Telegram.
+
+---
+
+# 59. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+Processed updates:
+
+* insert;
+* unique updateId;
+* claim;
+* duplicate;
+* processed;
+* failed;
+* dead;
+* attempt count;
+* timestamp constraints;
+* concurrency.
+
+Polling state, if implemented:
+
+* create;
+* monotonic offset;
+* concurrent update;
+* one bot identity.
+
+Sensitive actions, if implemented:
+
+* create;
+* unique action;
+* expiry;
+* complete once;
+* replay;
+* foreign key;
+* no token fields.
+
+Flyway and Hibernate validation must pass.
+
+---
+
+# 60. Full integration scenario
+
+Create an end-to-end integration scenario with mock Telegram API.
+
+1. Receive `/start`.
+2. Register User.
+3. Send welcome menu.
+4. Replay the same update.
+5. Verify no duplicate response.
+6. Create an ACTIVE Subscription fixture.
+7. Receive My Subscriptions callback.
+8. Verify list message.
+9. Select Subscription.
+10. Verify details.
+11. Request config.
+12. Verify Telegram sendMessage contains exact VLESS URI.
+13. Request config QR.
+14. Verify sendPhoto contains decodable QR.
+15. Request Subscription link.
+16. Verify confirmation warning.
+17. Confirm.
+18. Verify token rotates once.
+19. Verify URL message sent.
+20. Verify Subscription QR sent.
+21. Replay confirmation update.
+22. Verify no second rotation.
+23. Verify Bot token, Subscription token, URL, URI, and QR bytes are absent from logs and database records.
+
+---
+
+# 61. Concurrency integration tests
+
+Scenario A: duplicate update processing
+
+* two workers process same updateId;
+* one response sent;
+* one processed record.
+
+Scenario B: repeated rotation confirmation
+
+* two workers process equivalent confirm action;
+* one token rotation;
+* one sensitive action completion;
+* bounded delivery behavior.
+
+Scenario C: polling-worker ownership
+
+* two pollers start;
+* one active poller if advisory locking implemented.
+
+Scenario D: Subscription revoked during callback
+
+* no credential delivery after committed revoke.
+
+Scenario E: concurrent QR request callbacks
+
+* no shared mutable-state corruption;
+* no persistence of QR bytes.
+
+Requirements:
+
+* real PostgreSQL;
+* mock Telegram;
+* deterministic barriers/latches;
+* no Thread.sleep;
+* executor shutdown;
+* explicit timeouts.
+
+---
+
+# 62. Controller tests
+
+If webhook mode is implemented:
+
+Test:
+
+* valid update;
+* secret token header;
+* missing secret;
+* wrong secret;
+* body validation;
+* immediate acknowledgment;
+* duplicate update;
+* no detailed errors;
+* request-body logging redaction.
+
+If long polling is implemented:
+
+Test:
+
+* worker disabled;
+* worker enabled;
+* getUpdates offset;
+* graceful shutdown;
+* polling backoff;
+* malformed update skipped safely;
+* no context startup failure when disabled.
+
+---
+
+# 63. Architecture verification
+
+Verify:
+
+* Telegram SDK types remain in infrastructure.
+* Domain has no Telegram dependency.
+* Existing User/Subscription services do not depend on Telegram.
+* Telegram handlers depend on use cases.
+* Handlers do not inject repositories.
+* Telegram infrastructure does not call JPA directly.
+* QR and VLESS logic are reused.
+* No Subscription token storage added.
+* No raw URI storage added.
+* No Payment logic in Telegram handlers.
+* No XUI client creation in Telegram handlers.
+* No field injection.
+* No service locator.
+* No direct Telegram API calls from domain/application business handlers if a port exists.
+
+Extend ArchUnit tests.
+
+---
+
+# 64. Documentation
+
+Create:
+
+docs/telegram/telegram-bot-architecture.md
+
+Document:
+
+* inbound update flow;
+* outbound client;
+* application models;
+* handlers;
+* response plans;
+* idempotency;
+* transactions;
+* retries;
+* exactly-once limitations;
+* long polling or webhook choice.
+
+Create:
+
+docs/telegram/telegram-security.md
+
+Document:
+
+* Bot token;
+* callback signing;
+* private-chat requirement;
+* Telegram user identity;
+* ownership;
+* token/URI redaction;
+* QR handling;
+* replay protection;
+* uncertain send behavior.
+
+Create:
+
+docs/telegram/telegram-subscription-delivery.md
+
+Document:
+
+* `/start`;
+* main menu;
+* Subscription list;
+* config text;
+* config QR;
+* token rotation;
+* Subscription link;
+* Subscription QR;
+* raw-token limitation;
+* UX flow.
+
+Create:
+
+docs/telegram/telegram-local-development.md
+
+Document:
+
+* create Bot through BotFather;
+* local environment variables;
+* long-polling startup;
+* how to disable Bot;
+* mock-server tests;
+* safe test account use;
+* no production tokens.
+
+Include Mermaid diagrams for:
+
+* update processing;
+* duplicate update;
+* `/start`;
+* list Subscriptions;
+* config delivery;
+* token rotation confirmation;
+* Subscription QR delivery;
+* Telegram failure/retry.
+
+Use fake credentials only.
+
+---
+
+# 65. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/telegram/
+TelegramProcessedUpdate.java
+TelegramUpdateProcessingStatus.java
+TelegramSensitiveAction.java
+TelegramSensitiveActionType.java
+TelegramSensitiveActionStatus.java
+
+src/main/java/com/parazit/panel/domain/telegram/repository/
+TelegramProcessedUpdateRepository.java
+TelegramSensitiveActionRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/telegram/
+TelegramBotClient.java
+
+src/main/java/com/parazit/panel/application/port/in/telegram/
+ProcessTelegramUpdateUseCase.java
+
+src/main/java/com/parazit/panel/application/telegram/model/
+TelegramUpdate.java
+TelegramUpdateType.java
+TelegramActor.java
+TelegramChat.java
+TelegramChatType.java
+TelegramMessage.java
+TelegramCallbackQuery.java
+TelegramInteractionContext.java
+TelegramCommand.java
+TelegramCallbackAction.java
+TelegramResponsePlan.java
+TelegramResponseAction.java
+TelegramInlineKeyboard.java
+TelegramInlineButton.java
+
+src/main/java/com/parazit/panel/application/telegram/command/
+SendTelegramMessageCommand.java
+SendTelegramPhotoCommand.java
+EditTelegramMessageCommand.java
+AnswerTelegramCallbackCommand.java
+GetTelegramUpdatesCommand.java
+
+src/main/java/com/parazit/panel/application/telegram/result/
+TelegramSendResult.java
+TelegramUpdatesResult.java
+
+src/main/java/com/parazit/panel/application/telegram/
+TelegramUpdateProcessor.java
+TelegramCommandParser.java
+TelegramCommandRouter.java
+TelegramCallbackDataCodec.java
+TelegramCallbackSigner.java
+TelegramResponseExecutor.java
+TelegramFailureClassifier.java
+TelegramMessageFormatter.java
+TelegramHtmlEscaper.java
+TelegramMessageCatalog.java
+RegisterTelegramActorService.java
+ClaimTelegramUpdateTransaction.java
+CompleteTelegramUpdateTransaction.java
+FailTelegramUpdateTransaction.java
+
+src/main/java/com/parazit/panel/application/telegram/handler/
+StartTelegramCommandHandler.java
+MainMenuTelegramCommandHandler.java
+MySubscriptionsTelegramCommandHandler.java
+HelpTelegramCommandHandler.java
+UnknownTelegramCommandHandler.java
+TelegramCallbackHandler.java
+ViewSubscriptionCallbackHandler.java
+ShowConfigCallbackHandler.java
+ShowConfigQrCallbackHandler.java
+RequestSubscriptionLinkCallbackHandler.java
+ConfirmSubscriptionTokenRotationCallbackHandler.java
+
+src/main/java/com/parazit/panel/infrastructure/telegram/
+TelegramBotApiClient.java
+TelegramLongPollingWorker.java
+TelegramApiRequestMapper.java
+TelegramApiResponseMapper.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/telegram/
+SpringDataTelegramProcessedUpdateRepository.java
+TelegramProcessedUpdateRepositoryAdapter.java
+SpringDataTelegramSensitiveActionRepository.java
+TelegramSensitiveActionRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/config/properties/
+TelegramBotProperties.java
+
+src/main/resources/db/migration/
+V15__create_telegram_processed_updates.sql
+or actual next migration
+
+src/test/java/com/parazit/panel/application/telegram/
+TelegramCommandParserTest.java
+TelegramCallbackDataCodecTest.java
+TelegramUpdateProcessorTest.java
+TelegramResponseExecutorTest.java
+TelegramFailureClassifierTest.java
+
+src/test/java/com/parazit/panel/application/telegram/handler/
+StartTelegramCommandHandlerTest.java
+MySubscriptionsTelegramCommandHandlerTest.java
+ShowConfigCallbackHandlerTest.java
+ShowConfigQrCallbackHandlerTest.java
+ConfirmSubscriptionTokenRotationCallbackHandlerTest.java
+
+src/test/java/com/parazit/panel/infrastructure/telegram/
+TelegramBotApiClientTest.java
+TelegramLongPollingWorkerTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/telegram/
+TelegramProcessedUpdateRepositoryIntegrationTest.java
+TelegramSensitiveActionRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/telegram/
+TelegramStartFlowIntegrationTest.java
+TelegramSubscriptionDeliveryIntegrationTest.java
+TelegramDuplicateUpdateIntegrationTest.java
+TelegramTokenRotationIntegrationTest.java
+ConcurrentTelegramUpdateProcessingIntegrationTest.java
+
+docs/telegram/
+telegram-bot-architecture.md
+telegram-security.md
+telegram-subscription-delivery.md
+telegram-local-development.md
+
+Adapt names, packages, and migration versions to the existing project.
+
+---
+
+# 66. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Telegram disabled startup passes;
+* Telegram property tests pass;
+* command parser tests pass;
+* callback-signature tests pass;
+* update-idempotency tests pass;
+* Telegram client mock tests pass;
+* Subscription delivery handler tests pass;
+* QR delivery tests pass;
+* token-rotation replay tests pass;
+* integration tests pass;
+* concurrency tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* application starts;
+* duplicate update sends no duplicate response;
+* repeated confirmation rotates token once;
+* private-chat policy enforced;
+* wrong User cannot access Subscription;
+* token never stored;
+* token never logged;
+* VLESS URI never stored;
+* QR bytes never stored;
+* Bot token never logged;
+* no Payment workflow was added;
+* no Telegram purchase workflow was added;
+* no tests are disabled.
+
+---
+
+# 67. Optional manual verification
+
+Use only a test Bot and test User.
+
+1. Create a Bot using BotFather.
+2. Configure local environment variables.
+3. Start application with long polling.
+4. Send `/start`.
+5. Verify User registration.
+6. Open My Subscriptions.
+7. Select an ACTIVE Subscription.
+8. Request VLESS text.
+9. Import the config in a test VPN client.
+10. Request VLESS QR.
+11. Scan and import it.
+12. Request Subscription link.
+13. Confirm token rotation.
+14. Verify:
+
+    * old Subscription URL fails;
+    * new URL works.
+15. Request Subscription QR.
+16. Scan it.
+17. Replay the old Telegram update using a test fixture.
+18. Verify no duplicate rotation or message.
+19. Test from a group chat.
+20. Verify no credentials are delivered.
+21. Block the Bot and test non-retryable handling.
+22. Inspect logs and database:
+
+    * no Bot token;
+    * no Subscription token;
+    * no Subscription URL;
+    * no VLESS URI;
+    * no QR bytes.
+
+Do not use production users, Bot tokens, inbounds, or Subscriptions.
+
+---
+
+# 68. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Telegram library/client decision
+3. Update-delivery decision
+4. User identity model
+5. Update idempotency design
+6. Long-polling offset strategy
+7. Command-routing design
+8. Callback signing design
+9. Sensitive-action replay design
+10. Subscription list UX
+11. VLESS delivery flow
+12. Subscription token-rotation flow
+13. QR delivery flow
+14. Telegram retry and uncertainty strategy
+15. Transaction boundaries
+16. Logging and redaction strategy
+17. Planned files to create
+18. Planned files to modify
+19. Dependency, security, and operational risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Dependency changes
+5. Telegram configuration
+6. Update receiver behavior
+7. Long-polling or webhook behavior
+8. Update idempotency
+9. Polling offset behavior
+10. User registration behavior
+11. Command routing
+12. Callback signing
+13. Private-chat enforcement
+14. Subscription listing
+15. Subscription details
+16. VLESS text delivery
+17. VLESS QR delivery
+18. Token-rotation confirmation
+19. Subscription URL delivery
+20. Subscription QR delivery
+21. Sensitive-action replay protection
+22. Telegram retry behavior
+23. Uncertain-send behavior
+24. Transaction boundaries
+25. Security and logging
+26. Unit-test results
+27. Telegram-client test results
+28. Repository-test results
+29. Integration-test results
+30. Concurrency-test results
+31. Flyway and Hibernate results
+32. Build result
+33. Commands executed
+34. Remaining issues
+35. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(telegram): add bot foundation and subscription delivery
+
+Stop after completing Task 35.
+
+Do not begin Task 36.
+

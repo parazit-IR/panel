@@ -1,0 +1,2811 @@
+You are a senior Java 21, Spring Boot, Telegram Bot API, payment-workflow, idempotency, and distributed-systems engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 36 — Telegram Plan Purchase and Payment Flow
+
+## Goal
+
+Extend the Telegram Bot implemented in Task 35 so a user can purchase a VPN Plan and start the existing Payment workflows entirely from a private Telegram chat.
+
+After this task, the Telegram Bot must be able to:
+
+* show the active Plan catalog;
+* show Plan details;
+* let the user select a Plan;
+* create or reuse a PlanSelection;
+* create or reuse an Order;
+* create a Payment for the selected payment method;
+* support Zarinpal payment initiation;
+* show the trusted Zarinpal payment URL using a Telegram URL button;
+* support manual card-to-card payment instruction creation;
+* show the unique payable amount and masked destination card;
+* show payment expiry and current status;
+* let the user refresh payment status;
+* let the user cancel an eligible unpaid Payment;
+* guide the user to the receipt-upload flow without implementing the actual Telegram receipt upload yet;
+* prevent duplicate Orders, Payments, gateway requests, and manual instructions when Telegram updates or callbacks are replayed;
+* preserve all Payment, Order, Subscription, and provisioning invariants;
+* keep all payment decisions in existing application use cases;
+* avoid placing provider secrets or sensitive payment data in callback payloads or logs.
+
+Do not implement:
+
+* receipt photo/document upload through Telegram;
+* operator receipt review through Telegram;
+* admin Telegram commands;
+* refund processing;
+* chargeback handling;
+* automatic bank transaction matching;
+* OCR;
+* renewal purchase;
+* traffic add-on purchase;
+* subscription expiry reminders;
+* payment reminders;
+* scheduled jobs;
+* campaign messaging;
+* deployment;
+* new payment providers;
+* direct VPN provisioning from Telegram handlers.
+
+Stop after completing Task 36.
+
+Do not begin Task 37.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before making changes.
+* Preserve all working behavior from Tasks 1–35.
+* Reuse existing use cases and domain logic for:
+
+  * active Plan catalog;
+  * Plan details;
+  * Plan selection;
+  * Order creation;
+  * Payment creation;
+  * Payment strategy selection;
+  * Zarinpal initialization;
+  * Zarinpal callback and verification;
+  * manual card-payment instruction creation;
+  * Payment status;
+  * Order status;
+  * Telegram update processing;
+  * callback signing;
+  * sensitive-action replay protection;
+  * localized Telegram messages;
+  * Telegram response plans;
+  * traceId;
+  * logging;
+  * SystemClockPort;
+  * PostgreSQL Testcontainers.
+* Use Java 21.
+* Use the existing Spring Boot and build-tool versions.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into Telegram handlers or application services.
+* Telegram handlers must call existing application use cases.
+* Do not duplicate Payment business rules in Telegram code.
+* Do not approve Payments in Telegram handlers.
+* Do not mark an Order PAID in Telegram handlers.
+* Do not invoke 3x-ui provisioning directly.
+* Do not trust Plan price, Payment amount, Order amount, card number, gateway URL, User ID, Payment ID, or Order ID from callback text without reloading trusted state.
+* Do not include Zarinpal authority in callback data.
+* Do not include manual payable amount in callback data.
+* Do not include card number in callback data.
+* Do not log gateway URLs.
+* Do not log Zarinpal authority.
+* Do not log merchant credentials.
+* Do not log full card numbers.
+* Do not log manual payment instructions containing sensitive details.
+* Credentials and payment instructions must only be delivered in private chats.
+* Do not begin Task 37.
+
+---
+
+# 2. Verify current external contracts
+
+Before implementation, verify the current official behavior of:
+
+## Telegram Bot API
+
+* URL buttons;
+* callback queries;
+* callback-data size limit;
+* message editing;
+* link previews;
+* inline keyboard replacement;
+* message-length limit;
+* photo/document update structure for the future Task 37;
+* retry-after behavior.
+
+## Zarinpal
+
+Reuse the contract verified in Task 28.
+
+Confirm:
+
+* payment URL format;
+* callback behavior;
+* request and verification statuses;
+* amount units;
+* expiry assumptions;
+* URL safety.
+
+Use official provider documentation.
+
+Do not redesign the Zarinpal integration unless a correctness defect is found.
+
+Record:
+
+* Telegram Bot API version/date consulted;
+* Zarinpal documentation date consulted;
+* any contract changes affecting existing code.
+
+---
+
+# 3. Current-state assessment
+
+Inspect and report:
+
+* active Plan catalog use cases;
+* Plan detail result model;
+* PlanSelection lifecycle and TTL;
+* Order creation flow;
+* Order idempotency;
+* Payment creation use case;
+* Payment methods;
+* Payment statuses;
+* Payment expiry;
+* Zarinpal initialization use case;
+* manual card-payment instruction use case;
+* Payment retrieval and listing;
+* cancellation support;
+* Telegram command handlers;
+* Telegram callback codec and signing;
+* Telegram sensitive-action records;
+* Telegram processed-update idempotency;
+* existing localization catalog;
+* Telegram message editing support;
+* current internal API-only assumptions in payment use cases;
+* whether any use case requires internal HTTP DTOs rather than application commands;
+* migration history;
+* test fixtures.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Purchase-flow design
+3. Plan catalog Telegram UX
+4. Plan-selection strategy
+5. Order creation/reuse strategy
+6. Payment creation/reuse strategy
+7. Payment-method selection design
+8. Zarinpal Telegram flow
+9. Manual card-payment Telegram flow
+10. Payment-status refresh design
+11. Cancellation design
+12. Callback and sensitive-action replay protection
+13. Transaction-boundary design
+14. Security and redaction design
+15. Planned files to create
+16. Planned files to modify
+17. Migration and compatibility risks
+
+---
+
+# 4. Telegram purchase commands
+
+Extend:
+
+TelegramCommand
+
+Add:
+
+PLANS
+
+BUY
+
+PAYMENTS
+
+Supported text commands:
+
+/plans
+
+/buy
+
+/payments
+
+Optional aliases:
+
+/shop
+
+/my_payments
+
+Rules:
+
+* `/plans` shows active Plans.
+* `/buy` shows active Plans.
+* `/payments` shows the user’s recent Payments or current unpaid Payment.
+* `/start` and the main menu should include a purchase entry.
+* Commands remain private-chat only for sensitive continuation.
+* No amount or Plan ID is accepted from command arguments.
+* Unknown arguments are ignored or rejected safely.
+
+---
+
+# 5. Main menu update
+
+Update the Telegram main menu.
+
+Buttons:
+
+🛒 Buy VPN
+
+📦 My subscriptions
+
+💳 My payments
+
+ℹ️ Help
+
+Do not include admin functions.
+
+Create callback actions:
+
+SHOW_PLAN_CATALOG
+
+VIEW_PLAN
+
+SELECT_PLAN
+
+CONFIRM_PLAN_SELECTION
+
+CHOOSE_PAYMENT_METHOD
+
+CREATE_ZARINPAL_PAYMENT
+
+CREATE_MANUAL_PAYMENT
+
+VIEW_PAYMENT
+
+REFRESH_PAYMENT_STATUS
+
+CANCEL_PAYMENT_REQUEST
+
+CONFIRM_CANCEL_PAYMENT
+
+BACK_TO_PLAN_CATALOG
+
+BACK_TO_PAYMENT_METHODS
+
+BACK_TO_MAIN
+
+All callback data must remain:
+
+* signed;
+* time-bounded;
+* free of secrets;
+* ownership-validated after decoding.
+
+---
+
+# 6. Active Plan catalog Telegram flow
+
+Create:
+
+TelegramPlanCatalogHandler
+
+Behavior:
+
+1. Resolve User and language.
+2. Call the active Plan catalog use case.
+3. Display only ACTIVE Plans.
+4. Sort according to existing catalog ordering.
+5. Show bounded pages.
+6. Use one button per Plan.
+7. Show a safe empty-catalog message if none are available.
+
+Suggested button label:
+
+`30 GB — 30 days — 500,000 Toman`
+
+or localized equivalent.
+
+Requirements:
+
+* Price comes from trusted Plan result.
+* Traffic formatting uses trusted Plan data.
+* Duration comes from trusted Plan data.
+* Unlimited Plans are labeled explicitly.
+* Do not include archived/inactive Plans.
+* Do not put price in callback data.
+* Callback contains only signed Plan reference and page/navigation metadata.
+* Revalidate Plan status when selected.
+
+Recommended page size:
+
+5
+
+---
+
+# 7. Plan details Telegram flow
+
+Create:
+
+TelegramPlanDetailsHandler
+
+Display:
+
+* Plan name;
+* description;
+* price;
+* duration;
+* traffic limit or unlimited;
+* maximum devices if applicable;
+* Plan type.
+
+Buttons:
+
+✅ Select this Plan
+
+⬅️ Back
+
+Requirements:
+
+* Plan must still be ACTIVE.
+* Escape Plan name and description.
+* Bound description length.
+* Do not trust values from previous message.
+* Reload Plan through catalog/application use case.
+* If Plan becomes inactive:
+
+  * show unavailable message;
+  * return to catalog.
+
+---
+
+# 8. Plan selection confirmation
+
+Do not immediately create purchase state from the first Plan button.
+
+Flow:
+
+1. User selects Plan.
+2. Show Plan details.
+3. User presses Select.
+4. Show confirmation summary.
+5. User confirms.
+6. Call existing PlanSelection use case.
+
+Create sensitive action if needed:
+
+TelegramSensitiveActionType:
+
+CONFIRM_PLAN_SELECTION
+
+Fields should reference:
+
+* Telegram user ID;
+* Plan ID;
+* expiry;
+* action ID.
+
+Do not store:
+
+* price copied from Telegram;
+* callback text;
+* payment method;
+* secrets.
+
+At confirmation:
+
+* reload active Plan;
+* call PlanSelection use case;
+* same Plan selection returns idempotently;
+* replacement follows Task 19 rules;
+* show selected snapshot summary.
+
+---
+
+# 9. Purchase session model
+
+The purchase flow spans several callbacks.
+
+Create a server-side purchase session rather than putting all state in callback data.
+
+Create:
+
+TelegramPurchaseSession
+
+Suggested package:
+
+com.parazit.panel.domain.telegram.purchase
+
+Fields:
+
+UUID id
+
+long telegramUserId
+
+UUID userId
+
+UUID planId
+
+UUID planSelectionId
+
+UUID orderId
+
+UUID paymentId
+
+TelegramPurchaseSessionStatus status
+
+PaymentMethod selectedPaymentMethod
+
+Instant expiresAt
+
+Instant completedAt
+
+Instant cancelledAt
+
+String failureCode
+
+String failureMessage
+
+Instant createdAt
+
+Instant updatedAt
+
+Statuses:
+
+PLAN_SELECTED
+
+ORDER_CREATED
+
+AWAITING_PAYMENT_METHOD
+
+PAYMENT_CREATED
+
+PAYMENT_INITIALIZED
+
+WAITING_FOR_PAYMENT
+
+WAITING_FOR_REVIEW
+
+PAYMENT_APPROVED
+
+COMPLETED
+
+CANCELLED
+
+EXPIRED
+
+FAILED
+
+Rules:
+
+* One active purchase session per User.
+* Session is an orchestration convenience only.
+* Source of truth remains PlanSelection, Order, and Payment.
+* Session must never override domain status.
+* No amount fields required unless a trusted display snapshot is justified.
+* No provider authority.
+* No card number.
+* No payment URL.
+* No receipt bytes.
+* No raw tokens.
+* Session expiry bounded.
+* Terminal sessions preserved for audit.
+
+---
+
+# 10. Purchase session repository
+
+Create:
+
+TelegramPurchaseSessionRepository
+
+Methods:
+
+Optional<TelegramPurchaseSession> findActiveByUserId(UUID userId)
+
+Optional<TelegramPurchaseSession> findByIdAndUserId(
+UUID sessionId,
+UUID userId
+)
+
+List<TelegramPurchaseSession> findRecentByUserId(
+UUID userId,
+int limit
+)
+
+boolean existsActiveByUserId(UUID userId)
+
+Requirements:
+
+* no null returns;
+* no Spring Data leakage;
+* unique active session per User through database constraint;
+* concurrency-safe creation.
+
+---
+
+# 11. Purchase session properties
+
+Create:
+
+TelegramPurchaseProperties
+
+Prefix:
+
+app.telegram.purchase
+
+Fields:
+
+Duration sessionTtl
+
+int planPageSize
+
+int paymentHistoryLimit
+
+boolean allowZarinpal
+
+boolean allowManualCardPayment
+
+boolean requirePlanConfirmation
+
+boolean requirePaymentMethodConfirmation
+
+Duration sensitiveActionTtl
+
+Validation:
+
+* positive TTL;
+* bounded page/history sizes;
+* at least one payment method enabled when purchase enabled;
+* feature flags must also respect provider-level enabled properties.
+
+Update `.env.example`.
+
+Example:
+
+TELEGRAM_PURCHASE_SESSION_TTL=PT30M
+
+TELEGRAM_PURCHASE_PLAN_PAGE_SIZE=5
+
+TELEGRAM_PURCHASE_PAYMENT_HISTORY_LIMIT=10
+
+TELEGRAM_PURCHASE_ALLOW_ZARINPAL=true
+
+TELEGRAM_PURCHASE_ALLOW_MANUAL_CARD_PAYMENT=true
+
+TELEGRAM_PURCHASE_REQUIRE_PLAN_CONFIRMATION=true
+
+TELEGRAM_PURCHASE_REQUIRE_PAYMENT_METHOD_CONFIRMATION=true
+
+---
+
+# 12. Purchase session migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V16__create_telegram_purchase_sessions.sql
+
+Adjust version to the actual migration history.
+
+Create table:
+
+telegram_purchase_sessions
+
+Columns:
+
+id UUID primary key
+
+telegram_user_id BIGINT not null
+
+user_id UUID not null
+
+plan_id UUID not null
+
+plan_selection_id UUID null
+
+order_id UUID null
+
+payment_id UUID null
+
+status VARCHAR(40) not null
+
+selected_payment_method VARCHAR(40) null
+
+expires_at TIMESTAMPTZ not null
+
+completed_at TIMESTAMPTZ null
+
+cancelled_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* foreign keys to User, Plan, PlanSelection, Order, and Payment;
+* valid status;
+* expiry after creation;
+* completed status requires completed_at;
+* cancelled status requires cancelled_at;
+* payment method valid when present.
+
+Indexes:
+
+telegram_user_id
+
+user_id
+
+status
+
+expires_at
+
+plan_id
+
+order_id
+
+payment_id
+
+Create a PostgreSQL partial unique index:
+
+unique active session per user
+
+where status is in active session statuses.
+
+Do not edit old migrations.
+
+---
+
+# 13. Session lifecycle reconciliation
+
+Purchase session status must be reconciled from trusted domain state.
+
+Examples:
+
+* Plan selection missing/expired:
+
+  * session EXPIRED or FAILED.
+* Order CANCELLED:
+
+  * session CANCELLED.
+* Payment APPROVED:
+
+  * session PAYMENT_APPROVED or COMPLETED.
+* Payment WAITING_FOR_REVIEW:
+
+  * session WAITING_FOR_REVIEW.
+* Payment WAITING_FOR_PAYMENT:
+
+  * session WAITING_FOR_PAYMENT.
+* Order COMPLETED:
+
+  * session COMPLETED.
+
+Create:
+
+TelegramPurchaseSessionReconciler
+
+Requirements:
+
+* reads trusted domain state;
+* never changes Payment/Order to match session;
+* updates session only;
+* called before showing status or continuing callbacks;
+* detects inconsistent ownership and fails safely.
+
+---
+
+# 14. Start purchase use case
+
+Create:
+
+StartTelegramPurchaseUseCase
+
+Command:
+
+long telegramUserId
+
+UUID planId
+
+UUID actionId or requestId
+
+Behavior:
+
+1. Resolve User.
+2. Load active Plan.
+3. Create or replace PlanSelection according to Task 19.
+4. Find existing active purchase session.
+5. If existing session uses the same active selection and no terminal Payment:
+
+   * return idempotently.
+6. If a conflicting active session exists:
+
+   * cancel/expire it according to explicit policy;
+   * do not cancel an APPROVED Payment.
+7. Create session in AWAITING_PAYMENT_METHOD.
+8. Return trusted summary.
+
+Do not create Payment yet unless the existing Order workflow requires it.
+
+---
+
+# 15. Order creation strategy
+
+Inspect Task 27 Order creation.
+
+Create or reuse:
+
+CreateOrderUseCase
+
+Telegram purchase must not create Order through controllers.
+
+Recommended behavior:
+
+* Order is created after Plan selection confirmation and before payment-method selection; or
+* Order is created when payment method is confirmed.
+
+Preferred:
+
+Create Order after Plan selection confirmation so both Payment methods share the same Order.
+
+Requirements:
+
+* one active unpaid Order per PlanSelection;
+* requestId idempotency;
+* Order amount from PlanSelection snapshot;
+* User ownership validated;
+* same active purchase replay returns existing Order;
+* concurrent confirmation creates one Order;
+* Order starts PAYMENT_PENDING;
+* PlanSelection is not consumed until Order policy requires it;
+* do not mark paid.
+
+If no reusable application use case exists, create one in the Order application layer, not Telegram.
+
+---
+
+# 16. Order idempotency key
+
+Use a deterministic application request ID.
+
+Recommended:
+
+purchase session ID
+
+or:
+
+sensitive action ID
+
+CreateOrderCommand should include:
+
+UUID orderRequestId
+
+UUID planSelectionId
+
+long telegramUserId or resolved User identity
+
+Do not use Telegram update ID alone because multiple updates may continue the same purchase.
+
+Database uniqueness should protect orderRequestId or PlanSelection relationship according to existing design.
+
+---
+
+# 17. Payment-method selection
+
+After Order creation, show available methods.
+
+Buttons:
+
+🌐 Online payment — Zarinpal
+
+💳 Card-to-card transfer
+
+⬅️ Back
+
+Display only methods that are:
+
+* enabled in Telegram purchase properties;
+* enabled in provider properties;
+* supported by PaymentProcessor registry.
+
+Do not advertise a disabled provider.
+
+If only one method is available:
+
+* still show explicit confirmation if configured;
+* do not silently initiate a financial action.
+
+Callback carries:
+
+* signed purchase session ID;
+* selected PaymentMethod;
+* sensitive action ID;
+* expiry.
+
+Do not carry amount.
+
+---
+
+# 18. Payment creation use case
+
+Reuse or create:
+
+CreatePaymentUseCase
+
+Command fields:
+
+UUID paymentRequestId
+
+long telegramUserId
+
+UUID orderId
+
+PaymentMethod method
+
+Behavior:
+
+* load trusted User and Order;
+* verify ownership;
+* verify Order PAYMENT_PENDING;
+* derive amount and currency from Order;
+* create provider-specific Payment;
+* same request ID returns existing Payment;
+* same session/method replay returns existing active Payment;
+* conflict if another method already has an APPROVED Payment;
+* allow replacement of an unpaid method only through explicit policy;
+* no provider HTTP call here;
+* no approval;
+* no provisioning.
+
+Purchase session should store Payment ID after creation.
+
+---
+
+# 19. Switching payment methods
+
+Define a clear policy.
+
+Recommended Task 36 policy:
+
+* Before any provider initialization/instruction:
+
+  * method may be changed by cancelling the unpaid Payment.
+* After Zarinpal authority exists:
+
+  * do not silently switch;
+  * require explicit cancel and create another Payment.
+* After manual instruction is ACTIVE:
+
+  * require explicit cancel of instruction/Payment before switching.
+* After receipt submitted or review pending:
+
+  * switching is forbidden.
+* After Payment APPROVED:
+
+  * switching is forbidden.
+
+Telegram UX should show:
+
+“Cancel current unpaid payment to choose another method.”
+
+Do not create multiple uncontrolled Payments for one Order.
+
+---
+
+# 20. Zarinpal initiation Telegram flow
+
+Create:
+
+TelegramZarinpalPaymentHandler
+
+Flow:
+
+1. Validate private chat.
+2. Resolve User and purchase session.
+3. Reconcile session.
+4. Validate Order PAYMENT_PENDING.
+5. Create or load ZARINPAL Payment.
+6. Call existing Zarinpal initialization use case.
+7. Receive trusted redirect URL.
+8. Mark purchase session PAYMENT_INITIALIZED/WAITING_FOR_PAYMENT.
+9. Send a Telegram message with:
+
+   * Plan;
+   * amount;
+   * expiry;
+   * payment status.
+10. Add Telegram URL button:
+
+“Pay with Zarinpal”
+
+11. Add callback buttons:
+
+* Refresh status;
+* Cancel payment;
+* Back to payments.
+
+Requirements:
+
+* URL comes only from Zarinpal application result.
+* Do not reconstruct URL from authority in Telegram.
+* Do not put URL in callback data.
+* Disable link preview if URL is also included in text.
+* Prefer URL button rather than visible raw URL.
+* Initialization replay must not create a duplicate gateway request.
+* Telegram duplicate update must not create another Payment or authority.
+
+---
+
+# 21. Zarinpal callback relationship
+
+Zarinpal callback remains the public web callback from Task 28.
+
+Telegram must not act as the gateway callback.
+
+Behavior:
+
+* User pays in browser.
+* Gateway callback verifies through existing backend flow.
+* Telegram user presses Refresh Status.
+* Bot reads Payment/Order status.
+* If APPROVED:
+
+  * show success;
+  * explain provisioning may be in progress;
+  * later show Subscription when available.
+* If still waiting:
+
+  * show pending.
+* If cancelled/failed/expired:
+
+  * show safe state and allowed next action.
+
+Do not trust a Telegram message claiming payment success.
+
+---
+
+# 22. Manual card-payment initiation Telegram flow
+
+Create:
+
+TelegramManualPaymentHandler
+
+Flow:
+
+1. Validate private chat.
+2. Resolve User and purchase session.
+3. Reconcile session.
+4. Validate Order PAYMENT_PENDING.
+5. Create or load CARD_TO_CARD_MANUAL Payment.
+6. Call existing manual instruction initialization use case.
+7. Receive:
+
+   * base amount;
+   * unique payable amount;
+   * masked destination card;
+   * cardholder/display name if safely configured;
+   * expiry.
+8. Mark session WAITING_FOR_PAYMENT.
+9. Send localized instructions.
+
+Display:
+
+* exact unique payable amount;
+* currency;
+* masked destination card;
+* expiry;
+* warning to send the exact amount;
+* instruction that receipt upload will be handled in the next flow.
+
+Buttons:
+
+📎 Upload receipt
+
+🔄 Refresh status
+
+❌ Cancel payment
+
+⬅️ Back
+
+Task 36 must not process the Upload receipt button fully.
+
+It may return:
+
+“Receipt upload will be available in the next step.”
+
+or register the callback action for Task 37.
+
+Do not accept receipt bytes yet.
+
+---
+
+# 23. Card-number display policy
+
+Use only the safe display value returned from the manual-payment application service.
+
+Requirements:
+
+* never query configuration directly from Telegram handler;
+* never display plaintext card number unless the established Task 29 policy explicitly permits user delivery;
+* if full destination card number is required for transfer:
+
+  * retrieve it through a dedicated secure delivery result;
+  * never log it;
+  * never store it in Telegram session;
+  * never put it in callback data;
+  * send only in private chat;
+  * request/response logging must be redacted.
+* Prefer grouping digits for readability.
+* Add a copy-friendly code block only if escaping is safe.
+
+Clarify the existing Task 29 card-secrecy design before implementation.
+
+---
+
+# 24. Exact payable amount formatting
+
+Create or reuse:
+
+MoneyFormatter
+
+Requirements:
+
+* integer arithmetic only;
+* no floating point;
+* canonical IRT display;
+* locale-aware grouping;
+* no conversion in Telegram layer;
+* exact amount from trusted Payment/instruction result;
+* suffix must remain visible;
+* no rounding;
+* no translation of digits that breaks copying unless explicitly supported.
+
+Example:
+
+`500,137 تومان`
+
+Do not display only the base Plan amount for manual payment.
+
+---
+
+# 25. Payment status use case
+
+Create or reuse:
+
+GetUserPaymentStatusUseCase
+
+Input:
+
+long telegramUserId
+
+UUID paymentId
+
+Result should include:
+
+UUID paymentId
+
+UUID orderId
+
+PaymentMethod method
+
+PaymentStatus paymentStatus
+
+OrderStatus orderStatus
+
+long payableAmount
+
+CurrencyCode currency
+
+Instant expiresAt
+
+boolean cancellable
+
+boolean receiptUploadAllowed
+
+boolean reviewPending
+
+boolean approved
+
+boolean provisioningInProgress
+
+boolean completed
+
+Optional provider-safe metadata:
+
+String maskedReference
+
+Requirements:
+
+* ownership validated;
+* no authority;
+* no merchant ID;
+* no full card number;
+* no token;
+* no raw gateway response;
+* no JPA entity.
+
+---
+
+# 26. Refresh payment status handler
+
+Create:
+
+RefreshPaymentStatusCallbackHandler
+
+Behavior:
+
+1. Resolve signed session/Payment reference.
+2. Verify User ownership.
+3. Reconcile purchase session.
+4. Call status use case.
+5. Update or send payment-status message.
+6. Present actions based on current state.
+
+State UX:
+
+CREATED / WAITING_FOR_PAYMENT:
+
+* pending;
+* payment button or instruction;
+* refresh;
+* cancel.
+
+WAITING_FOR_REVIEW:
+
+* receipt received;
+* awaiting operator review;
+* refresh;
+* no method switch.
+
+APPROVED / Order PAID:
+
+* payment successful;
+* provisioning pending;
+* refresh.
+
+Order PROVISIONING:
+
+* setup in progress.
+
+Order COMPLETED:
+
+* purchase completed;
+* show My Subscriptions button.
+
+FAILED / CANCELLED / EXPIRED:
+
+* show state;
+* allow returning to Plans;
+* allow a new purchase if domain rules permit.
+
+Do not call Zarinpal Verify merely because the Telegram user presses refresh unless existing reconciliation use case explicitly supports it safely.
+
+---
+
+# 27. Payment history Telegram flow
+
+Create:
+
+TelegramPaymentHistoryHandler
+
+Behavior:
+
+* call user-owned Payment list use case;
+* bounded recent history;
+* newest first;
+* show safe status, method, amount, date;
+* button to view one Payment;
+* paginate if required.
+
+Do not show:
+
+* authority;
+* full reference ID;
+* merchant data;
+* card number;
+* receipt hash;
+* review operator;
+* internal errors.
+
+Recommended limit:
+
+10 recent Payments.
+
+---
+
+# 28. Cancel payment flow
+
+Create callback actions:
+
+REQUEST_CANCEL_PAYMENT
+
+CONFIRM_CANCEL_PAYMENT
+
+CANCEL_CANCEL_PAYMENT
+
+Use a TelegramSensitiveAction:
+
+CANCEL_PAYMENT
+
+Flow:
+
+1. User requests cancellation.
+2. Bot displays impact:
+
+   * unpaid Payment will be cancelled;
+   * active manual instruction will become unavailable;
+   * existing transfer may require support if already sent.
+3. User confirms.
+4. Call existing Payment cancellation use case.
+5. Cancel associated manual instruction where domain policy requires.
+6. Update purchase session CANCELLED.
+7. Show result.
+
+Requirements:
+
+* confirmation action executes once;
+* ownership checked;
+* only cancellable Payment states;
+* APPROVED cannot be cancelled;
+* WAITING_FOR_REVIEW cannot be casually cancelled unless existing domain explicitly supports withdrawal;
+* cancellation does not delete history;
+* no refund is implied;
+* no outbox created;
+* no VPN changes.
+
+If no proper Payment cancellation use case exists, create it in Payment application layer, not Telegram.
+
+---
+
+# 29. Payment cancellation result
+
+Create:
+
+CancelPaymentResult
+
+Fields:
+
+UUID paymentId
+
+PaymentStatus paymentStatus
+
+OrderStatus orderStatus
+
+boolean paymentChanged
+
+boolean instructionChanged
+
+boolean sessionChanged
+
+Instant cancelledAt
+
+Requirements:
+
+* safe;
+* no card or gateway data;
+* idempotent replay;
+* immutable.
+
+---
+
+# 30. Payment expiry reconciliation
+
+On every purchase/payment callback:
+
+* compare trusted expiry using SystemClockPort;
+* invoke existing lazy-expiry behavior;
+* expire:
+
+  * PlanSelection;
+  * purchase session;
+  * Payment;
+  * manual instruction;
+    according to their existing domain rules.
+* do not revive expired entities;
+* do not allow old signed callback to restart the exact old Payment;
+* direct User back to current Plans.
+
+Expiry callback action TTL and business expiry are separate checks.
+
+Both must pass.
+
+---
+
+# 31. Telegram callback-data design
+
+Extend:
+
+TelegramCallbackAction
+
+Suggested callback payload references:
+
+action
+
+purchaseSessionId
+
+resource ID where necessary
+
+page
+
+config index
+
+sensitiveActionId
+
+expiry
+
+signature
+
+Do not include:
+
+* amount;
+* Plan price;
+* currency;
+* Zarinpal authority;
+* payment URL;
+* card number;
+* payable amount;
+* receipt data;
+* User ID when actor provides it;
+* Telegram Bot token.
+
+Every handler must reload the referenced domain entity and validate ownership.
+
+---
+
+# 32. Purchase-sensitive actions
+
+Extend:
+
+TelegramSensitiveActionType
+
+Add:
+
+CONFIRM_PLAN_SELECTION
+
+CONFIRM_PAYMENT_METHOD
+
+CANCEL_PAYMENT
+
+Optional:
+
+RESTART_PURCHASE
+
+Rules:
+
+* action ID unique;
+* bound to Telegram user;
+* bound to purchase session;
+* optional Plan/Payment reference;
+* expires;
+* completed once;
+* callback replay returns idempotently;
+* no financial secrets.
+
+If the current sensitive-action table does not support purchaseSessionId/paymentId, add a corrective migration.
+
+Do not overload resultFingerprint with sensitive content.
+
+---
+
+# 33. Duplicate update and callback behavior
+
+Verify:
+
+* repeated Plan selection update:
+
+  * one active PlanSelection;
+  * one purchase session.
+* repeated Order confirmation:
+
+  * one Order.
+* repeated payment-method callback:
+
+  * one Payment.
+* repeated Zarinpal initiation:
+
+  * one active attempt/authority according to Task 28.
+* repeated manual initiation:
+
+  * one active instruction.
+* repeated cancel confirmation:
+
+  * one cancellation.
+* repeated status refresh:
+
+  * read-only except safe reconciliation.
+
+Use:
+
+* Telegram processed update ID;
+* signed callback expiry;
+* sensitive action ID;
+* domain request IDs;
+* database unique constraints.
+
+Do not rely on Telegram update idempotency alone.
+
+---
+
+# 34. Purchase request IDs
+
+Create deterministic request IDs from server-side action/session IDs.
+
+Examples:
+
+Plan selection request ID:
+
+sensitiveActionId
+
+Order request ID:
+
+purchaseSessionId
+
+Payment request ID:
+
+UUID v5 or stored UUID generated when method action is created
+
+Zarinpal initialization request ID:
+
+stored payment action/request ID
+
+Manual instruction request ID:
+
+stored payment action/request ID
+
+Do not derive security-sensitive IDs solely by hashing public callback text.
+
+Store generated request IDs in purchase session or sensitive-action record where necessary.
+
+---
+
+# 35. Transaction boundaries
+
+## Plan confirmation
+
+Short transactions:
+
+* complete sensitive action;
+* PlanSelection use case;
+* create/reconcile purchase session.
+
+No Telegram API call inside transaction.
+
+## Order creation
+
+* short Order transaction;
+* no Telegram call.
+
+## Payment creation
+
+* short Payment transaction;
+* no gateway HTTP call.
+
+## Zarinpal initialization
+
+Use existing Task 28 phases:
+
+* claim/create attempt transaction;
+* gateway HTTP outside transaction;
+* completion transaction.
+
+Telegram sending happens after initialization completes.
+
+## Manual instruction
+
+* use existing short transaction design;
+* no Telegram call inside transaction.
+
+## Status display
+
+* short reads/reconciliation;
+* Telegram call after result built.
+
+## Cancellation
+
+* domain cancellation transaction;
+* Telegram call after commit.
+
+No Telegram network call while holding DB locks.
+
+---
+
+# 36. URL-button security
+
+For Zarinpal URL button:
+
+* URL must be HTTPS unless official sandbox behavior requires otherwise.
+* Domain must match configured/validated Zarinpal host.
+* Do not accept arbitrary provider URL.
+* Validate result before creating button.
+* Do not send raw URL in logs.
+* Do not include URL in callback data.
+* Do not build from Telegram request Host.
+* Disable link preview if displayed as text.
+* Use generic button label.
+
+Add a provider URL policy:
+
+PaymentRedirectUrlValidator
+
+or reuse existing trusted redirect model.
+
+---
+
+# 37. Telegram message catalog additions
+
+Add localized keys:
+
+buy_vpn
+
+plan_catalog_title
+
+no_active_plans
+
+plan_details
+
+plan_price
+
+plan_duration
+
+plan_traffic
+
+plan_unlimited
+
+plan_devices
+
+select_plan
+
+confirm_plan
+
+choose_payment_method
+
+pay_with_zarinpal
+
+pay_card_to_card
+
+payment_created
+
+payment_pending
+
+payment_successful
+
+payment_failed
+
+payment_cancelled
+
+payment_expired
+
+payment_waiting_review
+
+provisioning_in_progress
+
+purchase_completed
+
+open_payment_page
+
+manual_payment_title
+
+manual_exact_amount
+
+manual_destination_card
+
+manual_expiry
+
+manual_exact_amount_warning
+
+upload_receipt
+
+receipt_upload_next_step
+
+refresh_status
+
+cancel_payment
+
+confirm_cancel_payment
+
+cancel_payment_warning
+
+payment_history
+
+no_payments
+
+temporary_payment_error
+
+Requirements:
+
+* FA and EN or all currently supported languages;
+* fallback behavior;
+* HTML escaping;
+* no secrets in translation templates;
+* placeholders strongly typed or validated where practical.
+
+---
+
+# 38. Telegram message formatting
+
+Create:
+
+TelegramPurchaseMessageFormatter
+
+Responsibilities:
+
+* Plan catalog item;
+* Plan details;
+* selection confirmation;
+* payment-method menu;
+* Zarinpal payment summary;
+* manual instruction;
+* payment status;
+* cancellation warning;
+* payment history.
+
+Requirements:
+
+* use TelegramHtmlEscaper;
+* money formatter;
+* date/time formatter;
+* message-length bounds;
+* no authority;
+* no provider raw error;
+* no full card number in safe `toString`;
+* exact manual amount;
+* no credentials in logs.
+
+For manual card number:
+
+mark the generated response action as sensitive.
+
+---
+
+# 39. Response-plan sensitivity
+
+Extend:
+
+TelegramResponseAction
+
+Add:
+
+TelegramContentSensitivity
+
+Values:
+
+PUBLIC
+
+PERSONAL
+
+FINANCIAL
+
+CREDENTIAL
+
+Task 36 examples:
+
+* Plan catalog: PUBLIC
+* Payment status: PERSONAL
+* Manual instruction: FINANCIAL
+* Zarinpal URL button: FINANCIAL
+
+Requirements:
+
+* response executor does not log action body;
+* sensitive actions cannot be sent to non-private chats;
+* financial response retries use conservative uncertainty policy;
+* metrics use type only, not content.
+
+---
+
+# 40. Telegram send uncertainty for financial messages
+
+A timeout may occur after Telegram accepted:
+
+* Zarinpal payment button;
+* manual card instruction.
+
+Policy:
+
+* do not create another Payment because message delivery is uncertain;
+* mark Telegram update FAILED or UNKNOWN according to Task 35;
+* on retry, rebuild response from existing Payment/instruction;
+* do not initialize provider again unnecessarily;
+* duplicate delivery of the same instruction is acceptable;
+* duplicate creation of financial entities is not acceptable.
+
+Store only safe response fingerprint:
+
+* purchase session ID;
+* Payment ID;
+* message type;
+* instruction version.
+
+Do not store URL, authority, amount/card text, or full message body.
+
+---
+
+# 41. Manual receipt-upload placeholder
+
+Create callback action:
+
+UPLOAD_MANUAL_RECEIPT
+
+Task 36 behavior:
+
+* validate private chat;
+* verify current Payment is manual;
+* verify status allows receipt submission;
+* respond with localized placeholder:
+
+“Send your receipt as a photo or file. Receipt processing will be implemented in the next task.”
+
+Optionally create conversation state:
+
+AWAITING_RECEIPT_UPLOAD
+
+Only if it is needed for Task 37 and can be introduced cleanly.
+
+Do not download Telegram files.
+
+Do not create ManualPaymentReceipt.
+
+Do not store file IDs.
+
+Do not change Payment to WAITING_FOR_REVIEW.
+
+---
+
+# 42. Optional conversation state
+
+If required for Task 37, create:
+
+TelegramConversationState
+
+Fields:
+
+UUID id
+
+long telegramUserId
+
+long chatId
+
+TelegramConversationStep step
+
+UUID purchaseSessionId
+
+UUID paymentId
+
+Instant expiresAt
+
+Instant createdAt
+
+Instant updatedAt
+
+Steps:
+
+NONE
+
+AWAITING_RECEIPT_UPLOAD
+
+Rules:
+
+* one active state per User/chat;
+* no token;
+* no amount;
+* no card number;
+* no file data;
+* expires;
+* source of truth remains Payment;
+* Task 36 may set AWAITING_RECEIPT_UPLOAD but must not process files.
+
+Avoid creating this entity if the existing Telegram architecture already has a suitable state mechanism.
+
+---
+
+# 43. Payment and Order completion UX
+
+When status refresh finds:
+
+Payment APPROVED and Order PAID:
+
+* show payment success;
+* show provisioning is queued/in progress;
+* provide Refresh button.
+
+Order PROVISIONING:
+
+* show setup in progress.
+
+Order COMPLETED:
+
+* show purchase complete;
+* provide My Subscriptions button.
+
+Order PROVISIONING_FAILED:
+
+* show a generic support/temporary problem message;
+* do not suggest paying again;
+* do not cancel Payment;
+* do not expose XUI failure.
+
+Telegram purchase session should reconcile accordingly.
+
+---
+
+# 44. Ownership and relationship validation
+
+For every purchase action validate:
+
+* Telegram user resolves to User.
+* PlanSelection belongs to User.
+* purchase session belongs to User.
+* Order belongs to User.
+* Order belongs to PlanSelection.
+* Payment belongs to Order.
+* Payment belongs to User where modeled.
+* manual instruction belongs to Payment.
+* Zarinpal attempt belongs to Payment.
+* selected Plan matches session.
+* callback resource belongs to current actor.
+
+On mismatch:
+
+* do not repair automatically;
+* mark purchase session FAILED if appropriate;
+* return generic invalid-action message;
+* log safe IDs;
+* do not expose existence to another user.
+
+---
+
+# 45. Cancellation and PlanSelection policy
+
+Define what happens to PlanSelection when Payment is cancelled.
+
+Recommended:
+
+* preserve PlanSelection if still ACTIVE and unexpired;
+* allow choosing another Payment method or recreating Order according to Order policy;
+* do not create duplicate active selections;
+* if Order is terminal CANCELLED and cannot be reused:
+
+  * create a new Order on next confirmed purchase;
+  * selection may be reused if allowed.
+
+Document policy.
+
+Do not consume PlanSelection because an unpaid Payment was cancelled.
+
+---
+
+# 46. Payment-method capability checks
+
+Telegram handler must not use only enum values.
+
+Create or reuse:
+
+AvailablePaymentMethodsUseCase
+
+Result:
+
+PaymentMethod
+
+enabled
+
+displayOrder
+
+availabilityReason
+
+Capabilities:
+
+ONLINE_REDIRECT
+
+MANUAL_TRANSFER
+
+Requirements:
+
+* combines provider configuration and strategy registry;
+* disabled provider omitted;
+* startup duplicate strategy detection remains;
+* no Telegram-specific switch required for availability;
+* method-specific callback handlers remain explicit where needed.
+
+---
+
+# 47. Exceptions
+
+Create or reuse safe exceptions:
+
+TelegramPurchaseSessionNotFoundException
+
+TelegramPurchaseSessionExpiredException
+
+TelegramPurchaseConflictException
+
+PlanUnavailableForPurchaseException
+
+PaymentMethodUnavailableException
+
+PaymentAlreadyInitializedException where appropriate
+
+PaymentCancellationNotAllowedException
+
+InvalidPurchaseActionException
+
+Map to localized Telegram UX rather than raw HTTP errors.
+
+Internal APIs, if any, use standard error responses.
+
+Do not expose:
+
+* provider errors;
+* authority;
+* merchant ID;
+* full card number;
+* database constraint;
+* stack trace;
+* another User’s resource IDs.
+
+---
+
+# 48. Logging
+
+INFO:
+
+* Plan catalog shown;
+* Plan selected;
+* purchase session created;
+* Order created/reused;
+* payment method selected;
+* Payment created/reused;
+* Zarinpal payment initialized;
+* manual instruction initialized;
+* payment status shown;
+* cancellation requested;
+* Payment cancelled;
+* purchase completed.
+
+DEBUG:
+
+* catalog page;
+* session reconciliation;
+* idempotent replay;
+* provider availability;
+* status-to-keyboard mapping;
+* response fingerprint.
+
+WARN:
+
+* inactive Plan callback;
+* expired purchase session;
+* ownership mismatch;
+* payment-method conflict;
+* cancellation forbidden;
+* provider unavailable;
+* Telegram financial-message send uncertainty.
+
+ERROR:
+
+* inconsistent Order/Payment linkage;
+* unexpected purchase-handler failure;
+* purchase session persistence failure.
+
+Include:
+
+updateId
+
+telegramUserId
+
+purchaseSessionId
+
+planId
+
+planSelectionId
+
+orderId
+
+paymentId
+
+paymentMethod
+
+paymentStatus
+
+orderStatus
+
+callbackAction
+
+traceId
+
+Never include:
+
+Bot token
+
+callback signing secret
+
+Zarinpal merchant ID
+
+authority
+
+payment URL
+
+full card number
+
+manual instruction text
+
+receipt data
+
+raw provider response
+
+VLESS URI
+
+Subscription token
+
+---
+
+# 49. Domain unit tests — purchase session
+
+Test:
+
+* creation;
+* expiry;
+* status transitions;
+* Plan selection attachment;
+* Order attachment;
+* Payment attachment;
+* method selection;
+* waiting for payment;
+* waiting for review;
+* approved;
+* completed;
+* cancelled;
+* failed;
+* terminal behavior;
+* no amount/secret storage;
+* safe toString.
+
+---
+
+# 50. Unit tests — Plan handlers
+
+Test:
+
+* active catalog;
+* no Plans;
+* pagination;
+* correct ordering;
+* safe Plan labels;
+* unlimited Plan;
+* Plan details;
+* inactive Plan after callback;
+* confirmation;
+* duplicate confirmation;
+* session creation;
+* ownership;
+* private-chat enforcement.
+
+---
+
+# 51. Unit tests — payment-method handler
+
+Test:
+
+* both methods enabled;
+* only Zarinpal;
+* only manual;
+* none available;
+* disabled provider hidden;
+* explicit confirmation;
+* duplicate callback;
+* conflicting current Payment;
+* method switch policy.
+
+---
+
+# 52. Unit tests — Zarinpal Telegram handler
+
+Test:
+
+* creates Order and Payment through use cases;
+* initializes Zarinpal once;
+* trusted URL button;
+* URL not in callback;
+* replay uses existing initialization;
+* provider disabled;
+* Payment expired;
+* Payment already approved;
+* wrong owner;
+* Telegram send uncertainty does not create another Payment;
+* no approval;
+* no provisioning call;
+* no authority in logs.
+
+Use mocks/fakes for application ports, not real Zarinpal.
+
+---
+
+# 53. Unit tests — manual Payment handler
+
+Test:
+
+* Payment creation;
+* instruction creation;
+* exact amount display;
+* suffix visible;
+* masked/safe card display;
+* expiry;
+* instruction replay;
+* collision handling delegated;
+* provider disabled;
+* wrong method;
+* approved Payment;
+* waiting-review state;
+* no receipt creation;
+* no approval;
+* no provisioning;
+* card/amount not in logs.
+
+---
+
+# 54. Unit tests — status handler
+
+Test all relevant combinations:
+
+* Payment waiting;
+* Zarinpal initialized;
+* manual instruction active;
+* receipt submitted;
+* waiting review;
+* approved/Order paid;
+* provisioning;
+* completed;
+* provisioning failed;
+* failed;
+* cancelled;
+* expired;
+* action buttons;
+* session reconciliation;
+* ownership;
+* no provider secrets.
+
+---
+
+# 55. Unit tests — cancellation handler
+
+Test:
+
+* request warning;
+* confirmation;
+* cancel eligible Payment;
+* replay;
+* approved cannot cancel;
+* waiting review policy;
+* manual instruction cancellation;
+* Zarinpal unpaid cancellation;
+* session status;
+* no outbox;
+* no refund;
+* no VPN mutation.
+
+---
+
+# 56. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+Purchase sessions:
+
+* save/load;
+* one active session per User;
+* expiry;
+* status;
+* foreign keys;
+* Plan/selection/Order/Payment linkage;
+* concurrent creation;
+* history retention.
+
+Sensitive actions:
+
+* purchase action types;
+* complete once;
+* replay;
+* expiry;
+* session/payment relationship if added.
+
+Conversation state, if added:
+
+* one active state;
+* expiry;
+* ownership;
+* no file data.
+
+Flyway and Hibernate validation must pass.
+
+---
+
+# 57. Full Zarinpal Telegram integration scenario
+
+Use:
+
+* real PostgreSQL;
+* mock Telegram API;
+* mock Zarinpal server.
+
+Scenario:
+
+1. Receive `/start`.
+2. User opens Buy VPN.
+3. Bot lists active Plans.
+4. User selects Plan.
+5. Bot shows details.
+6. User confirms.
+7. Verify one PlanSelection.
+8. Verify one purchase session.
+9. Verify one Order.
+10. User chooses Zarinpal.
+11. Verify one Payment.
+12. Verify one Zarinpal initialization.
+13. Bot sends trusted payment URL button.
+14. Replay payment-method update.
+15. Verify:
+
+    * one Payment;
+    * one attempt/authority;
+    * no duplicate gateway request according to request idempotency.
+16. Simulate successful gateway callback and Verify.
+17. User presses Refresh.
+18. Bot shows Payment approved/provisioning.
+19. Process provisioning outbox.
+20. User refreshes.
+21. Bot shows purchase complete and My Subscriptions.
+22. Verify no Telegram handler approved Payment or called 3x-ui directly.
+
+---
+
+# 58. Full manual Telegram integration scenario
+
+Use real PostgreSQL and mock Telegram API.
+
+1. User opens Plan catalog.
+2. Selects and confirms Plan.
+3. Verify PlanSelection, session, and Order.
+4. Choose manual card payment.
+5. Verify one Payment.
+6. Verify one active instruction.
+7. Bot sends exact payable amount and safe card data.
+8. Replay callback.
+9. Verify one Payment and one instruction.
+10. Press Upload receipt.
+11. Verify placeholder/conversation state only.
+12. Verify:
+
+    * no file download;
+    * no receipt row;
+    * Payment remains WAITING_FOR_PAYMENT;
+    * no outbox;
+    * no VPN provision.
+13. Press Refresh.
+14. Verify pending status.
+15. Cancel Payment.
+16. Verify Payment/instruction/session policy.
+17. Replay cancellation.
+18. Verify idempotency.
+
+---
+
+# 59. Payment-method switching integration scenario
+
+Test:
+
+1. Start with manual Payment and active instruction.
+2. Attempt direct Zarinpal switch.
+3. Verify conflict and no second active uncontrolled Payment.
+4. Cancel manual Payment.
+5. Choose Zarinpal.
+6. Verify one new eligible Payment.
+7. Ensure old Payment/instruction history preserved.
+
+Also test reverse direction.
+
+---
+
+# 60. Duplicate update integration tests
+
+Scenario A:
+
+Two workers process the same Plan confirmation update.
+
+Verify:
+
+* one PlanSelection;
+* one purchase session;
+* one Order;
+* one Telegram response according to processed-update guarantees.
+
+Scenario B:
+
+Two method-confirmation updates for Zarinpal.
+
+Verify:
+
+* one Payment;
+* one gateway initialization;
+* bounded Telegram delivery.
+
+Scenario C:
+
+Two manual-method confirmations.
+
+Verify:
+
+* one Payment;
+* one active instruction.
+
+Scenario D:
+
+Two cancellation confirmations.
+
+Verify:
+
+* one domain cancellation.
+
+Use deterministic barriers and separate transactions.
+
+---
+
+# 61. Concurrency integration tests
+
+Required:
+
+* two simultaneous purchase starts for one User;
+* same active Plan selection;
+* different Plan selections;
+* Order creation race;
+* Payment creation race;
+* Zarinpal initiation race;
+* manual instruction race;
+* method selection race;
+* cancellation racing initialization;
+* cancellation racing approval;
+* refresh racing provider callback;
+* session expiry racing callback.
+
+Requirements:
+
+* real PostgreSQL;
+* mock providers;
+* no Thread.sleep;
+* barriers/latches;
+* executor shutdown;
+* explicit timeouts;
+* database constraints as final authority.
+
+---
+
+# 62. Telegram client/controller tests
+
+Verify generated Telegram requests:
+
+* Plan catalog keyboard;
+* Plan detail keyboard;
+* payment-method keyboard;
+* Zarinpal URL button;
+* Refresh callback;
+* Cancel callback;
+* manual instruction message;
+* payment history;
+* safe HTML;
+* private chat;
+* no link preview;
+* no callback secrets;
+* no authority/card amount in callback;
+* message size;
+* localized text.
+
+Inspect serialized mock Telegram request bodies for secret leakage.
+
+---
+
+# 63. Security tests
+
+Verify:
+
+* no purchase in group chat;
+* Telegram username cannot access another account;
+* signed callback required;
+* expired callback rejected;
+* tampered Plan ID rejected;
+* tampered Payment method rejected;
+* Plan price not accepted from callback;
+* amount not accepted from callback;
+* User ownership rechecked;
+* Order/Payment relationship rechecked;
+* Zarinpal URL trusted;
+* no open redirect;
+* authority not in callback/log;
+* full card number not logged;
+* manual amount/card not persisted in Telegram session;
+* Bot token not exposed;
+* response body logging disabled for financial messages;
+* no Payment approval through Telegram;
+* no direct 3x-ui invocation.
+
+---
+
+# 64. Architecture verification
+
+Verify:
+
+* Telegram purchase handlers depend on application use cases.
+* Telegram code does not inject repositories.
+* Telegram code does not call Spring Data.
+* Telegram code does not contain Payment status mutation logic.
+* Provider adapters remain outside Telegram.
+* Plan and Payment domain do not depend on Telegram.
+* Callback DTOs do not enter domain.
+* Purchase session is orchestration state, not financial source of truth.
+* No raw provider DTO leaks.
+* No field injection.
+* No ApplicationContext lookup.
+* No direct XUI provisioning.
+* No receipt-file processing.
+* No new payment provider.
+
+Extend ArchUnit tests.
+
+---
+
+# 65. Documentation
+
+Create:
+
+docs/telegram/telegram-purchase-flow.md
+
+Document:
+
+* Plan catalog;
+* Plan details;
+* selection confirmation;
+* purchase session;
+* Order creation;
+* method selection;
+* Zarinpal flow;
+* manual card flow;
+* refresh;
+* cancellation;
+* completion.
+
+Create:
+
+docs/telegram/telegram-purchase-idempotency.md
+
+Include matrix columns:
+
+Operation
+
+Telegram update key
+
+Sensitive action key
+
+Application request ID
+
+Database constraint
+
+Replay behavior
+
+Uncertain-send behavior
+
+Cover:
+
+* Plan selection;
+* purchase session;
+* Order creation;
+* Payment creation;
+* Zarinpal initialization;
+* manual instruction;
+* status refresh;
+* cancellation.
+
+Create:
+
+docs/telegram/telegram-payment-security.md
+
+Document:
+
+* private-chat requirement;
+* callback signing;
+* no amounts from callbacks;
+* no authority/card details in callbacks;
+* provider URL validation;
+* financial response redaction;
+* uncertain Telegram sends;
+* ownership;
+* no Telegram approval.
+
+Update:
+
+docs/telegram/telegram-bot-architecture.md
+
+docs/telegram/telegram-local-development.md
+
+Include Mermaid diagrams for:
+
+* Plan purchase;
+* Zarinpal payment;
+* manual payment;
+* status refresh;
+* cancellation;
+* duplicate update;
+* method switching;
+* payment approval followed by provisioning.
+
+Use fake payment URLs, cards, and amounts in examples.
+
+---
+
+# 66. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/telegram/purchase/
+TelegramPurchaseSession.java
+TelegramPurchaseSessionStatus.java
+
+src/main/java/com/parazit/panel/domain/telegram/purchase/repository/
+TelegramPurchaseSessionRepository.java
+
+src/main/java/com/parazit/panel/application/port/in/telegram/purchase/
+StartTelegramPurchaseUseCase.java
+GetTelegramPurchaseSessionUseCase.java
+ReconcileTelegramPurchaseSessionUseCase.java
+
+src/main/java/com/parazit/panel/application/telegram/purchase/
+StartTelegramPurchaseService.java
+TelegramPurchaseSessionReconciler.java
+TelegramPlanCatalogHandler.java
+TelegramPlanDetailsHandler.java
+TelegramPlanSelectionHandler.java
+TelegramPaymentMethodHandler.java
+TelegramZarinpalPaymentHandler.java
+TelegramManualPaymentHandler.java
+TelegramPaymentStatusHandler.java
+TelegramPaymentHistoryHandler.java
+TelegramCancelPaymentHandler.java
+TelegramPurchaseMessageFormatter.java
+
+src/main/java/com/parazit/panel/application/telegram/purchase/result/
+TelegramPurchaseResult.java
+TelegramPaymentStatusResult.java
+
+src/main/java/com/parazit/panel/application/payment/
+GetUserPaymentStatusUseCase.java
+AvailablePaymentMethodsUseCase.java
+CancelPaymentUseCase.java
+if not already present
+
+src/main/java/com/parazit/panel/application/order/
+CreateOrderUseCase.java
+if not already present
+
+src/main/java/com/parazit/panel/infrastructure/persistence/telegram/purchase/
+SpringDataTelegramPurchaseSessionRepository.java
+TelegramPurchaseSessionRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/config/properties/
+TelegramPurchaseProperties.java
+
+src/main/resources/db/migration/
+V16__create_telegram_purchase_sessions.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/telegram/purchase/
+TelegramPurchaseSessionTest.java
+
+src/test/java/com/parazit/panel/application/telegram/purchase/
+TelegramPlanCatalogHandlerTest.java
+TelegramPlanDetailsHandlerTest.java
+TelegramPlanSelectionHandlerTest.java
+TelegramPaymentMethodHandlerTest.java
+TelegramZarinpalPaymentHandlerTest.java
+TelegramManualPaymentHandlerTest.java
+TelegramPaymentStatusHandlerTest.java
+TelegramPaymentHistoryHandlerTest.java
+TelegramCancelPaymentHandlerTest.java
+TelegramPurchaseSessionReconcilerTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/telegram/purchase/
+TelegramPurchaseSessionRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/telegram/purchase/
+TelegramZarinpalPurchaseIntegrationTest.java
+TelegramManualPurchaseIntegrationTest.java
+TelegramPaymentMethodSwitchIntegrationTest.java
+TelegramDuplicatePurchaseUpdateIntegrationTest.java
+ConcurrentTelegramPurchaseIntegrationTest.java
+
+docs/telegram/
+telegram-purchase-flow.md
+telegram-purchase-idempotency.md
+telegram-payment-security.md
+
+Adapt packages, names, and migration versions to the existing project conventions.
+
+---
+
+# 67. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* purchase-session domain tests pass;
+* catalog-handler tests pass;
+* selection tests pass;
+* Order creation tests pass;
+* Payment creation tests pass;
+* Zarinpal Telegram tests pass;
+* manual-payment Telegram tests pass;
+* cancellation tests pass;
+* status tests pass;
+* duplicate-update tests pass;
+* concurrency tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* application starts with Telegram disabled;
+* application starts with Telegram enabled and mock providers;
+* private-chat policy enforced;
+* one active purchase session per User;
+* one active PlanSelection per User;
+* one Order per purchase request;
+* one Payment per method request;
+* one Zarinpal initialization per request;
+* one active manual instruction;
+* no Telegram handler approves Payment;
+* no Telegram handler provisions VPN;
+* no receipt file processing exists;
+* no provider secrets are logged;
+* no tests are disabled.
+
+---
+
+# 68. Optional manual verification
+
+Use only:
+
+* a test Telegram Bot;
+* sandbox or mock Zarinpal;
+* test manual card data;
+* non-production Users.
+
+## Zarinpal
+
+1. Send `/start`.
+2. Select Buy VPN.
+3. Choose a Plan.
+4. Confirm Plan.
+5. Choose Zarinpal.
+6. Verify payment button opens trusted provider URL.
+7. Replay the payment callback button.
+8. Confirm no duplicate Payment or authority.
+9. Complete sandbox/mock payment.
+10. Return to Telegram.
+11. Press Refresh Status.
+12. Confirm approved/provisioning message.
+13. Process outbox.
+14. Refresh.
+15. Confirm purchase completed.
+
+## Manual
+
+1. Start another purchase.
+2. Choose manual card payment.
+3. Verify exact unique amount.
+4. Verify safe destination card display.
+5. Press Upload receipt.
+6. Confirm placeholder only.
+7. Confirm no receipt row exists.
+8. Refresh status.
+9. Cancel Payment.
+10. Confirm history is preserved.
+
+## Security
+
+* test in group chat;
+* tamper callback data;
+* use expired callback;
+* inspect logs and database;
+* confirm no Bot token, authority, payment URL, card number, or sensitive message body appears.
+
+Do not perform a real financial transfer.
+
+---
+
+# 69. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Plan catalog Telegram design
+3. Plan-selection confirmation design
+4. Purchase-session design
+5. Order creation/reuse design
+6. Payment creation/reuse design
+7. Payment-method selection design
+8. Zarinpal Telegram flow
+9. Manual card-payment Telegram flow
+10. Payment status and completion UX
+11. Cancellation and method-switching policy
+12. Update/callback/request idempotency
+13. Telegram send-uncertainty behavior
+14. Transaction-boundary design
+15. Security and logging design
+16. Planned files to create
+17. Planned files to modify
+18. Migration and operational risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Purchase-session behavior
+6. Plan catalog behavior
+7. Plan selection behavior
+8. Order creation/reuse
+9. Payment creation/reuse
+10. Payment-method availability
+11. Zarinpal Telegram behavior
+12. Manual payment Telegram behavior
+13. Exact amount/card display
+14. Status refresh behavior
+15. Cancellation behavior
+16. Method-switching behavior
+17. Completion/provisioning UX
+18. Callback signing and sensitive actions
+19. Idempotency behavior
+20. Telegram uncertainty behavior
+21. Transaction boundaries
+22. Security and logging
+23. Unit-test results
+24. Repository-test results
+25. Zarinpal integration-test results
+26. Manual-payment integration-test results
+27. Duplicate-update test results
+28. Concurrency-test results
+29. Architecture-test results
+30. Flyway and Hibernate results
+31. Build result
+32. Commands executed
+33. Remaining issues
+34. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(telegram): add plan purchase and payment flow
+
+Stop after completing Task 36.
+
+Do not begin Task 37.
+

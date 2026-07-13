@@ -1,0 +1,2747 @@
+You are a senior Java 21, Spring Boot, Telegram Bot API, secure file-upload, payment-receipt, and distributed-systems engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 37 — Telegram Manual Payment Receipt Upload
+
+## Goal
+
+Extend the Telegram purchase flow implemented in Tasks 35–36 so a user can submit a manual card-to-card payment receipt directly through the Telegram Bot.
+
+After this task, the Telegram Bot must be able to:
+
+* enter a controlled receipt-upload conversation state;
+* accept a receipt as:
+
+  * Telegram photo;
+  * image document;
+  * PDF document;
+* reject unsupported messages and file types safely;
+* retrieve Telegram file metadata;
+* download the file securely through the Telegram Bot API;
+* enforce size limits before and during download;
+* submit the downloaded stream to the existing manual receipt-upload use case from Task 30;
+* preserve the exact Payment, Order, instruction, User, and purchase-session relationships;
+* create no duplicate receipt when Telegram retries an update;
+* avoid downloading or storing the same Telegram file repeatedly;
+* show the user a successful “receipt submitted for review” message;
+* show safe retry instructions after invalid or rejected files;
+* support cancellation of the upload conversation;
+* clean up temporary files and streams;
+* keep Telegram file identifiers, receipt bytes, and financial metadata out of logs;
+* keep the Payment unapproved until operator review;
+* preserve all review, approval, outbox, and provisioning rules from Tasks 30–32.
+
+Do not implement:
+
+* receipt approval or rejection through Telegram;
+* operator/admin Telegram commands;
+* OCR;
+* automatic bank validation;
+* automatic Payment approval;
+* direct VPN provisioning;
+* refunds;
+* payment reminders;
+* Subscription expiry reminders;
+* broadcast messaging;
+* deployment;
+* webhook file-storage proxy;
+* permanent Telegram file storage;
+* persistent receipt bytes in PostgreSQL.
+
+Stop after completing Task 37.
+
+Do not begin Task 38.
+
+---
+
+# 1. Important rules
+
+* Inspect the complete repository before changing anything.
+* Preserve all working behavior from Tasks 1–36.
+* Reuse:
+
+  * Telegram update processing;
+  * Telegram private-chat policy;
+  * Telegram command and callback routing;
+  * Telegram processed-update idempotency;
+  * Telegram conversation state, if created in Task 36;
+  * Telegram purchase session;
+  * Telegram Bot API client;
+  * Telegram failure classification;
+  * Telegram message catalog;
+  * ManualPaymentReceipt upload use case from Task 30;
+  * ManualCardPaymentInstruction;
+  * Payment;
+  * Order;
+  * User;
+  * SystemClockPort;
+  * standard exceptions;
+  * logging;
+  * traceId;
+  * Testcontainers;
+  * temporary receipt-storage test support.
+* Use Java 21.
+* Use the existing Spring Boot and build-tool versions.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into Telegram handlers or application services.
+* Do not duplicate file validation from Task 30.
+* Do not duplicate Payment status-transition logic.
+* Do not approve Payment.
+* Do not mark Order PAID.
+* Do not create provisioning outbox records.
+* Do not call 3x-ui.
+* Do not trust:
+
+  * Telegram filename;
+  * Telegram MIME type;
+  * file extension;
+  * Telegram file size alone;
+  * Telegram caption;
+  * payment ID supplied in message text;
+  * amount supplied in message text;
+  * User identity from username.
+* Telegram numeric User ID is the trusted external actor identity.
+* Credentials and receipt processing are private-chat only.
+* Do not log:
+
+  * Bot token;
+  * Telegram file path;
+  * Telegram file ID;
+  * file unique ID;
+  * receipt bytes;
+  * receipt hash;
+  * card number;
+  * claimed amount;
+  * full receipt metadata;
+  * complete Telegram download URL.
+* Do not persist Telegram file URLs.
+* Do not persist Telegram file bytes outside existing receipt storage.
+* Do not begin Task 38.
+
+---
+
+# 2. Verify current Telegram Bot API file behavior
+
+Before implementation, inspect the current official Telegram Bot API documentation for:
+
+* Message.photo;
+* Message.document;
+* PhotoSize;
+* Document;
+* file_id;
+* file_unique_id;
+* file_size;
+* mime_type;
+* file_name;
+* getFile;
+* File.file_path;
+* file download URL construction;
+* Bot API download-size limits;
+* photo compression behavior;
+* document upload behavior;
+* update retries;
+* file availability duration;
+* protected content behavior.
+
+Use official Telegram documentation.
+
+Record:
+
+* Bot API version/date consulted;
+* maximum downloadable file size;
+* differences between photo and document;
+* whether photos are recompressed;
+* file path lifetime assumptions;
+* security implications;
+* selected receipt-source preference.
+
+Do not rely on old examples or hardcoded historic limits without verification.
+
+---
+
+# 3. Current-state assessment
+
+Inspect and report:
+
+* Task 30 receipt-upload command and stream abstraction;
+* receipt-size limits;
+* supported MIME types;
+* file signature inspection;
+* filename sanitizer;
+* compensation behavior;
+* duplicate hash policy;
+* receipt-request idempotency;
+* active receipt uniqueness;
+* Payment status requirements;
+* instruction status requirements;
+* Task 36 purchase-session behavior;
+* Task 36 upload-receipt placeholder;
+* Telegram conversation-state mechanism;
+* Telegram update model;
+* whether photo/document metadata is currently mapped;
+* current Bot API client file methods;
+* current temporary-file utilities;
+* current HTTP streaming conventions;
+* request-body logging rules;
+* migration history;
+* test fixtures.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Receipt conversation-state design
+3. Telegram photo/document mapping design
+4. File-selection strategy
+5. Telegram file-download strategy
+6. Size-limit and streaming strategy
+7. Receipt request-id strategy
+8. Duplicate-update behavior
+9. Temporary-file and cleanup strategy
+10. Payment/instruction ownership validation
+11. Error and retry UX
+12. Transaction-boundary design
+13. Security and redaction design
+14. Planned files to create
+15. Planned files to modify
+16. Migration and operational risks
+
+---
+
+# 4. Supported Telegram receipt inputs
+
+Task 37 supports:
+
+## Photo
+
+Telegram `Message.photo`
+
+Use the largest available PhotoSize that:
+
+* is within configured maximum size;
+* has a valid file ID;
+* satisfies minimum resolution if the project requires it.
+
+Important:
+
+Telegram photos may be recompressed.
+
+Therefore:
+
+* accept them as JPEG-like image input;
+* still inspect actual bytes;
+* do not trust Telegram-reported MIME type;
+* preserve a generated safe filename.
+
+## Document
+
+Telegram `Message.document`
+
+Accept only documents that appear to be:
+
+* JPEG;
+* PNG;
+* PDF;
+* WebP only if Task 30 supports it.
+
+Still rely on Task 30 file inspector as the final authority.
+
+Reject:
+
+* ZIP;
+* RAR;
+* executables;
+* SVG;
+* HTML;
+* text files;
+* videos;
+* audio;
+* stickers;
+* animations;
+* voice messages;
+* arbitrary binary files.
+
+Do not accept Telegram caption as receipt evidence.
+
+---
+
+# 5. Telegram update model extension
+
+Extend internal Telegram models.
+
+Update:
+
+TelegramMessage
+
+Add optional fields:
+
+List<TelegramPhotoSize> photos
+
+TelegramDocument document
+
+String caption
+
+Create:
+
+TelegramPhotoSize
+
+Fields:
+
+String fileId
+
+String fileUniqueId
+
+int width
+
+int height
+
+Long fileSize
+
+Create:
+
+TelegramDocument
+
+Fields:
+
+String fileId
+
+String fileUniqueId
+
+String fileName
+
+String mimeType
+
+Long fileSize
+
+Requirements:
+
+* immutable;
+* bounded strings;
+* safe `toString`;
+* no raw file ID in logs;
+* no file path;
+* no file bytes;
+* no SDK type leakage.
+
+Do not map unsupported media fully unless needed.
+
+---
+
+# 6. Conversation state
+
+Reuse or complete:
+
+TelegramConversationState
+
+Add or confirm:
+
+TelegramConversationStep
+
+Values:
+
+NONE
+
+AWAITING_RECEIPT_UPLOAD
+
+RECEIPT_UPLOAD_PROCESSING
+
+RECEIPT_UPLOAD_COMPLETED
+
+Recommended fields:
+
+UUID id
+
+long telegramUserId
+
+long chatId
+
+TelegramConversationStep step
+
+UUID purchaseSessionId
+
+UUID paymentId
+
+UUID manualInstructionId if storing this is safe and useful
+
+UUID receiptRequestId
+
+Instant expiresAt
+
+Instant processingStartedAt
+
+Instant completedAt
+
+String failureCode
+
+Instant createdAt
+
+Instant updatedAt
+
+Rules:
+
+* one active conversation state per User/private chat;
+* state belongs to current purchase session and Payment;
+* receiptRequestId generated server-side;
+* no Telegram file ID;
+* no filename;
+* no card number;
+* no amount;
+* no receipt hash;
+* no bytes;
+* state expires;
+* state is orchestration only;
+* Payment remains the source of truth.
+
+---
+
+# 7. Conversation-state statuses
+
+Recommended flow:
+
+NONE
+-> AWAITING_RECEIPT_UPLOAD
+-> RECEIPT_UPLOAD_PROCESSING
+-> RECEIPT_UPLOAD_COMPLETED
+
+Failure behavior:
+
+RECEIPT_UPLOAD_PROCESSING
+-> AWAITING_RECEIPT_UPLOAD
+
+or:
+
+-> NONE
+
+according to failure type.
+
+Rules:
+
+* invalid user message keeps AWAITING_RECEIPT_UPLOAD;
+* invalid file keeps AWAITING_RECEIPT_UPLOAD;
+* successful upload moves to COMPLETED or clears state;
+* expired state cannot accept file;
+* cancellation clears state;
+* repeated same update cannot reprocess file;
+* terminal Payment states clear state.
+
+Do not create a second active conversation state.
+
+---
+
+# 8. Conversation-state migration
+
+If the table does not already exist, create the next migration.
+
+Suggested:
+
+V17__create_telegram_conversation_states.sql
+
+Adjust to the actual migration order.
+
+Create table:
+
+telegram_conversation_states
+
+Columns:
+
+id UUID primary key
+
+telegram_user_id BIGINT not null
+
+chat_id BIGINT not null
+
+step VARCHAR(64) not null
+
+purchase_session_id UUID not null
+
+payment_id UUID not null
+
+manual_instruction_id UUID null
+
+receipt_request_id UUID not null
+
+expires_at TIMESTAMPTZ not null
+
+processing_started_at TIMESTAMPTZ null
+
+completed_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* valid step;
+* expiry after creation;
+* PROCESSING requires processing_started_at;
+* COMPLETED requires completed_at;
+* foreign keys to:
+
+  * telegram purchase session;
+  * Payment;
+  * manual instruction if referenced;
+* no file-related columns.
+
+Indexes:
+
+telegram_user_id
+
+chat_id
+
+payment_id
+
+step
+
+expires_at
+
+Create a partial unique index:
+
+one active conversation state per Telegram User/private chat.
+
+Do not edit old migrations.
+
+---
+
+# 9. Conversation-state repository
+
+Create or complete:
+
+TelegramConversationStateRepository
+
+Methods:
+
+Optional<TelegramConversationState> findActiveByTelegramUserIdAndChatId(
+long telegramUserId,
+long chatId
+)
+
+Optional<TelegramConversationState> findByIdAndTelegramUserId(
+UUID stateId,
+long telegramUserId
+)
+
+boolean existsActiveByPaymentId(UUID paymentId)
+
+List<TelegramConversationState> findExpired(
+Instant now,
+int limit
+)
+
+Create Spring Data repository and adapter.
+
+No null returns.
+
+No Spring Data leakage.
+
+Use database constraints for active-state uniqueness.
+
+---
+
+# 10. Enter receipt-upload mode
+
+Create:
+
+BeginTelegramReceiptUploadUseCase
+
+Command:
+
+long telegramUserId
+
+long chatId
+
+UUID purchaseSessionId
+
+UUID paymentId
+
+UUID actionId
+
+Behavior:
+
+1. Verify private chat.
+2. Resolve User.
+3. Load and reconcile purchase session.
+4. Load Payment.
+5. Verify:
+
+   * Payment belongs to User;
+   * method is CARD_TO_CARD_MANUAL;
+   * status is WAITING_FOR_PAYMENT;
+   * active instruction exists;
+   * instruction is ACTIVE;
+   * instruction not expired;
+   * no active receipt exists.
+6. Create or reuse AWAITING_RECEIPT_UPLOAD state.
+7. Generate one server-side receiptRequestId.
+8. Return upload instructions.
+
+Idempotency:
+
+* same sensitive action returns same conversation state;
+* repeated Telegram update does not generate another request ID;
+* existing matching active state is reused.
+
+Do not create receipt yet.
+
+---
+
+# 11. Upload instructions UX
+
+When entering receipt-upload mode, send a localized message:
+
+* send one clear image or PDF;
+* supported formats;
+* maximum size;
+* do not send multiple files;
+* send the exact receipt for the current payment;
+* payment must match the unique amount;
+* receipt submission does not mean approval;
+* operator review is required;
+* use Cancel button to exit.
+
+Buttons:
+
+❌ Cancel upload
+
+🔄 Payment status
+
+Optional:
+
+⬅️ Back
+
+Do not show internal IDs.
+
+---
+
+# 12. Cancel receipt-upload mode
+
+Create:
+
+CancelTelegramReceiptUploadUseCase
+
+Behavior:
+
+* verify ownership;
+* AWAITING/PROCESSING cancellation policy:
+
+  * AWAITING can be cancelled;
+  * PROCESSING cannot be cancelled once external download/upload is already running, unless a cancellation token exists.
+* clear or mark state cancelled;
+* do not cancel Payment;
+* do not cancel manual instruction;
+* do not delete an already submitted receipt;
+* repeated cancellation idempotent.
+
+Create callback action:
+
+CANCEL_RECEIPT_UPLOAD
+
+Do not confuse this with Payment cancellation.
+
+---
+
+# 13. Telegram file metadata port
+
+Extend:
+
+TelegramBotClient
+
+Add:
+
+TelegramFileMetadata getFile(
+GetTelegramFileCommand command
+)
+
+Create:
+
+GetTelegramFileCommand
+
+Field:
+
+String fileId
+
+Create:
+
+TelegramFileMetadata
+
+Fields:
+
+String fileId
+
+String fileUniqueId
+
+String filePath
+
+Long fileSize
+
+Requirements:
+
+* infrastructure/application model separation;
+* safe `toString`;
+* filePath secret-sensitive;
+* no logging;
+* validate bounded path;
+* no URL construction outside infrastructure.
+
+If using direct RestClient, map official getFile response.
+
+---
+
+# 14. Telegram file download port
+
+Create:
+
+TelegramFileDownloader
+
+Suggested package:
+
+com.parazit.panel.application.port.out.telegram
+
+Method:
+
+DownloadedTelegramFile download(
+DownloadTelegramFileCommand command
+)
+
+Create:
+
+DownloadTelegramFileCommand
+
+Fields:
+
+String fileId
+
+long maximumBytes
+
+Duration timeout
+
+Create:
+
+DownloadedTelegramFile
+
+Fields:
+
+InputStream or application-owned streaming abstraction
+
+long bytesRead or declaredSize
+
+String originalFileName
+
+String reportedMimeType
+
+String fileUniqueIdFingerprint
+
+Requirements:
+
+* do not expose complete file path;
+* no raw URL;
+* no temp file path in result;
+* stream must be closeable;
+* bounded reads;
+* abort if size exceeds limit;
+* safe filename;
+* no file ID in `toString`;
+* no eager unbounded byte array.
+
+Preferred:
+
+Stream directly into the existing Task 30 upload abstraction.
+
+Alternative:
+
+Use a secure temporary file if the existing receipt service needs repeatable reads.
+
+---
+
+# 15. Download implementation
+
+Create:
+
+TelegramFileDownloadClient
+
+Suggested package:
+
+com.parazit.panel.infrastructure.telegram.file
+
+Behavior:
+
+1. Call getFile.
+2. Validate file path.
+3. Build Telegram download URL internally:
+   `/file/bot<token>/<file_path>`
+4. Never log the complete URL.
+5. Stream response with:
+
+   * connect timeout;
+   * read timeout;
+   * maximum bytes;
+   * no redirects to untrusted hosts;
+   * HTTPS;
+   * Telegram host allowlist;
+   * response-code validation.
+6. Close HTTP response and stream correctly.
+7. Reject content larger than configured limit.
+8. Do not persist file.
+9. Do not retry blindly after a partial download unless safe.
+10. Classify failures.
+
+Do not return Telegram Bot token or file URL to application code.
+
+---
+
+# 16. Telegram file-download properties
+
+Create:
+
+TelegramReceiptUploadProperties
+
+Prefix:
+
+app.telegram.receipt-upload
+
+Fields:
+
+boolean enabled
+
+Duration conversationTtl
+
+long maxTelegramFileBytes
+
+Duration metadataTimeout
+
+Duration downloadTimeout
+
+int maxDownloadAttempts
+
+Duration initialRetryDelay
+
+Duration maxRetryDelay
+
+double retryMultiplier
+
+boolean acceptPhoto
+
+boolean acceptDocument
+
+boolean acceptPdf
+
+boolean preferLargestPhoto
+
+int minimumPhotoWidth
+
+int minimumPhotoHeight
+
+boolean deleteTemporaryFileAfterSubmission
+
+Validation:
+
+* positive sizes/timeouts;
+* maximum not greater than Task 30 receipt-storage limit;
+* at least one input type enabled;
+* bounded retry attempts;
+* photo dimensions nonnegative.
+
+Update `.env.example`.
+
+Example:
+
+TELEGRAM_RECEIPT_UPLOAD_ENABLED=true
+
+TELEGRAM_RECEIPT_UPLOAD_CONVERSATION_TTL=PT10M
+
+TELEGRAM_RECEIPT_UPLOAD_MAX_FILE_BYTES=5242880
+
+TELEGRAM_RECEIPT_UPLOAD_METADATA_TIMEOUT=PT10S
+
+TELEGRAM_RECEIPT_UPLOAD_DOWNLOAD_TIMEOUT=PT30S
+
+TELEGRAM_RECEIPT_UPLOAD_MAX_DOWNLOAD_ATTEMPTS=3
+
+TELEGRAM_RECEIPT_UPLOAD_INITIAL_RETRY_DELAY=PT1S
+
+TELEGRAM_RECEIPT_UPLOAD_MAX_RETRY_DELAY=PT10S
+
+TELEGRAM_RECEIPT_UPLOAD_RETRY_MULTIPLIER=2.0
+
+TELEGRAM_RECEIPT_UPLOAD_ACCEPT_PHOTO=true
+
+TELEGRAM_RECEIPT_UPLOAD_ACCEPT_DOCUMENT=true
+
+TELEGRAM_RECEIPT_UPLOAD_ACCEPT_PDF=true
+
+TELEGRAM_RECEIPT_UPLOAD_PREFER_LARGEST_PHOTO=true
+
+---
+
+# 17. Receipt-file candidate model
+
+Create:
+
+TelegramReceiptFileCandidate
+
+Fields:
+
+TelegramReceiptSourceType sourceType
+
+String fileId
+
+String fileUniqueId
+
+String originalFileName
+
+String reportedMimeType
+
+Long reportedSize
+
+Integer width
+
+Integer height
+
+Create:
+
+TelegramReceiptSourceType
+
+Values:
+
+PHOTO
+
+DOCUMENT
+
+Rules:
+
+* safe immutable model;
+* no file ID in logs;
+* no raw bytes;
+* bounded metadata;
+* source-specific validation.
+
+---
+
+# 18. Receipt candidate selector
+
+Create:
+
+TelegramReceiptCandidateSelector
+
+Behavior:
+
+For photo:
+
+* choose preferred PhotoSize according to configured policy;
+* typically the largest valid photo;
+* reject if all sizes exceed limit;
+* reject if below minimum dimensions.
+
+For document:
+
+* accept one document only;
+* use reported filename/MIME only as hints;
+* reject reported size over configured maximum before download;
+* reject obvious unsupported types early, but final validation remains Task 30.
+
+If a message contains both photo and document unexpectedly:
+
+* apply deterministic policy;
+* preferred:
+
+  * reject ambiguous message;
+  * ask user to send one file.
+
+Do not accept multiple receipt files in one update.
+
+---
+
+# 19. Telegram receipt request ID
+
+The receipt upload use case requires:
+
+receiptRequestId
+
+Use the server-generated ID stored in conversation state.
+
+Requirements:
+
+* one receiptRequestId per upload conversation;
+* repeated same update uses same request ID;
+* invalid file does not necessarily rotate request ID unless Task 30 idempotency semantics require a new one;
+* if the first submission reaches the receipt service and fails with INVALID_FILE:
+
+  * determine whether the same request ID can be reused;
+  * preferred: generate a new request ID for the next candidate after marking the failed attempt.
+* if Telegram send/update replay occurs:
+
+  * do not create another request ID.
+
+Document exact behavior.
+
+Recommended:
+
+Create a new request ID for each actual file-submission attempt and store:
+
+currentAttemptRequestId
+
+attemptNumber
+
+This may require a dedicated upload-attempt entity.
+
+---
+
+# 20. Telegram receipt-upload attempt aggregate
+
+To support retries and audit safely, create:
+
+TelegramReceiptUploadAttempt
+
+Suggested package:
+
+com.parazit.panel.domain.telegram.receipt
+
+Fields:
+
+UUID id
+
+long telegramUserId
+
+long chatId
+
+UUID conversationStateId
+
+UUID purchaseSessionId
+
+UUID paymentId
+
+UUID receiptRequestId
+
+TelegramReceiptUploadAttemptStatus status
+
+TelegramReceiptSourceType sourceType
+
+String telegramFileUniqueIdHash
+
+Long reportedFileSize
+
+String reportedMimeType
+
+String sanitizedFileName
+
+UUID manualReceiptId
+
+int attemptNumber
+
+Instant startedAt
+
+Instant downloadedAt
+
+Instant submittedAt
+
+Instant failedAt
+
+String failureCode
+
+String failureMessage
+
+Instant createdAt
+
+Instant updatedAt
+
+Statuses:
+
+CREATED
+
+DOWNLOADING
+
+DOWNLOADED
+
+SUBMITTING
+
+SUBMITTED
+
+FAILED
+
+REJECTED
+
+UNKNOWN
+
+Rules:
+
+* never store file ID;
+* never store Telegram file path;
+* store only hash of file_unique_id if deduplication requires it;
+* no file bytes;
+* no receipt hash;
+* no card data;
+* no claimed amount copied from Telegram;
+* one attempt per receiptRequestId;
+* terminal SUBMITTED;
+* repeated Telegram update returns existing attempt result.
+
+---
+
+# 21. File unique ID hashing
+
+Telegram `file_unique_id` may be used as a Telegram-side duplicate hint.
+
+Do not store it raw unless current privacy policy explicitly allows it.
+
+Create:
+
+TelegramFileIdentityHasher
+
+Use HMAC-SHA-256 or SHA-256 with clear rationale.
+
+Preferred:
+
+HMAC-SHA-256 using a dedicated secret.
+
+Reason:
+
+* avoids storing a globally correlatable Telegram identifier;
+* still supports deterministic duplicate lookup.
+
+Configuration:
+
+String fileIdentityHashSecret
+
+Requirements:
+
+* required when upload enabled;
+* minimum secret length;
+* no logging;
+* separate from callback signing secret;
+* update `.env.example`.
+
+Store only lowercase hex or Base64url hash.
+
+---
+
+# 22. Receipt-upload attempt migration
+
+Create or extend the next migration.
+
+Suggested table:
+
+telegram_receipt_upload_attempts
+
+Columns:
+
+id UUID primary key
+
+telegram_user_id BIGINT not null
+
+chat_id BIGINT not null
+
+conversation_state_id UUID not null
+
+purchase_session_id UUID not null
+
+payment_id UUID not null
+
+receipt_request_id UUID not null
+
+status VARCHAR(32) not null
+
+source_type VARCHAR(20) not null
+
+telegram_file_unique_id_hash VARCHAR(64) null
+
+reported_file_size BIGINT null
+
+reported_mime_type VARCHAR(100) null
+
+sanitized_file_name VARCHAR(255) null
+
+manual_receipt_id UUID null
+
+attempt_number INTEGER not null
+
+started_at TIMESTAMPTZ not null
+
+downloaded_at TIMESTAMPTZ null
+
+submitted_at TIMESTAMPTZ null
+
+failed_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique receipt_request_id;
+* attempt_number > 0;
+* valid status/source type;
+* SUBMITTED requires submitted_at and manual_receipt_id;
+* FAILED/REJECTED require failed_at;
+* reported size nonnegative;
+* foreign keys to conversation state, purchase session, Payment, and manual receipt where present.
+
+Indexes:
+
+telegram_user_id
+
+payment_id
+
+conversation_state_id
+
+status
+
+telegram_file_unique_id_hash
+
+created_at
+
+Do not edit old migrations.
+
+---
+
+# 23. Upload-attempt repository
+
+Create:
+
+TelegramReceiptUploadAttemptRepository
+
+Methods:
+
+Optional<TelegramReceiptUploadAttempt> findByReceiptRequestId(UUID requestId)
+
+Optional<TelegramReceiptUploadAttempt> findByConversationStateIdAndAttemptNumber(
+UUID stateId,
+int attemptNumber
+)
+
+Optional<TelegramReceiptUploadAttempt> findSubmittedByFileUniqueIdHashAndPaymentId(
+String hash,
+UUID paymentId
+)
+
+List<TelegramReceiptUploadAttempt> findRecentByPaymentId(
+UUID paymentId
+)
+
+Create adapter and Spring Data repository.
+
+No Spring Data leakage.
+
+Use uniqueness constraints for idempotency.
+
+---
+
+# 24. Process receipt-message use case
+
+Create:
+
+ProcessTelegramReceiptMessageUseCase
+
+Command:
+
+TelegramInteractionContext context
+
+TelegramMessage message
+
+Behavior:
+
+1. Verify private chat.
+2. Resolve User.
+3. Load active conversation state.
+4. Validate state AWAITING_RECEIPT_UPLOAD.
+5. Reconcile purchase session.
+6. Load Payment and instruction.
+7. Validate:
+
+   * ownership;
+   * manual method;
+   * Payment WAITING_FOR_PAYMENT;
+   * instruction ACTIVE;
+   * not expired;
+   * no active receipt already submitted.
+8. Select one file candidate.
+9. Create/claim upload attempt in a short transaction.
+10. Download file outside transaction.
+11. Submit stream to existing manual receipt use case.
+12. Complete upload attempt in short transaction.
+13. Complete/clear conversation state.
+14. Reconcile purchase session to WAITING_FOR_REVIEW.
+15. Return success response plan.
+
+No Telegram send call inside database transaction.
+
+---
+
+# 25. Receipt submission command mapping
+
+Map Telegram data into the Task 30 receipt-submission command.
+
+Trusted values:
+
+* receiptRequestId from upload attempt;
+* telegramUserId from update actor;
+* paymentId from conversation state;
+* claimed amount from persisted instruction or existing receipt flow requirements;
+* file stream from Telegram downloader;
+* filename from sanitized Telegram hint;
+* content length from download result if known.
+
+Do not take from Telegram message:
+
+* claimed amount;
+* instruction ID;
+* User ID;
+* Order ID;
+* card number;
+* tracking number unless explicitly entered through a separate validated flow.
+
+Optional receipt metadata:
+
+* claimedTrackingNumber:
+
+  * absent in Task 37 unless a prior structured step collects it.
+* claimedSenderCardLastFour:
+
+  * absent unless explicitly collected.
+* claimedPaidAt:
+
+  * absent unless explicitly collected.
+* note:
+
+  * caption should not automatically become a trusted note.
+  * preferred: ignore caption.
+
+If Task 30 requires optional fields, pass empty values.
+
+---
+
+# 26. Amount behavior
+
+The manual receipt service requires exact amount consistency.
+
+Telegram handler must not parse amount from:
+
+* caption;
+* OCR;
+* filename;
+* image.
+
+Use the persisted instruction payable amount.
+
+If the receipt-submission command expects `claimedAmount`:
+
+* set it from the current trusted manual instruction;
+* do not ask the User to type it;
+* do not infer it from the image.
+
+The operator still reviews the actual receipt.
+
+Document that Telegram submission asserts the current instruction amount, not bank verification.
+
+---
+
+# 27. Download phases
+
+Use explicit phases.
+
+## Phase A — Claim
+
+Short DB transaction:
+
+* load state;
+* validate ownership/status;
+* create attempt;
+* mark state PROCESSING;
+* commit.
+
+## Phase B — File metadata and download
+
+Outside DB transaction:
+
+* select candidate;
+* call getFile;
+* validate declared size;
+* stream/download;
+* enforce hard maximum;
+* no Telegram send call yet.
+
+## Phase C — Receipt submission
+
+Use Task 30 service boundaries:
+
+* inspect/store outside long DB transaction according to its existing design;
+* let receipt service manage file-storage compensation.
+
+## Phase D — Completion
+
+Short DB transaction:
+
+* attempt SUBMITTED;
+* state COMPLETED/cleared;
+* session WAITING_FOR_REVIEW.
+
+## Phase E — Telegram response
+
+Outside DB transaction:
+
+* send success message.
+
+Do not keep a transaction open during download, file inspection, storage, or Telegram send.
+
+---
+
+# 28. Temporary-file strategy
+
+Preferred:
+
+Stream directly if the existing receipt-upload service supports a single-pass stream with bounded validation.
+
+If repeatable reads are required:
+
+Use a secure temporary file.
+
+Requirements:
+
+* application-controlled temp root;
+* random generated filename;
+* no Telegram filename as path;
+* no token/file ID in filename;
+* root confinement;
+* no symlink following;
+* restrictive permissions;
+* maximum size enforced while writing;
+* delete in finally;
+* cleanup on:
+
+  * success;
+  * validation failure;
+  * storage failure;
+  * database failure;
+  * Telegram failure.
+* no temp path persisted or logged.
+
+Create:
+
+TelegramReceiptTemporaryFileManager
+
+only if necessary.
+
+---
+
+# 29. Download retry policy
+
+Create:
+
+TelegramFileDownloadFailureClassifier
+
+Retryable:
+
+* getFile temporary timeout;
+* file download timeout before bytes are received;
+* HTTP 429;
+* HTTP 500/502/503/504;
+* temporary DNS/network failure.
+
+Potentially unsafe/unknown:
+
+* connection reset after partial data;
+* timeout after partial download.
+
+Non-retryable:
+
+* file not found;
+* invalid file path;
+* file too large;
+* unsupported media;
+* forbidden;
+* invalid Bot token;
+* malformed getFile response.
+
+Requirements:
+
+* bounded retries;
+* respect retry_after;
+* restart download from zero only;
+* do not append partial files;
+* delete partial temp file before retry;
+* no HTTP range complexity in Task 37;
+* no nested retry loops with Telegram update retry.
+
+Keep retry ownership clear.
+
+---
+
+# 30. Duplicate Telegram file behavior
+
+Use several layers:
+
+1. Telegram processed update ID.
+2. Conversation-state current attempt.
+3. receiptRequestId.
+4. upload-attempt unique constraint.
+5. Task 30 receipt request-id idempotency.
+6. active receipt unique constraint.
+7. receipt SHA-256 duplicate policy.
+
+Behavior:
+
+* same update replay:
+
+  * no second download/submission.
+* same Telegram file sent in a new update for same Payment:
+
+  * detect file-unique-ID hash if available;
+  * if prior attempt SUBMITTED:
+
+    * return existing success;
+    * do not download again.
+* same bytes with different Telegram file IDs:
+
+  * Task 30 content hash handles it.
+* same file for another User:
+
+  * do not automatically infer fraud;
+  * follow Task 30 duplicate-hash policy.
+
+Do not rely only on Telegram file_unique_id.
+
+---
+
+# 31. Unknown-result behavior
+
+Possible uncertainty:
+
+* file stored and receipt submitted;
+* completion transaction fails;
+* Telegram response times out.
+
+Recovery:
+
+1. On retry, lookup attempt by receiptRequestId.
+2. Lookup receipt by receiptRequestId.
+3. If receipt exists and is queued:
+
+   * mark attempt SUBMITTED;
+   * reconcile state/session;
+   * send success response without re-upload.
+4. If attempt says SUBMITTING but no receipt:
+
+   * follow Task 30 compensation/orphan rules;
+   * retry safely with same request ID only if semantics permit.
+5. Never create another active receipt blindly.
+
+Create:
+
+ReconcileTelegramReceiptUploadAttemptService
+
+if needed.
+
+---
+
+# 32. Success behavior
+
+After successful receipt submission:
+
+* ManualPaymentReceipt:
+
+  * QUEUED_FOR_REVIEW.
+* ManualCardPaymentInstruction:
+
+  * RECEIPT_PENDING.
+* Payment:
+
+  * WAITING_FOR_REVIEW.
+* Review:
+
+  * not yet approved.
+* Order:
+
+  * remains PAYMENT_PENDING.
+* No outbox.
+* No VPN provision.
+
+Telegram response:
+
+* receipt received;
+* queued for operator review;
+* submission is not approval;
+* status can be refreshed;
+* no need to resend unless rejected.
+
+Buttons:
+
+🔄 Refresh payment status
+
+💳 My payments
+
+🏠 Main menu
+
+Do not display receipt storage ID or hash.
+
+---
+
+# 33. Invalid-file behavior
+
+For invalid file type/content:
+
+* mark upload attempt REJECTED or FAILED with safe code;
+* return conversation state to AWAITING_RECEIPT_UPLOAD;
+* generate a new receiptRequestId for the next actual file attempt if required;
+* tell User:
+
+  * allowed formats;
+  * maximum size;
+  * send one clear receipt;
+  * try again.
+
+Do not:
+
+* change Payment status;
+* change instruction status;
+* create review;
+* create outbox;
+* keep invalid file;
+* log file content.
+
+---
+
+# 34. Oversized-file behavior
+
+Early rejection:
+
+* if Telegram reported size exceeds maximum:
+
+  * do not call getFile/download;
+  * send localized size-limit message.
+
+Streaming rejection:
+
+* if reported size is missing or incorrect:
+
+  * stop download after maximum + one-byte detection;
+  * delete partial file;
+  * classify as too large.
+
+Use both limits:
+
+* Telegram receipt-upload maximum;
+* Task 30 receipt-storage maximum.
+
+Effective maximum is the lower value.
+
+Do not buffer oversized content in memory.
+
+---
+
+# 35. Unsupported-message behavior
+
+While awaiting receipt, User may send:
+
+* text;
+* sticker;
+* voice;
+* video;
+* location;
+* contact;
+* multiple media;
+* unsupported document.
+
+Behavior:
+
+* remain in AWAITING_RECEIPT_UPLOAD;
+* send concise localized instruction;
+* do not create upload attempt for clearly unsupported message, unless audit requires it;
+* no Payment mutation.
+
+Commands:
+
+* `/cancel` cancels upload mode;
+* `/menu` may cancel or ask for confirmation;
+* `/help` gives receipt-upload help.
+
+Do not interpret arbitrary text as filename, amount, or tracking number.
+
+---
+
+# 36. Upload conversation expiry
+
+When state expires:
+
+* mark state expired/clear it;
+* do not change Payment or instruction;
+* tell User to reopen Payment and choose Upload receipt again;
+* old file update arriving after expiry is ignored safely;
+* old callback/signature cannot revive state.
+
+Optional lazy expiry is sufficient.
+
+Task 38 may introduce scheduled cleanup.
+
+---
+
+# 37. Telegram file API commands
+
+Extend outbound models:
+
+GetTelegramFileCommand
+
+DownloadTelegramFileCommand
+
+TelegramFileMetadata
+
+TelegramFileDownloadResult
+
+Requirements:
+
+* no Bot token in models;
+* no full URL;
+* no file path in application-visible logs;
+* safe validation;
+* streaming lifecycle documented.
+
+If the existing Telegram client abstraction cannot stream, refactor minimally.
+
+Do not expose RestClient response objects.
+
+---
+
+# 38. Telegram API infrastructure tests
+
+Using MockWebServer or WireMock, test:
+
+## getFile
+
+* success;
+* file path;
+* file size;
+* logical `ok=false`;
+* 400 invalid file ID;
+* 401 invalid Bot token;
+* 429 retry_after;
+* 500;
+* timeout;
+* malformed response;
+* missing file_path.
+
+## download
+
+* image success;
+* PDF success;
+* streaming;
+* declared length;
+* missing content length;
+* oversized declared length;
+* oversized streamed length;
+* partial connection reset;
+* timeout;
+* redirect to untrusted host rejected;
+* invalid path rejected;
+* no secret URL in logs;
+* stream closed.
+
+Do not call real Telegram.
+
+---
+
+# 39. Conversation-state unit tests
+
+Test:
+
+* begin upload;
+* same action replay;
+* active state reuse;
+* wrong Payment method;
+* missing instruction;
+* expired instruction;
+* existing active receipt;
+* state expiry;
+* cancel;
+* processing transition;
+* completion;
+* failure returns to awaiting;
+* terminal Payment clears state;
+* safe toString.
+
+---
+
+# 40. Candidate-selector unit tests
+
+Test:
+
+* one photo;
+* multiple photo sizes;
+* largest selected;
+* size limit;
+* minimum dimensions;
+* one JPEG document;
+* one PNG document;
+* one PDF document;
+* WebP if supported;
+* unsupported MIME hint;
+* missing MIME;
+* fake extension still passed to final inspector only if policy permits;
+* oversized document;
+* photo and document ambiguity;
+* no media;
+* safe metadata.
+
+Do not treat Telegram MIME as final truth.
+
+---
+
+# 41. Upload-attempt domain tests
+
+Test:
+
+* creation;
+* DOWNLOADING;
+* DOWNLOADED;
+* SUBMITTING;
+* SUBMITTED;
+* FAILED;
+* REJECTED;
+* UNKNOWN;
+* attempt number;
+* receipt linkage;
+* timestamps;
+* terminal behavior;
+* safe failure metadata;
+* no raw file identity;
+* no bytes;
+* safe toString.
+
+---
+
+# 42. Process-receipt service unit tests
+
+Test:
+
+* successful photo;
+* successful document image;
+* successful PDF;
+* private-chat enforcement;
+* no active conversation;
+* expired conversation;
+* wrong User;
+* wrong Payment method;
+* Payment not waiting;
+* instruction expired;
+* active receipt already exists;
+* unsupported message;
+* oversized reported file;
+* oversized streamed file;
+* download timeout;
+* file metadata failure;
+* Task 30 invalid file;
+* storage failure;
+* receipt service conflict;
+* idempotent replay;
+* existing submitted attempt;
+* unknown completion result;
+* conversation/session reconciliation;
+* no Payment approval;
+* no provisioning call.
+
+Use fake downloader streams.
+
+---
+
+# 43. Receipt-command mapping tests
+
+Verify:
+
+* telegramUserId from actor;
+* paymentId from conversation state;
+* receiptRequestId from upload attempt;
+* amount from persisted instruction;
+* filename sanitized;
+* MIME only a hint;
+* stream passed correctly;
+* no callback-supplied IDs;
+* no caption mapped to trusted fields;
+* no file ID passed to receipt domain;
+* no Telegram path persisted.
+
+---
+
+# 44. Full successful integration scenario
+
+Use:
+
+* real PostgreSQL;
+* mock Telegram Bot API;
+* temporary receipt storage;
+* synthetic valid receipt file.
+
+Scenario:
+
+1. Create User.
+2. Create manual Payment.
+3. Create active manual instruction.
+4. Start Telegram purchase session.
+5. Press Upload receipt.
+6. Verify AWAITING_RECEIPT_UPLOAD.
+7. Send Telegram photo update.
+8. Mock getFile.
+9. Mock file download.
+10. Process update.
+11. Verify:
+
+    * one upload attempt SUBMITTED;
+    * one ManualPaymentReceipt;
+    * receipt QUEUED_FOR_REVIEW;
+    * instruction RECEIPT_PENDING;
+    * Payment WAITING_FOR_REVIEW;
+    * conversation completed/cleared;
+    * purchase session WAITING_FOR_REVIEW;
+    * success message sent.
+12. Replay same update.
+13. Verify:
+
+    * no second download;
+    * no second receipt;
+    * no duplicate response according to update idempotency.
+14. Verify:
+
+    * no review approval;
+    * no outbox;
+    * no XUI provision.
+
+---
+
+# 45. Invalid-file integration scenario
+
+1. Enter upload mode.
+2. Send a document with `.jpg` filename but executable or invalid bytes.
+3. Verify:
+
+   * Telegram download may occur;
+   * Task 30 rejects content;
+   * invalid file deleted;
+   * attempt REJECTED;
+   * conversation returns AWAITING_RECEIPT_UPLOAD;
+   * Payment remains WAITING_FOR_PAYMENT;
+   * instruction remains ACTIVE;
+   * no receipt queued;
+   * no outbox.
+4. Send valid replacement.
+5. Verify successful submission.
+
+---
+
+# 46. Oversized-file integration scenario
+
+Scenario A:
+
+Telegram reports file size above limit.
+
+Verify:
+
+* no download call;
+* safe error;
+* conversation remains active.
+
+Scenario B:
+
+Telegram reports no size but stream exceeds limit.
+
+Verify:
+
+* download aborted;
+* partial temp content deleted;
+* no receipt;
+* no Payment mutation;
+* retry allowed.
+
+---
+
+# 47. Duplicate-file integration scenario
+
+Scenario A:
+
+Same update replay.
+
+* one attempt;
+* one download;
+* one receipt.
+
+Scenario B:
+
+Same Telegram `file_unique_id` in a new update.
+
+* previous submitted attempt found;
+* no second download;
+* existing success returned.
+
+Scenario C:
+
+Different file ID but same bytes.
+
+* receipt SHA-256 duplicate policy applies;
+* no uncontrolled active duplicate.
+
+Scenario D:
+
+Same file used for another User.
+
+* follow Task 30 cross-user duplicate flag policy;
+* no ownership leak.
+
+---
+
+# 48. Unknown-result integration scenario
+
+Force:
+
+* receipt successfully persisted;
+* Telegram upload-attempt completion transaction fails.
+
+On retry:
+
+* reconcile by receiptRequestId;
+* mark attempt SUBMITTED;
+* no second file storage;
+* no second receipt;
+* send success.
+
+Force Telegram send timeout after success:
+
+* domain state remains correct;
+* update retry does not resubmit receipt;
+* response may be resent according to Telegram uncertainty policy;
+* no duplicate financial entity.
+
+---
+
+# 49. Concurrency tests
+
+Scenario A: two workers process same media update
+
+* one claim;
+* one download;
+* one receipt;
+* one upload attempt.
+
+Scenario B: same file sent in two different updates concurrently
+
+* one active receipt;
+* deterministic conflict/idempotent success;
+* no duplicate storage.
+
+Scenario C: receipt upload races instruction expiry
+
+* either valid submission wins before expiry;
+* or expiry wins and upload is rejected;
+* consistent final state.
+
+Scenario D: receipt upload races Payment cancellation
+
+* no queued receipt for a committed cancelled Payment;
+* or successful submission prevents incompatible cancellation according to domain locking;
+* no partial state.
+
+Scenario E: receipt upload races another receipt source
+
+* active receipt uniqueness enforced.
+
+Requirements:
+
+* real PostgreSQL;
+* deterministic latches/barriers;
+* no Thread.sleep;
+* separate transactions;
+* executor shutdown;
+* explicit timeouts.
+
+---
+
+# 50. Telegram handler integration
+
+Extend Telegram routing.
+
+When active conversation state is AWAITING_RECEIPT_UPLOAD:
+
+* media messages route to receipt processor before normal command fallback;
+* `/cancel` routes to upload cancellation;
+* `/menu` follows documented state-exit policy;
+* unsupported messages receive upload guidance.
+
+When no active receipt state:
+
+* unsolicited photos/documents are ignored or receive:
+  “Open your pending manual payment and select Upload receipt first.”
+
+Do not associate unsolicited media with the latest Payment automatically.
+
+---
+
+# 51. Callback handling
+
+Complete:
+
+UPLOAD_MANUAL_RECEIPT
+
+CANCEL_RECEIPT_UPLOAD
+
+REFRESH_PAYMENT_STATUS
+
+Rules:
+
+* signed;
+* actor-bound through ownership;
+* time-bounded;
+* private-chat only;
+* callback replay safe;
+* no file data in callback;
+* no Payment amount/card data;
+* no receipt request ID unless opaque and safe.
+
+Answer callback query promptly.
+
+---
+
+# 52. Telegram response formatting
+
+Add localized message keys:
+
+receipt_upload_prompt
+
+receipt_upload_supported_formats
+
+receipt_upload_max_size
+
+receipt_upload_private_chat_only
+
+receipt_upload_invalid_message
+
+receipt_upload_invalid_file
+
+receipt_upload_too_large
+
+receipt_upload_download_failed
+
+receipt_upload_temporary_error
+
+receipt_upload_success
+
+receipt_upload_waiting_review
+
+receipt_upload_not_approval
+
+receipt_upload_cancelled
+
+receipt_upload_expired
+
+receipt_upload_already_submitted
+
+receipt_upload_payment_not_available
+
+send_one_file_only
+
+Requirements:
+
+* FA and EN or all supported languages;
+* safe HTML;
+* no internal errors;
+* no file ID/path;
+* no receipt hash;
+* no storage key;
+* no full card number.
+
+---
+
+# 53. Error classification
+
+Create:
+
+TelegramReceiptUploadFailureClassifier
+
+Categories:
+
+USER_CORRECTABLE
+
+RETRYABLE_TELEGRAM
+
+RETRYABLE_STORAGE
+
+CONFLICT
+
+EXPIRED
+
+NON_RETRYABLE
+
+UNKNOWN
+
+Examples:
+
+USER_CORRECTABLE:
+
+* unsupported media;
+* invalid file;
+* too large;
+* malformed image/PDF.
+
+RETRYABLE_TELEGRAM:
+
+* getFile timeout;
+* download 5xx;
+* rate limit.
+
+RETRYABLE_STORAGE:
+
+* temporary local storage unavailable.
+
+CONFLICT:
+
+* receipt already submitted;
+* Payment state changed.
+
+EXPIRED:
+
+* conversation;
+* instruction;
+* Payment.
+
+Requirements:
+
+* map to safe UX;
+* no raw exception text;
+* no infinite retry;
+* preserve domain correctness.
+
+---
+
+# 54. Transaction and network verification
+
+Structurally verify:
+
+* getFile call outside DB transaction;
+* file download outside DB transaction;
+* file inspection/storage follows Task 30 boundaries;
+* Telegram send outside DB transaction;
+* claim/complete/fail transactions are short;
+* no row lock held during network or file IO;
+* no self-invocation breaks `@Transactional`.
+
+Add tests or architecture checks where possible.
+
+---
+
+# 55. Security tests
+
+Verify:
+
+* private chat required;
+* unsolicited file not attached to arbitrary Payment;
+* username not used for identity;
+* callback tampering rejected;
+* expired callback rejected;
+* conversation ownership checked;
+* Payment ownership checked;
+* instruction relationship checked;
+* Telegram file ID not logged;
+* Telegram file path not logged;
+* Bot token not logged;
+* download URL not logged;
+* receipt bytes not logged;
+* filename path traversal neutralized;
+* MIME spoofing rejected by Task 30;
+* oversized stream bounded;
+* redirects rejected;
+* no file bytes in PostgreSQL;
+* no raw file_unique_id persisted;
+* temporary files cleaned;
+* no automatic approval;
+* no outbox;
+* no XUI call.
+
+---
+
+# 56. Architecture verification
+
+Verify:
+
+* Telegram domain models do not depend on Telegram SDK.
+* Receipt domain does not depend on Telegram.
+* Task 30 receipt service remains reusable outside Telegram.
+* Telegram handler depends on use cases/ports.
+* Telegram downloader is infrastructure.
+* No controller/handler injects Spring Data repositories.
+* No raw InputStream leaks into domain.
+* No Telegram DTO leaks into Payment domain.
+* No duplicate file-inspection implementation.
+* No Payment approval logic in Telegram.
+* No direct provisioning.
+* No field injection.
+* No service locator.
+
+Extend ArchUnit tests.
+
+---
+
+# 57. Logging
+
+INFO:
+
+* receipt upload mode started;
+* receipt candidate accepted;
+* Telegram file download started;
+* receipt submitted;
+* receipt queued for review;
+* upload mode cancelled;
+* upload attempt reconciled.
+
+DEBUG:
+
+* source type;
+* reported size;
+* attempt number;
+* idempotent replay;
+* candidate-selection result;
+* download duration;
+* submission duration.
+
+WARN:
+
+* unsupported media;
+* oversized file;
+* invalid content;
+* expired conversation;
+* ownership mismatch;
+* duplicate file;
+* Telegram file unavailable;
+* partial download;
+* storage compensation failure;
+* unknown submission result.
+
+ERROR:
+
+* unexpected upload-processing failure;
+* download-stream failure;
+* receipt-state inconsistency;
+* orphaned temporary file.
+
+Include:
+
+updateId
+
+telegramUserId
+
+purchaseSessionId
+
+paymentId
+
+conversationStateId
+
+uploadAttemptId
+
+receiptRequestId
+
+manualReceiptId after success
+
+sourceType
+
+attemptNumber
+
+traceId
+
+Never include:
+
+Bot token
+
+file ID
+
+file unique ID
+
+file unique ID hash if considered sensitive; preferably omit
+
+file path
+
+download URL
+
+filename if user-controlled; log sanitized generic type only
+
+receipt bytes
+
+receipt hash
+
+card number
+
+amount
+
+storage path/key
+
+raw exception body
+
+---
+
+# 58. Documentation
+
+Create:
+
+docs/telegram/telegram-receipt-upload.md
+
+Document:
+
+* entering upload mode;
+* supported input types;
+* photo versus document behavior;
+* candidate selection;
+* conversation state;
+* download phases;
+* Task 30 integration;
+* successful state transitions;
+* invalid-file retry;
+* cancellation;
+* expiry.
+
+Create:
+
+docs/telegram/telegram-file-download-security.md
+
+Document:
+
+* getFile;
+* download URL secrecy;
+* Bot token placement;
+* host validation;
+* redirect prevention;
+* streaming limits;
+* temporary files;
+* cleanup;
+* MIME distrust;
+* filename sanitization;
+* logging redaction.
+
+Create:
+
+docs/telegram/telegram-receipt-idempotency.md
+
+Include matrix:
+
+Operation
+
+Idempotency key
+
+Database constraint
+
+Replay behavior
+
+Unknown-result behavior
+
+Cover:
+
+* begin upload;
+* media update;
+* file download;
+* upload attempt;
+* receipt submission;
+* completion transaction;
+* Telegram success response.
+
+Update:
+
+docs/telegram/telegram-purchase-flow.md
+
+docs/telegram/telegram-security.md
+
+Include Mermaid diagrams for:
+
+* begin upload;
+* photo upload;
+* document upload;
+* invalid file;
+* oversized file;
+* duplicate update;
+* unknown completion;
+* cancellation;
+* upload versus expiry race.
+
+Use only fake file IDs and fake receipts.
+
+---
+
+# 59. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/telegram/receipt/
+TelegramReceiptUploadAttempt.java
+TelegramReceiptUploadAttemptStatus.java
+TelegramReceiptSourceType.java
+
+src/main/java/com/parazit/panel/domain/telegram/receipt/repository/
+TelegramReceiptUploadAttemptRepository.java
+
+src/main/java/com/parazit/panel/domain/telegram/conversation/
+TelegramConversationState.java
+TelegramConversationStep.java
+TelegramConversationStateRepository.java
+
+src/main/java/com/parazit/panel/application/port/in/telegram/receipt/
+BeginTelegramReceiptUploadUseCase.java
+CancelTelegramReceiptUploadUseCase.java
+ProcessTelegramReceiptMessageUseCase.java
+
+src/main/java/com/parazit/panel/application/port/out/telegram/
+TelegramFileDownloader.java
+TelegramFileIdentityHasher.java
+
+src/main/java/com/parazit/panel/application/telegram/model/
+TelegramPhotoSize.java
+TelegramDocument.java
+
+src/main/java/com/parazit/panel/application/telegram/receipt/
+BeginTelegramReceiptUploadService.java
+CancelTelegramReceiptUploadService.java
+ProcessTelegramReceiptMessageService.java
+TelegramReceiptCandidateSelector.java
+TelegramReceiptFileCandidate.java
+TelegramReceiptUploadFailureClassifier.java
+ReconcileTelegramReceiptUploadAttemptService.java
+ClaimTelegramReceiptUploadTransaction.java
+CompleteTelegramReceiptUploadTransaction.java
+FailTelegramReceiptUploadTransaction.java
+
+src/main/java/com/parazit/panel/application/telegram/file/
+GetTelegramFileCommand.java
+DownloadTelegramFileCommand.java
+TelegramFileMetadata.java
+DownloadedTelegramFile.java
+
+src/main/java/com/parazit/panel/infrastructure/telegram/file/
+TelegramFileDownloadClient.java
+HmacTelegramFileIdentityHasher.java
+TelegramReceiptTemporaryFileManager.java
+if needed
+
+src/main/java/com/parazit/panel/infrastructure/persistence/telegram/receipt/
+SpringDataTelegramReceiptUploadAttemptRepository.java
+TelegramReceiptUploadAttemptRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/telegram/conversation/
+SpringDataTelegramConversationStateRepository.java
+TelegramConversationStateRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/config/properties/
+TelegramReceiptUploadProperties.java
+
+src/main/resources/db/migration/
+V17__create_telegram_receipt_upload.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/telegram/receipt/
+TelegramReceiptUploadAttemptTest.java
+
+src/test/java/com/parazit/panel/domain/telegram/conversation/
+TelegramConversationStateTest.java
+
+src/test/java/com/parazit/panel/application/telegram/receipt/
+BeginTelegramReceiptUploadServiceTest.java
+CancelTelegramReceiptUploadServiceTest.java
+TelegramReceiptCandidateSelectorTest.java
+ProcessTelegramReceiptMessageServiceTest.java
+ReconcileTelegramReceiptUploadAttemptServiceTest.java
+TelegramReceiptUploadFailureClassifierTest.java
+
+src/test/java/com/parazit/panel/infrastructure/telegram/file/
+TelegramFileDownloadClientTest.java
+HmacTelegramFileIdentityHasherTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/telegram/receipt/
+TelegramReceiptUploadAttemptRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/telegram/conversation/
+TelegramConversationStateRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/telegram/receipt/
+TelegramPhotoReceiptUploadIntegrationTest.java
+TelegramDocumentReceiptUploadIntegrationTest.java
+TelegramInvalidReceiptIntegrationTest.java
+TelegramOversizedReceiptIntegrationTest.java
+TelegramDuplicateReceiptUpdateIntegrationTest.java
+TelegramReceiptUnknownResultIntegrationTest.java
+ConcurrentTelegramReceiptUploadIntegrationTest.java
+
+docs/telegram/
+telegram-receipt-upload.md
+telegram-file-download-security.md
+telegram-receipt-idempotency.md
+
+Adapt packages, class names, and migration versions to existing project conventions.
+
+---
+
+# 60. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Telegram message-model tests pass;
+* conversation-state tests pass;
+* upload-attempt tests pass;
+* candidate-selector tests pass;
+* file-downloader tests pass;
+* receipt-service integration tests pass;
+* photo upload works;
+* document image upload works;
+* PDF upload works;
+* invalid files are rejected;
+* oversized files are rejected before unbounded buffering;
+* duplicate updates create one receipt;
+* unknown completion reconciles safely;
+* temporary files are deleted;
+* Flyway passes;
+* Hibernate validation passes;
+* application starts with Telegram receipt upload disabled;
+* application starts with it enabled and mock Telegram;
+* Payment remains unapproved after submission;
+* Order remains unpaid;
+* no outbox is created;
+* no XUI call occurs;
+* no raw file IDs/paths/bytes are logged or persisted;
+* no tests are disabled.
+
+---
+
+# 61. Optional manual verification
+
+Use only:
+
+* a test Telegram Bot;
+* a test User;
+* a test manual Payment;
+* a fake/synthetic receipt;
+* non-production card details.
+
+1. Start a manual purchase.
+2. Receive manual payment instruction.
+3. Press Upload receipt.
+4. Send a clear photo.
+5. Verify:
+
+   * Bot downloads it;
+   * receipt enters review queue;
+   * Payment becomes WAITING_FOR_REVIEW;
+   * Bot confirms submission.
+6. Replay the same update in test tooling.
+7. Confirm one receipt.
+8. Try sending:
+
+   * text;
+   * sticker;
+   * video;
+   * ZIP;
+   * SVG;
+   * oversized PDF;
+   * fake JPG executable.
+9. Confirm safe rejection and retry.
+10. Cancel upload mode.
+11. Confirm Payment remains unchanged.
+12. Let conversation expire.
+13. Confirm late file is ignored.
+14. Inspect:
+
+* logs;
+* database;
+* temp directory;
+* receipt storage.
+
+15. Confirm:
+
+* no Bot token;
+* no file ID/path;
+* no receipt bytes in DB;
+* no leftover temp file;
+* no approval/outbox/provisioning.
+
+Do not perform a real bank transfer.
+
+---
+
+# 62. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Telegram file API contract findings
+3. Supported receipt-input design
+4. Conversation-state design
+5. Upload-attempt design
+6. File identity hashing design
+7. Candidate-selection strategy
+8. Streaming and size-limit strategy
+9. Temporary-file strategy
+10. Receipt command mapping
+11. Idempotency and duplicate-file strategy
+12. Unknown-result reconciliation
+13. Payment/instruction state validation
+14. Error and retry UX
+15. Transaction-boundary design
+16. Security and logging design
+17. Planned files to create
+18. Planned files to modify
+19. Migration and operational risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Telegram message-model changes
+6. Conversation-state behavior
+7. Upload-attempt behavior
+8. Photo selection behavior
+9. Document selection behavior
+10. Telegram file metadata behavior
+11. File-download behavior
+12. Streaming and size limits
+13. Temporary-file cleanup
+14. Receipt-use-case integration
+15. Amount and metadata mapping
+16. Duplicate update/file behavior
+17. Unknown-result reconciliation
+18. Invalid-file behavior
+19. Oversized-file behavior
+20. Cancellation and expiry behavior
+21. Payment/instruction/session transitions
+22. Transaction boundaries
+23. Security and logging
+24. Unit-test results
+25. Telegram file-client test results
+26. Repository-test results
+27. Integration-test results
+28. Duplicate/idempotency-test results
+29. Concurrency-test results
+30. Flyway and Hibernate results
+31. Build result
+32. Commands executed
+33. Remaining issues
+34. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(telegram): add secure manual receipt upload
+
+Stop after completing Task 37.
+
+Do not begin Task 38.
+

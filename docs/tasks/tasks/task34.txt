@@ -1,0 +1,2257 @@
+You are a senior Java 21, Spring Boot, QR Code, secure-content-delivery, and VPN-client compatibility engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 34 — QR Code Generation and User-Friendly Subscription Delivery Formats
+
+## Goal
+
+Extend the Subscription module implemented in Task 33 with user-friendly delivery formats.
+
+After this task, the application must be able to:
+
+* generate QR Codes for:
+
+  * the secure Subscription URL;
+  * an individual VLESS configuration URI;
+* return QR Codes as PNG images;
+* return QR Codes as SVG only if implemented safely;
+* provide user-facing subscription delivery metadata;
+* expose safe internal endpoints for:
+
+  * Subscription URL display;
+  * QR Code preview;
+  * QR Code download;
+  * plain subscription content;
+  * Base64 subscription content;
+  * individual configuration entries;
+* support deterministic QR output for the same input and options;
+* limit QR size and complexity;
+* validate rendering parameters;
+* prevent token leakage through logs, errors, cache, filenames, or headers;
+* keep QR generation stateless;
+* keep raw subscription tokens out of PostgreSQL;
+* preserve all token rotation and revocation behavior from Task 33;
+* prevent revoked, expired, suspended, or invalid Subscriptions from generating usable QR Codes;
+* provide reusable application services for future Telegram delivery;
+* avoid coupling QR generation to Telegram Bot APIs.
+
+Do not implement:
+
+* Telegram Bot handlers;
+* automatic Telegram message delivery;
+* QR Code persistence in PostgreSQL;
+* QR Code persistence on local disk;
+* email delivery;
+* notifications;
+* payment changes;
+* VPN provisioning;
+* client renewal;
+* traffic purchase;
+* new VPN protocols;
+* public admin dashboard;
+* deployment.
+
+Stop after completing Task 34.
+
+Do not begin Task 35.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before making changes.
+* Preserve all working behavior from Tasks 1–33.
+* Reuse:
+
+  * Subscription;
+  * SubscriptionAccessToken;
+  * SubscriptionRepository;
+  * ResolveSubscriptionByTokenUseCase;
+  * VlessUriBuilder;
+  * SubscriptionRenderer;
+  * SubscriptionProperties;
+  * SubscriptionEndpointProperties;
+  * User;
+  * Order;
+  * PlanSelection;
+  * XuiClientProvision;
+  * SystemClockPort;
+  * standard error handling;
+  * traceId;
+  * logging;
+  * Testcontainers;
+  * architecture conventions.
+* Use Java 21.
+* Use the existing Spring Boot and build-tool versions.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into controllers or application services.
+* Do not store generated QR bytes.
+* Do not store raw Subscription URL.
+* Do not store raw VLESS URI.
+* Do not log QR payload.
+* Do not log raw token.
+* Do not log complete Subscription URL.
+* Do not log complete VLESS URI.
+* Do not include raw token in a download filename.
+* Do not derive public base URL from untrusted request headers.
+* Do not build QR payload from caller-provided arbitrary text.
+* Do not generate QR Codes for unknown, revoked, expired, suspended, or invalid Subscriptions.
+* Do not add Telegram SDK dependencies.
+* Do not begin Task 35.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* Subscription aggregate and statuses;
+* raw token creation/rotation behavior;
+* public Subscription URL generation;
+* public `/sub/{token}` endpoint;
+* Subscription content models;
+* VLESS URI builder;
+* plain and Base64 renderers;
+* public endpoint properties;
+* trusted public base URL;
+* current response DTOs;
+* content-entry representation;
+* whether multiple configuration entries are possible;
+* provision-state validation;
+* Subscription access validation;
+* logging redaction for tokenized paths;
+* current image libraries;
+* current API content-negotiation conventions;
+* current resource-download conventions;
+* current test image-comparison utilities;
+* current dependency policy.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. QR payload types
+3. QR library decision
+4. PNG rendering design
+5. SVG rendering decision
+6. Validation and resource-limit design
+7. Subscription URL delivery design
+8. Individual VLESS configuration design
+9. Ownership and lifecycle validation
+10. Token leakage prevention
+11. API design
+12. Planned files to create
+13. Planned files to modify
+14. Dependency and compatibility risks
+
+---
+
+# 3. QR Code library
+
+Choose a mature, offline Java QR library.
+
+Preferred:
+
+ZXing
+
+Recommended dependencies:
+
+com.google.zxing:core
+
+com.google.zxing:javase
+
+Requirements:
+
+* Pin the version according to project dependency-management conventions.
+* Do not add web-based QR APIs.
+* Do not send subscription data to third-party services.
+* Keep QR generation fully local.
+* Add only required modules.
+* Avoid Android-specific dependencies.
+* Document the dependency and license.
+* Add dependency only once.
+
+If an equivalent QR library already exists, reuse it.
+
+---
+
+# 4. QR payload types
+
+Create:
+
+QrPayloadType
+
+Suggested package:
+
+com.parazit.panel.application.qrcode.model
+
+Values:
+
+SUBSCRIPTION_URL
+
+VLESS_URI
+
+Rules:
+
+* SUBSCRIPTION_URL contains the public opaque-token URL.
+* VLESS_URI contains one full rendered VLESS configuration URI.
+* Arbitrary caller-supplied payload is not allowed.
+* Payload must be constructed internally from trusted data.
+* Do not support raw text QR generation through public APIs.
+* Do not accept a URL or VLESS URI directly from request JSON.
+
+---
+
+# 5. QR output format
+
+Create:
+
+QrImageFormat
+
+Values:
+
+PNG
+
+SVG
+
+Task 34 requirements:
+
+* PNG is mandatory.
+* SVG is optional.
+* If SVG is implemented:
+
+  * generate it locally;
+  * no scripts;
+  * no external resources;
+  * no embedded HTML;
+  * no user-provided XML;
+  * correct XML escaping;
+  * safe Content-Type;
+  * `X-Content-Type-Options: nosniff`.
+* If SVG cannot be implemented safely with the selected library, omit it and document PNG-only support.
+
+Do not use JPEG because QR edges require lossless rendering.
+
+---
+
+# 6. QR error-correction level
+
+Create:
+
+QrErrorCorrection
+
+Values:
+
+LOW
+
+MEDIUM
+
+QUARTILE
+
+HIGH
+
+Map to the QR library’s error-correction levels.
+
+Recommended default:
+
+MEDIUM
+
+For VLESS URIs with large payloads:
+
+* allow QUARTILE only if payload remains renderable;
+* do not default to HIGH because it reduces data capacity significantly.
+
+Document that higher error correction increases QR density.
+
+---
+
+# 7. QR rendering options
+
+Create:
+
+QrRenderOptions
+
+Fields:
+
+int width
+
+int height
+
+int marginModules
+
+QrErrorCorrection errorCorrection
+
+QrImageFormat format
+
+boolean transparentBackground
+
+Optional:
+
+int scale
+
+Rules:
+
+* width and height must be equal unless there is a justified implementation reason.
+* Minimum dimension:
+
+  * 128 pixels.
+* Recommended default:
+
+  * 512 pixels.
+* Maximum dimension:
+
+  * 2048 pixels.
+* marginModules:
+
+  * minimum 0;
+  * recommended 4;
+  * maximum 16.
+* transparentBackground allowed only when rendering library supports it safely.
+* Reject unsupported values.
+* Do not accept arbitrary colors in Task 34 unless the project already has a safe color model.
+* Do not permit unbounded rendering dimensions.
+* Do not permit floating-point dimensions.
+
+---
+
+# 8. QR properties
+
+Create:
+
+QrCodeProperties
+
+Prefix:
+
+app.subscription.qr
+
+Suggested fields:
+
+boolean enabled
+
+int defaultSize
+
+int minSize
+
+int maxSize
+
+int defaultMarginModules
+
+int maxMarginModules
+
+QrErrorCorrection defaultErrorCorrection
+
+QrImageFormat defaultFormat
+
+boolean allowSvg
+
+boolean allowTransparentBackground
+
+int maxPayloadCharacters
+
+Duration generationTimeout
+
+Validation:
+
+* default size inside bounds;
+* max size bounded;
+* minimum positive;
+* max payload length positive and bounded;
+* generation timeout positive;
+* default SVG only if SVG enabled;
+* transparent background policy consistent with renderer.
+
+Update `.env.example`.
+
+Suggested environment variables:
+
+SUBSCRIPTION_QR_ENABLED=true
+
+SUBSCRIPTION_QR_DEFAULT_SIZE=512
+
+SUBSCRIPTION_QR_MIN_SIZE=128
+
+SUBSCRIPTION_QR_MAX_SIZE=2048
+
+SUBSCRIPTION_QR_DEFAULT_MARGIN=4
+
+SUBSCRIPTION_QR_MAX_MARGIN=16
+
+SUBSCRIPTION_QR_DEFAULT_ERROR_CORRECTION=MEDIUM
+
+SUBSCRIPTION_QR_DEFAULT_FORMAT=PNG
+
+SUBSCRIPTION_QR_ALLOW_SVG=false
+
+SUBSCRIPTION_QR_ALLOW_TRANSPARENT_BACKGROUND=false
+
+SUBSCRIPTION_QR_MAX_PAYLOAD_CHARACTERS=4096
+
+SUBSCRIPTION_QR_GENERATION_TIMEOUT=PT2S
+
+---
+
+# 9. QR Code generation port
+
+Create:
+
+QrCodeGenerator
+
+Suggested package:
+
+com.parazit.panel.application.port.out.qrcode
+
+Method:
+
+GeneratedQrCode generate(
+QrPayload payload,
+QrRenderOptions options
+)
+
+Create:
+
+QrPayload
+
+Fields:
+
+QrPayloadType type
+
+String value
+
+Rules:
+
+* value nonblank;
+* bounded length;
+* no control characters except valid URI encoding;
+* no CRLF;
+* validated by payload type;
+* safe `toString` that does not print value.
+
+Create:
+
+GeneratedQrCode
+
+Fields:
+
+byte[] bytes
+
+QrImageFormat format
+
+String contentType
+
+int width
+
+int height
+
+String contentHash
+
+Requirements:
+
+* Defensive copying of byte arrays.
+* contentHash is a SHA-256 hash of generated bytes or normalized payload/options for ETag use.
+* No raw payload in result.
+* No token in toString.
+* No mutable internal state.
+
+---
+
+# 10. QR infrastructure adapter
+
+Create:
+
+ZxingQrCodeGenerator
+
+Suggested package:
+
+com.parazit.panel.infrastructure.qrcode
+
+Responsibilities:
+
+* map internal error-correction level;
+* create BitMatrix;
+* render PNG;
+* optionally render safe SVG;
+* apply margin;
+* support configured size;
+* preserve square modules;
+* avoid anti-aliasing that makes scanning unreliable;
+* produce deterministic output;
+* reject payloads exceeding limits;
+* wrap library errors safely.
+
+PNG requirements:
+
+* use lossless PNG;
+* white background and black modules by default;
+* no metadata containing payload;
+* no EXIF;
+* no comments;
+* no embedded token text;
+* correct `image/png`.
+
+SVG requirements, if implemented:
+
+* no script;
+* no external URL;
+* no image references;
+* only basic safe elements;
+* correct viewBox;
+* XML declaration optional but deterministic;
+* correct `image/svg+xml`.
+
+---
+
+# 11. QR generation exception hierarchy
+
+Create or reuse:
+
+QrCodeGenerationException
+
+QrPayloadTooLargeException
+
+QrRenderingDisabledException
+
+UnsupportedQrFormatException
+
+InvalidQrOptionsException
+
+Map internal APIs safely:
+
+400 invalid options
+
+404 inaccessible Subscription or config
+
+413 payload too large if applicable
+
+422 unsupported/incompatible configuration
+
+503 QR generation disabled or temporarily unavailable, according to project policy
+
+Public endpoints must not disclose token validity details.
+
+Do not expose:
+
+* raw payload;
+* token;
+* VLESS URI;
+* QR library stack trace;
+* matrix dimensions beyond safe request validation;
+* internal class names.
+
+---
+
+# 12. Subscription delivery model
+
+Create:
+
+SubscriptionDelivery
+
+Suggested package:
+
+com.parazit.panel.application.subscription.delivery
+
+Fields:
+
+UUID subscriptionId
+
+SubscriptionStatus status
+
+String planName
+
+Instant expiresAt
+
+String accessTokenPrefix
+
+int tokenVersion
+
+String subscriptionUrl
+
+List<SubscriptionDeliveryEntry> entries
+
+Create:
+
+SubscriptionDeliveryEntry
+
+Fields:
+
+int index
+
+String protocol
+
+String displayName
+
+String maskedServer
+
+int port
+
+String transport
+
+String security
+
+boolean qrAvailable
+
+Requirements:
+
+* subscriptionUrl included only in a trusted internal delivery result generated from a raw token available in the current operation.
+* Metadata retrieval without raw token must not reconstruct the URL.
+* Entry metadata must not include:
+
+  * full VLESS URI;
+  * private key;
+  * token;
+  * token hash;
+  * cookies.
+* maskedServer may show:
+
+  * domain;
+  * partially masked IP;
+    according to project policy.
+
+---
+
+# 13. Delivery token behavior
+
+Task 33 returns the raw token only during:
+
+* initial Subscription creation;
+* explicit token rotation.
+
+Task 34 must preserve this rule.
+
+Requirements:
+
+* QR Code for Subscription URL may only be generated when the caller supplies the raw token through an explicitly protected internal use case, or during creation/rotation flow.
+* Do not reconstruct raw token from hash.
+* Do not store token merely to generate QR later.
+* Do not expose an endpoint that generates Subscription URL QR from Subscription ID alone when the server no longer has the raw token.
+
+Preferred design:
+
+Create QR directly in:
+
+* create-subscription result flow;
+* rotate-token result flow;
+
+or expose an internal endpoint requiring both:
+
+* subscriptionId;
+* raw token;
+
+and validate the token against the stored hash before rendering.
+
+Recommended endpoint:
+
+POST /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/qr
+
+Request:
+
+{
+"payloadType": "SUBSCRIPTION_URL",
+"accessToken": "sub_...",
+"format": "PNG",
+"size": 512
+}
+
+Behavior:
+
+* Verify user ownership.
+* Verify provided raw token matches stored hash.
+* Do not log request body.
+* Generate trusted URL from configured base URL and validated token.
+* Never store the supplied token.
+* Return image bytes.
+
+This design allows the future Telegram layer to pass the token it just received after creation/rotation.
+
+---
+
+# 14. VLESS QR behavior
+
+For VLESS_URI QR:
+
+* raw Subscription token is not required.
+* User ownership and Subscription accessibility are required.
+* Build configuration entry from trusted Subscription data.
+* Caller selects configuration by stable index or safe entry ID.
+* Do not accept raw VLESS URI from caller.
+* Do not accept inbound/client/public-key fields from caller.
+* Render the URI internally with VlessUriBuilder.
+* Do not return the URI in logs or error responses.
+
+Recommended endpoint:
+
+GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/configs/{configIndex}/qr
+
+Query parameters:
+
+format=png
+
+size=512
+
+margin=4
+
+errorCorrection=medium
+
+Optional:
+
+download=true
+
+Requirements:
+
+* configIndex validated.
+* Out-of-range config -> 404.
+* Subscription ACTIVE.
+* Underlying provision ACTIVE.
+* Expiry not reached.
+* Config renderable.
+* QR payload within capacity.
+
+---
+
+# 15. Subscription URL QR use case
+
+Create:
+
+GenerateSubscriptionUrlQrCodeUseCase
+
+Command:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+String rawAccessToken
+
+QrRenderOptions options
+
+Behavior:
+
+1. Resolve User.
+2. Load Subscription by user and ID.
+3. Validate ACTIVE and accessible.
+4. Validate token format.
+5. Hash and verify against stored token hash.
+6. Validate expiry.
+7. Validate underlying provision state.
+8. Build trusted Subscription URL from configured public base URL.
+9. Reject if URL exceeds payload limit.
+10. Generate QR.
+11. Return image result and safe download metadata.
+12. Do not update token version.
+13. Do not persist QR.
+14. Do not expose raw URL outside the image result unless explicitly requested by an authorized internal delivery result.
+
+---
+
+# 16. VLESS QR use case
+
+Create:
+
+GenerateVlessConfigQrCodeUseCase
+
+Command:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+int configIndex
+
+QrRenderOptions options
+
+Behavior:
+
+1. Resolve User and ownership.
+2. Load accessible Subscription.
+3. Resolve trusted Subscription content.
+4. Select config entry by index.
+5. Ensure protocol VLESS.
+6. Build exact URI using VlessUriBuilder.
+7. Validate payload size.
+8. Generate QR.
+9. Return image result.
+10. Do not return the URI in response metadata.
+11. Do not persist QR.
+12. Do not increment public Subscription access metrics unless project semantics explicitly define internal QR access as content access.
+
+Preferred:
+
+Do not increment public accessCount for internal QR preview.
+
+---
+
+# 17. Plain configuration display use case
+
+Create:
+
+GetSubscriptionConfigEntryUseCase
+
+Input:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+int configIndex
+
+Result:
+
+SubscriptionConfigEntryResult
+
+Fields:
+
+int index
+
+String protocol
+
+String displayName
+
+String uri
+
+String server
+
+int port
+
+String transport
+
+String security
+
+Instant expiresAt
+
+Requirements:
+
+* Internal authenticated/trusted endpoint only.
+* Verify ownership.
+* Verify Subscription and provision accessibility.
+* URI may be returned because the endpoint is internal and user-scoped.
+* Never log returned URI.
+* Never include Reality private key.
+* Use `Cache-Control: no-store`.
+* Do not expose token.
+* Do not expose raw 3x-ui response.
+
+This endpoint enables future Telegram delivery without duplicating rendering logic.
+
+---
+
+# 18. Subscription URL display behavior
+
+A Subscription URL can only be shown when the raw token is known.
+
+Create:
+
+BuildSubscriptionUrlUseCase
+
+Input:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+String rawAccessToken
+
+Behavior:
+
+* verify ownership;
+* validate raw token against hash;
+* build URL from trusted public base URL;
+* return URL;
+* never persist;
+* never log.
+
+This can be used by:
+
+* creation response;
+* rotation response;
+* QR generation;
+* future Telegram delivery.
+
+Do not create a “get URL by Subscription ID” endpoint.
+
+---
+
+# 19. User delivery summary use case
+
+Create:
+
+GetSubscriptionDeliverySummaryUseCase
+
+Input:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+Result:
+
+SubscriptionDeliverySummary
+
+Fields:
+
+UUID subscriptionId
+
+String planName
+
+SubscriptionStatus status
+
+Instant expiresAt
+
+int tokenVersion
+
+String accessTokenPrefix
+
+int configCount
+
+List<SubscriptionDeliveryEntry> entries
+
+boolean subscriptionUrlAvailable
+
+boolean subscriptionQrAvailable
+
+boolean configQrAvailable
+
+Requirements:
+
+* `subscriptionUrlAvailable` means a valid raw token is needed; do not imply server can reconstruct it.
+* No raw token.
+* No Subscription URL.
+* No VLESS URI.
+* Safe for internal admin/user-facing API.
+
+---
+
+# 20. Image response model
+
+Create:
+
+QrCodeImageResult
+
+Fields:
+
+byte[] bytes
+
+String contentType
+
+String filename
+
+String etag
+
+int width
+
+int height
+
+QrPayloadType payloadType
+
+QrImageFormat format
+
+Requirements:
+
+* filename safe and token-free.
+* Example filename:
+
+subscription-<subscriptionId-prefix>.png
+
+or:
+
+vless-config-1.png
+
+* Do not include:
+
+  * raw token;
+  * full Subscription ID if privacy policy discourages it;
+  * User ID;
+  * Telegram ID;
+  * client UUID.
+* ETag based on generated content hash.
+* Defensive byte copying.
+* No raw payload.
+
+---
+
+# 21. HTTP response headers
+
+All QR responses must include:
+
+Content-Type: image/png
+
+or safe SVG content type
+
+Cache-Control: no-store, no-cache, must-revalidate, private
+
+Pragma: no-cache
+
+Expires: 0
+
+X-Content-Type-Options: nosniff
+
+Content-Disposition:
+inline or attachment with sanitized filename
+
+Content-Length if known
+
+ETag optional
+
+Content-Security-Policy for SVG if implemented:
+
+default-src 'none'; img-src 'self'; style-src 'none'; sandbox
+
+For PNG:
+
+* CSP optional.
+* Never include payload in headers.
+* Never include token in filename.
+* Do not use public caching.
+
+---
+
+# 22. Conditional requests
+
+ETag support is optional.
+
+If implemented:
+
+* ETag must not reveal the token directly.
+* Use SHA-256 of generated bytes.
+* `If-None-Match` may return 304.
+* Response remains `Cache-Control: no-store`.
+* Do not persist QR just for ETag.
+* Do not include ETag in logs if policy considers it a stable identifier.
+
+If not implemented, document omission.
+
+---
+
+# 23. Internal Subscription delivery controller
+
+Create:
+
+SubscriptionDeliveryController
+
+Suggested base path:
+
+/internal/users/{telegramUserId}/subscriptions/{subscriptionId}/delivery
+
+Endpoints:
+
+GET /
+
+Returns safe delivery summary.
+
+POST /subscription-url
+
+Request:
+
+{
+"accessToken": "sub_..."
+}
+
+Returns:
+
+{
+"subscriptionUrl": "https://example.com/sub/sub_..."
+}
+
+POST /subscription-url/qr
+
+Request:
+
+{
+"accessToken": "sub_...",
+"format": "PNG",
+"size": 512,
+"marginModules": 4,
+"errorCorrection": "MEDIUM",
+"transparentBackground": false
+}
+
+Returns image bytes.
+
+GET /configs/{configIndex}
+
+Returns one trusted configuration entry, including URI.
+
+GET /configs/{configIndex}/qr
+
+Returns QR image bytes.
+
+Requirements:
+
+* Do not log request body for endpoints containing token.
+* Controller depends on use cases only.
+* No repository injection.
+* No Spring Data types.
+* Validate query/body through DTOs.
+* Use existing User identity conventions.
+* Standard safe internal errors.
+
+---
+
+# 24. Create and rotate response enhancement
+
+Update Task 33 responses.
+
+Create Subscription response may include:
+
+{
+"subscriptionId": "...",
+"status": "ACTIVE",
+"accessToken": "sub_...",
+"subscriptionUrl": "https://example.com/sub/sub_...",
+"tokenVersion": 1,
+"expiresAt": "...",
+"newlyCreated": true,
+"delivery": {
+"subscriptionQrEndpoint": "...",
+"configCount": 1
+}
+}
+
+Rotate response may include:
+
+{
+"subscriptionId": "...",
+"accessToken": "sub_new...",
+"subscriptionUrl": "https://example.com/sub/sub_new...",
+"tokenVersion": 2
+}
+
+Rules:
+
+* URLs built from trusted configuration.
+* Raw token only during creation/rotation.
+* Do not embed QR bytes/Base64 image in JSON by default.
+* Provide endpoints or links for QR retrieval.
+* Avoid generating QR eagerly unless requested.
+
+---
+
+# 25. Optional JSON QR response
+
+Do not return Base64-encoded QR images in normal JSON responses.
+
+Reason:
+
+* larger response;
+* duplicate encoding;
+* higher memory;
+* easier accidental logging.
+
+Preferred:
+
+Return binary image endpoint.
+
+If a future Telegram adapter needs bytes, it should call the application use case directly, not HTTP JSON.
+
+---
+
+# 26. Resource safety
+
+QR generation must be bounded.
+
+Requirements:
+
+* validate payload character count before calling library;
+* validate dimensions before allocation;
+* limit concurrent memory use naturally through request/thread limits;
+* no unbounded image buffer;
+* no arbitrary image scaling after generation;
+* no recursive generation;
+* no filesystem temp files unless required by library;
+* if temp files are used:
+
+  * secure temp directory;
+  * immediate cleanup;
+  * no token in filename.
+
+Preferred implementation:
+
+Generate directly to ByteArrayOutputStream.
+
+Set a reasonable maximum generated-byte size.
+
+Optional property:
+
+int maxOutputBytes
+
+Reject unexpected oversized output safely.
+
+---
+
+# 27. QR capacity handling
+
+QR capacity varies by:
+
+* payload bytes;
+* error correction;
+* QR version;
+* character encoding.
+
+Requirements:
+
+* encode in UTF-8.
+* Use an explicit character-set hint.
+* Detect library capacity failure.
+* Return safe 413 or 422.
+* Recommend Subscription URL QR when a VLESS URI is too large.
+* Do not silently truncate.
+* Do not remove required VLESS parameters.
+* Do not downgrade security to shorten URI.
+* Do not expose payload in error.
+
+---
+
+# 28. Deterministic rendering
+
+Same:
+
+* payload;
+* width;
+* height;
+* margin;
+* error correction;
+* format;
+* transparency;
+
+must produce equivalent output.
+
+Requirements:
+
+* no timestamps in image metadata;
+* no random metadata;
+* no dynamic comments;
+* deterministic SVG ordering if implemented;
+* stable encoding settings.
+
+Add exact hash-based deterministic tests where library behavior is stable.
+
+Avoid snapshot tests that are library-version brittle unless dependency version is pinned.
+
+---
+
+# 29. Token validation in delivery endpoints
+
+For Subscription URL display and QR:
+
+* validate token maximum length before hashing;
+* reject control characters;
+* use the same normalizer and hasher as public resolution;
+* compare safely;
+* ensure Subscription ID and token refer to the same aggregate;
+* wrong token returns generic 404 or 403 according to internal API policy.
+
+Preferred:
+
+404 to reduce token enumeration.
+
+Do not return:
+
+“Token belongs to another Subscription.”
+
+---
+
+# 30. Subscription lifecycle validation
+
+QR generation allowed only when:
+
+* Subscription status ACTIVE;
+* Subscription not expired;
+* underlying XuiClientProvision ACTIVE;
+* underlying endpoint snapshot valid;
+* ownership valid.
+
+Disallow when:
+
+* PENDING;
+* SUSPENDED;
+* REVOKED;
+* EXPIRED;
+* INVALID;
+* provision DISABLED;
+* provision DELETING;
+* provision DELETED;
+* provision FAILED;
+* provision UNKNOWN, unless current policy treats it as temporary 503.
+
+Behavior:
+
+* terminal inaccessible state -> 404 or 409 internally according to project conventions;
+* temporary metadata outage -> 503;
+* public endpoint anti-enumeration remains unchanged.
+
+---
+
+# 31. Protocol-entry selection
+
+Subscription content may contain multiple entries.
+
+Create a stable selection strategy.
+
+Preferred Task 34:
+
+* use zero-based or one-based index consistently;
+* expose index in delivery summary;
+* sort entries deterministically;
+* do not expose internal database IDs unnecessarily.
+
+Recommended:
+
+one-based API index:
+
+1, 2, 3...
+
+Internally convert safely.
+
+Test:
+
+* index 0 rejected;
+* negative rejected;
+* too-large -> 404;
+* deterministic ordering.
+
+---
+
+# 32. Content display security
+
+Internal config-entry endpoint returns a complete VLESS URI.
+
+Requirements:
+
+* use `Cache-Control: no-store`;
+* do not place URI in headers;
+* do not include URI in exception messages;
+* request/response body logging must be disabled or redacted;
+* OpenAPI examples must use fake data;
+* no full URI in application logs;
+* no private Reality key;
+* no XUI credentials.
+
+Document that the URI is a bearer-like client credential and must be protected.
+
+---
+
+# 33. API DTOs
+
+Create:
+
+SubscriptionDeliverySummaryResponse
+
+SubscriptionDeliveryEntryResponse
+
+BuildSubscriptionUrlRequest
+
+BuildSubscriptionUrlResponse
+
+GenerateSubscriptionUrlQrRequest
+
+QrCodeOptionsRequest
+
+SubscriptionConfigEntryResponse
+
+SubscriptionDeliveryApiMapper
+
+Validation:
+
+* accessToken bounded and nonblank;
+* format enum;
+* size bounds;
+* margin bounds;
+* error correction enum;
+* transparent-background policy;
+* no caller-supplied payload;
+* no caller-supplied VLESS data.
+
+Do not include token hash.
+
+---
+
+# 34. Public QR endpoint decision
+
+Do not expose a public QR endpoint containing the raw token in the path by default.
+
+Avoid:
+
+GET /qr/{token}
+
+Reasons:
+
+* proxy logs;
+* browser history;
+* analytics;
+* referer leakage;
+* duplicate public token surface.
+
+Preferred:
+
+* authenticated/trusted internal binary endpoint;
+* future Telegram service calls use case directly;
+* public Subscription endpoint remains `/sub/{token}`.
+
+If a public QR endpoint is implemented anyway, it must:
+
+* reuse token anti-enumeration;
+* redact logs;
+* no caching;
+* no HTML;
+* no redirects;
+* never expose detailed errors.
+
+Task 34 preferred implementation:
+
+No new public QR endpoint.
+
+---
+
+# 35. Request-body logging exclusion
+
+Update HTTP logging or observability filters.
+
+Exclude or redact bodies for:
+
+* create Subscription;
+* rotate token;
+* build Subscription URL;
+* Subscription URL QR generation.
+
+Requirements:
+
+* do not log token at INFO, DEBUG, WARN, or ERROR;
+* do not include token in tracing attributes;
+* do not attach token to Sentry or similar error metadata;
+* do not include complete URL in audit events.
+
+Add tests or structural verification.
+
+---
+
+# 36. Audit events
+
+Create lightweight application audit records only if existing audit infrastructure exists.
+
+Events:
+
+SUBSCRIPTION_QR_GENERATED
+
+VLESS_QR_GENERATED
+
+SUBSCRIPTION_URL_REVEALED
+
+VLESS_URI_REVEALED
+
+Fields:
+
+subscriptionId
+
+userId
+
+payloadType
+
+format
+
+configIndex
+
+timestamp
+
+traceId
+
+Do not include:
+
+token
+
+URL
+
+URI
+
+public key
+
+client UUID
+
+QR bytes
+
+If no audit infrastructure exists, log safe structured events only.
+
+Do not create a full audit subsystem in Task 34.
+
+---
+
+# 37. Idempotency
+
+QR generation is stateless and repeatable.
+
+Rules:
+
+* same request may generate the same image;
+* no database row created;
+* no token version change;
+* no Subscription state change;
+* no provision change;
+* no Payment or Order change;
+* no accessCount increment unless explicitly designed.
+
+Build Subscription URL:
+
+* deterministic for the same validated token and base URL.
+
+VLESS URI:
+
+* deterministic for the same trusted configuration snapshot.
+
+No idempotency table is needed.
+
+---
+
+# 38. Concurrency
+
+Handle:
+
+* QR generation concurrent with token rotation;
+* QR generation concurrent with revocation;
+* VLESS QR concurrent with provision disable;
+* multiple simultaneous QR requests;
+* property/config reload if project supports it.
+
+Rules:
+
+* Subscription URL token must be validated against current committed hash.
+* After rotation commit, old token QR request must fail.
+* After revocation commit, QR request must fail.
+* A request that validated before a concurrent commit may finish with the previous state; minimize this window through one short read transaction and document behavior.
+* Do not hold database locks while rendering image.
+* Use:
+
+  * Phase A: validate and build immutable payload;
+  * Phase B: render outside transaction.
+* No JVM global lock.
+* QR generator must be thread-safe or stateless.
+
+---
+
+# 39. Transaction boundaries
+
+Subscription URL QR:
+
+Phase A, short transaction:
+
+* load Subscription;
+* verify ownership;
+* verify token;
+* validate state;
+* build immutable trusted URL.
+
+Phase B, outside transaction:
+
+* generate QR bytes.
+
+VLESS QR:
+
+Phase A, short transaction or existing resolver boundary:
+
+* validate ownership/state;
+* create immutable config model.
+
+Optional remote metadata retrieval:
+
+* outside database transaction.
+
+Phase B:
+
+* render URI;
+* generate QR.
+
+Do not keep a transaction open during:
+
+* 3x-ui call;
+* QR matrix generation;
+* PNG encoding;
+* SVG generation;
+* response streaming.
+
+---
+
+# 40. Domain and value-object tests
+
+Test:
+
+QrPayload:
+
+* valid Subscription URL;
+* valid VLESS URI;
+* blank;
+* control characters;
+* CRLF;
+* too long;
+* safe toString.
+
+QrRenderOptions:
+
+* defaults;
+* minimum size;
+* maximum size;
+* too small;
+* too large;
+* margin;
+* unsupported SVG;
+* transparent-background policy;
+* equality if implemented.
+
+GeneratedQrCode:
+
+* defensive copying;
+* content type;
+* dimensions;
+* hash;
+* safe toString.
+
+---
+
+# 41. QR generator unit tests
+
+Test:
+
+* PNG generation.
+* Correct PNG signature.
+* Decodable QR payload using ZXing reader.
+* Subscription URL round trip.
+* VLESS URI round trip.
+* UTF-8 content.
+* deterministic output.
+* default size.
+* custom size.
+* margins.
+* all supported error-correction levels.
+* transparent background if supported.
+* unsupported SVG.
+* too-long payload.
+* invalid options.
+* no payload metadata.
+* concurrent generation.
+* content hash stability.
+
+Do not assert only that bytes are nonempty.
+
+Decode generated QR and compare exact payload.
+
+---
+
+# 42. Subscription URL QR service tests
+
+Test:
+
+* successful generation;
+* correct trusted URL;
+* correct token verification;
+* wrong token;
+* malformed token;
+* wrong owner;
+* revoked;
+* expired;
+* suspended;
+* invalid;
+* underlying provision inactive;
+* payload too large;
+* QR disabled;
+* no state mutation;
+* no accessCount mutation;
+* token absent from logs.
+
+---
+
+# 43. VLESS QR service tests
+
+Test:
+
+* successful config index;
+* QR decodes to exact expected VLESS URI;
+* multiple configs;
+* invalid index;
+* unsupported protocol;
+* missing endpoint snapshot;
+* temporary metadata failure;
+* wrong owner;
+* revoked;
+* expired;
+* provision disabled/deleted;
+* no private key;
+* no token required;
+* no database state mutation.
+
+---
+
+# 44. Configuration-entry service tests
+
+Test:
+
+* returns exact VLESS URI;
+* safe metadata;
+* ownership;
+* active state;
+* invalid index;
+* no private key;
+* correct cache headers in controller;
+* no logging of URI;
+* stable entry ordering.
+
+---
+
+# 45. Controller tests
+
+Delivery summary:
+
+* success;
+* missing Subscription;
+* wrong owner;
+* safe fields.
+
+Build URL:
+
+* success;
+* wrong token;
+* raw token not echoed in errors;
+* no caching.
+
+Subscription URL QR:
+
+* PNG 200;
+* exact content type;
+* content disposition;
+* cache headers;
+* nosniff;
+* wrong token;
+* invalid size;
+* disabled QR;
+* payload too large;
+* no token in headers.
+
+VLESS config:
+
+* success;
+* URI returned only internally;
+* no-store;
+* wrong owner;
+* invalid index.
+
+VLESS QR:
+
+* PNG 200;
+* decodable;
+* invalid index;
+* unsupported format;
+* revoked/expired;
+* correct filename;
+* no VLESS URI in headers.
+
+---
+
+# 46. Integration tests
+
+Using real PostgreSQL and existing Subscription fixtures:
+
+Scenario A: Subscription URL QR
+
+1. Create User.
+2. Create active Subscription with raw token.
+3. Request Subscription URL QR with token.
+4. Decode image.
+5. Verify exact configured public URL.
+6. Verify raw token not persisted.
+7. Verify no state changed.
+8. Rotate token.
+9. Verify old token QR fails.
+10. Verify new token QR succeeds.
+11. Revoke.
+12. Verify QR generation fails.
+
+Scenario B: VLESS QR
+
+1. Create ACTIVE provision and endpoint snapshot.
+2. Create ACTIVE Subscription.
+3. Request config 1 QR.
+4. Decode image.
+5. Verify exact VLESS URI.
+6. Verify no private key.
+7. Disable provision.
+8. Verify QR fails.
+
+Scenario C: multiple entries
+
+* deterministic entry order;
+* each index maps to correct URI;
+* out-of-range fails.
+
+---
+
+# 47. Concurrency tests
+
+Scenario A: old-token QR versus rotation
+
+* coordinate validation and rotation;
+* after rotation commit, new requests with old token fail;
+* new token succeeds.
+
+Scenario B: QR versus revocation
+
+* after revoke commit, new QR request fails.
+
+Scenario C: multiple PNG generation
+
+* same payload/options;
+* valid decodable images;
+* no shared mutable-state corruption.
+
+Scenario D: VLESS QR versus provision disable
+
+* no unusable post-disable generation after committed state refresh.
+
+Requirements:
+
+* barriers/latches;
+* no Thread.sleep;
+* timeouts;
+* executors shut down;
+* deterministic assertions.
+
+---
+
+# 48. Security tests
+
+Verify:
+
+* no arbitrary QR payload endpoint;
+* no raw URL request parameter;
+* no raw VLESS request parameter;
+* token not logged;
+* token not in filename;
+* token not in ETag;
+* token not in errors;
+* URI not logged;
+* QR bytes not logged;
+* no public QR endpoint by default;
+* PNG has no text metadata containing payload;
+* SVG, if enabled, has no scripts/external references;
+* CRLF-safe headers;
+* no caching;
+* no untrusted Host header URL generation;
+* output-size bounds;
+* payload-size bounds.
+
+---
+
+# 49. Architecture verification
+
+Verify:
+
+* QR application models do not depend on ZXing.
+* ZXing exists only in infrastructure.
+* Controllers depend on input ports.
+* No controller injects QrCodeGenerator directly if a use case exists.
+* No repository injection into controllers/services.
+* No QR bytes persisted.
+* No raw tokens persisted.
+* No raw VLESS URIs persisted.
+* No Telegram dependency.
+* No image library in domain.
+* No field injection.
+* No service locator.
+* QR generation does not call Payment or provisioning services.
+
+Extend ArchUnit tests.
+
+---
+
+# 50. Logging
+
+INFO:
+
+* Subscription URL QR generated;
+* VLESS QR generated;
+* configuration entry delivered;
+* Subscription URL revealed through internal delivery use case.
+
+DEBUG:
+
+* QR format;
+* size;
+* error-correction level;
+* config index;
+* generation duration;
+* content hash prefix if safe.
+
+WARN:
+
+* inaccessible Subscription;
+* wrong token;
+* oversized payload;
+* unsupported QR format;
+* unavailable endpoint metadata;
+* QR disabled.
+
+ERROR:
+
+* unexpected QR rendering failure.
+
+Include only:
+
+subscriptionId
+
+userId
+
+provisionId
+
+payloadType
+
+format
+
+size
+
+configIndex
+
+traceId
+
+duration
+
+Never include:
+
+raw token
+
+token hash
+
+Subscription URL
+
+VLESS URI
+
+QR bytes
+
+Base64 QR
+
+public key unless explicitly allowed; preferably omit
+
+private key
+
+client UUID
+
+XUI credentials
+
+cookies
+
+payment data
+
+---
+
+# 51. Documentation
+
+Create:
+
+docs/subscription/qr-code-delivery.md
+
+Document:
+
+* supported payloads;
+* PNG behavior;
+* SVG decision;
+* error correction;
+* dimensions;
+* payload limits;
+* no persistence;
+* deterministic rendering;
+* client scanning considerations;
+* long VLESS payload capacity.
+
+Create:
+
+docs/subscription/subscription-delivery-api.md
+
+Document:
+
+* delivery summary;
+* Subscription URL reveal;
+* Subscription URL QR;
+* config entry;
+* config QR;
+* request/response examples with fake tokens;
+* binary response headers;
+* lifecycle errors;
+* token requirements.
+
+Create:
+
+docs/subscription/qr-security.md
+
+Document:
+
+* QR contains credentials;
+* bearer-token sensitivity;
+* no logging;
+* no caching;
+* no third-party generator;
+* no arbitrary payload;
+* no public QR endpoint;
+* safe filenames;
+* rotation/revocation effects;
+* HTTPS requirement.
+
+Update:
+
+docs/subscription/subscription-api.md
+
+Include Task 34 endpoints.
+
+Add Mermaid diagrams for:
+
+* Subscription URL QR generation;
+* VLESS QR generation;
+* token validation;
+* token rotation race;
+* revocation behavior;
+* trusted payload construction.
+
+---
+
+# 52. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/application/port/out/qrcode/
+QrCodeGenerator.java
+
+src/main/java/com/parazit/panel/application/port/in/subscription/delivery/
+GetSubscriptionDeliverySummaryUseCase.java
+BuildSubscriptionUrlUseCase.java
+GenerateSubscriptionUrlQrCodeUseCase.java
+GetSubscriptionConfigEntryUseCase.java
+GenerateVlessConfigQrCodeUseCase.java
+
+src/main/java/com/parazit/panel/application/qrcode/model/
+QrPayload.java
+QrPayloadType.java
+QrImageFormat.java
+QrErrorCorrection.java
+QrRenderOptions.java
+GeneratedQrCode.java
+
+src/main/java/com/parazit/panel/application/subscription/delivery/
+GetSubscriptionDeliverySummaryService.java
+BuildSubscriptionUrlService.java
+GenerateSubscriptionUrlQrCodeService.java
+GetSubscriptionConfigEntryService.java
+GenerateVlessConfigQrCodeService.java
+SubscriptionDelivery.java
+SubscriptionDeliveryEntry.java
+SubscriptionDeliverySummary.java
+SubscriptionConfigEntryResult.java
+QrCodeImageResult.java
+
+src/main/java/com/parazit/panel/infrastructure/qrcode/
+ZxingQrCodeGenerator.java
+SafeSvgQrRenderer.java
+if SVG is supported
+
+src/main/java/com/parazit/panel/api/internal/subscription/delivery/
+SubscriptionDeliveryController.java
+SubscriptionDeliverySummaryResponse.java
+SubscriptionDeliveryEntryResponse.java
+BuildSubscriptionUrlRequest.java
+BuildSubscriptionUrlResponse.java
+GenerateSubscriptionUrlQrRequest.java
+QrCodeOptionsRequest.java
+SubscriptionConfigEntryResponse.java
+SubscriptionDeliveryApiMapper.java
+
+src/main/java/com/parazit/panel/config/properties/
+QrCodeProperties.java
+
+src/main/java/com/parazit/panel/common/exception/
+QrCodeGenerationException.java
+QrPayloadTooLargeException.java
+QrRenderingDisabledException.java
+UnsupportedQrFormatException.java
+InvalidQrOptionsException.java
+
+src/test/java/com/parazit/panel/application/qrcode/model/
+QrPayloadTest.java
+QrRenderOptionsTest.java
+GeneratedQrCodeTest.java
+
+src/test/java/com/parazit/panel/infrastructure/qrcode/
+ZxingQrCodeGeneratorTest.java
+ZxingQrCodeGeneratorConcurrencyTest.java
+
+src/test/java/com/parazit/panel/application/subscription/delivery/
+GetSubscriptionDeliverySummaryServiceTest.java
+BuildSubscriptionUrlServiceTest.java
+GenerateSubscriptionUrlQrCodeServiceTest.java
+GetSubscriptionConfigEntryServiceTest.java
+GenerateVlessConfigQrCodeServiceTest.java
+
+src/test/java/com/parazit/panel/api/internal/subscription/delivery/
+SubscriptionDeliveryControllerTest.java
+
+src/test/java/com/parazit/panel/integration/subscription/delivery/
+SubscriptionUrlQrIntegrationTest.java
+VlessQrIntegrationTest.java
+SubscriptionQrLifecycleIntegrationTest.java
+ConcurrentQrGenerationIntegrationTest.java
+
+docs/subscription/
+qr-code-delivery.md
+subscription-delivery-api.md
+qr-security.md
+
+Adapt packages and names to existing project conventions.
+
+---
+
+# 53. Dependency verification
+
+After adding ZXing:
+
+* verify dependency tree;
+* ensure no unexpected logging implementation;
+* ensure no vulnerable duplicate image library;
+* ensure no Android artifact;
+* record library version;
+* confirm license compatibility;
+* ensure build remains reproducible.
+
+Do not add ZXing if an approved equivalent already exists.
+
+---
+
+# 54. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* QR model tests pass;
+* generator tests pass;
+* generated PNG decodes to exact payload;
+* Subscription URL QR tests pass;
+* VLESS QR tests pass;
+* controller tests pass;
+* integration tests pass;
+* concurrency tests pass;
+* architecture tests pass;
+* application starts;
+* no raw token is persisted;
+* no QR bytes are persisted;
+* no VLESS URI is persisted;
+* no token or URI is logged;
+* no public QR endpoint was added;
+* revoked/expired Subscription cannot generate QR;
+* old token cannot generate QR after rotation;
+* disabled/deleted provision cannot generate VLESS QR;
+* no Payment, Order, or provision state is changed;
+* no Telegram dependency exists;
+* no tests are disabled.
+
+---
+
+# 55. Optional manual verification
+
+Use only test data.
+
+1. Create a User.
+2. Create an ACTIVE Subscription and retain the raw token.
+3. Request Subscription URL PNG QR.
+4. Scan with a phone.
+5. Confirm it opens the expected `/sub/{token}` URL.
+6. Request VLESS config QR.
+7. Scan/import it in a compatible VPN client.
+8. Confirm:
+
+   * UUID;
+   * host;
+   * port;
+   * Reality public key;
+   * SNI;
+   * short ID;
+   * fingerprint;
+   * transport.
+9. Change QR size and verify readability.
+10. Test incorrect token.
+11. Rotate token.
+12. Confirm old-token QR generation fails.
+13. Confirm new-token QR works.
+14. Revoke Subscription.
+15. Confirm QR generation fails.
+16. Disable provision.
+17. Confirm VLESS QR generation fails.
+18. Inspect logs and confirm no token/URI appears.
+
+Do not use production tokens, clients, or inbounds.
+
+---
+
+# 56. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. QR library decision
+3. Payload-type design
+4. PNG/SVG decision
+5. Rendering-option design
+6. Payload and output limits
+7. Subscription URL QR flow
+8. VLESS QR flow
+9. Raw-token handling
+10. Lifecycle validation
+11. Transaction-boundary design
+12. Logging-redaction design
+13. Planned files to create
+14. Planned files to modify
+15. Dependency and compatibility risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Dependency changes
+5. QR payload model
+6. Rendering options
+7. PNG implementation
+8. SVG implementation or omission
+9. Subscription URL delivery behavior
+10. Subscription URL QR behavior
+11. VLESS config delivery behavior
+12. VLESS QR behavior
+13. Token validation
+14. Lifecycle validation
+15. Response headers
+16. Resource-limit behavior
+17. Idempotency behavior
+18. Transaction boundaries
+19. Concurrency behavior
+20. Security and logging behavior
+21. Unit-test results
+22. QR decoding-test results
+23. Integration-test results
+24. Controller-test results
+25. Concurrency-test results
+26. Architecture-test results
+27. Build result
+28. Commands executed
+29. Remaining issues
+30. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(subscription): add QR code and delivery formats
+
+Stop after completing Task 34.
+
+Do not begin Task 35.

@@ -1,0 +1,3001 @@
+You are a senior Java 21, Spring Boot, Telegram Bot API, notification, scheduling, idempotency, and distributed-systems engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 39 — Telegram Notifications, Payment Reminders, and Subscription Expiry Alerts
+
+## Goal
+
+Implement a reliable notification and reminder framework that uses the Telegram Bot to notify users about important Payment, provisioning, and Subscription events.
+
+After this task, the application must be able to send bounded, localized, idempotent, and privacy-safe Telegram notifications for:
+
+* unpaid Zarinpal Payments approaching expiry;
+* unpaid manual card-to-card Payments approaching expiry;
+* manual Payments waiting for receipt upload;
+* submitted receipts waiting for operator review;
+* approved Payments waiting for VPN provisioning;
+* successful VPN provisioning;
+* provisioning failure requiring support;
+* Subscriptions approaching expiry;
+* Subscriptions approaching traffic exhaustion when reliable usage data exists;
+* expired Subscriptions;
+* token rotation and revocation security events when appropriate;
+* optionally, rejected manual receipts requiring resubmission;
+* delivery failure handling;
+* user notification preferences;
+* quiet hours;
+* duplicate-notification prevention;
+* bounded retry through the scheduled-job framework from Task 38;
+* safe multi-instance execution.
+
+Do not implement:
+
+* promotional campaigns;
+* marketing broadcasts;
+* mass messaging;
+* admin-composed announcements;
+* referral marketing;
+* discount campaigns;
+* refund notifications;
+* chargeback workflows;
+* automatic renewal;
+* automatic payment creation;
+* automatic receipt approval;
+* automatic VPN provisioning outside the existing outbox;
+* SMS;
+* email;
+* push notifications outside Telegram;
+* user-configurable cron expressions;
+* complex template administration UI;
+* deployment.
+
+Stop after completing Task 39.
+
+Do not begin Task 40.
+
+---
+
+# 1. Important rules
+
+* Inspect the complete repository before changing anything.
+* Preserve all working behavior from Tasks 1–38.
+* Reuse:
+
+  * TelegramBotClient;
+  * TelegramResponseExecutor where appropriate;
+  * Telegram message catalog;
+  * Telegram private-chat and user-identity rules;
+  * User and UserSettings;
+  * Payment;
+  * Order;
+  * ManualCardPaymentInstruction;
+  * ManualPaymentReceipt;
+  * ManualPaymentReview;
+  * XuiClientProvision;
+  * Subscription;
+  * Subscription usage provider;
+  * scheduled-job framework from Task 38;
+  * PostgreSQL advisory job locks;
+  * SystemClockPort;
+  * existing retry classifiers;
+  * logging;
+  * traceId;
+  * Testcontainers.
+* Use Java 21.
+* Use the current Spring Boot and build-tool versions.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into schedulers, notification handlers, or controllers.
+* Notification services must use application repository ports and use cases.
+* Do not send Telegram messages inside long database transactions.
+* Do not mark a Payment APPROVED because a reminder was sent.
+* Do not change Order status because a notification was sent.
+* Do not alter Subscription expiry or traffic because of a notification.
+* Do not create another Payment, Order, receipt, Subscription, or VPN client.
+* Do not store Telegram message bodies containing credentials.
+* Do not include:
+
+  * Subscription token;
+  * Subscription URL;
+  * VLESS URI;
+  * full card number;
+  * Zarinpal authority;
+  * receipt contents;
+  * private keys;
+  * 3x-ui credentials;
+    in notification records or logs.
+* Financial and credential-related notifications must be sent only to the User’s private Telegram chat.
+* Do not begin Task 40.
+
+---
+
+# 2. Verify current Telegram Bot API behavior
+
+Before implementation, inspect the current official Telegram Bot API documentation for:
+
+* sendMessage;
+* inline keyboards;
+* URL buttons;
+* editMessageText;
+* deleteMessage if considered;
+* protected content behavior;
+* disable_web_page_preview or equivalent current fields;
+* rate-limit responses;
+* retry_after;
+* forbidden and blocked-user errors;
+* message-length limits;
+* parse-mode behavior.
+
+Record:
+
+* Bot API version/date consulted;
+* delivery limitations;
+* rate-limit handling;
+* blocked-user behavior;
+* whether notifications should use new messages or edit prior messages.
+
+Do not rely on outdated tutorials.
+
+---
+
+# 3. Current-state assessment
+
+Inspect and report:
+
+* UserSettings notification-related fields;
+* User language;
+* Telegram private-chat identity;
+* whether a stable Telegram chat ID is stored;
+* Telegram Bot client methods;
+* scheduled-job framework;
+* Payment expiry and states;
+* manual receipt/review states;
+* provisioning outbox and Order states;
+* Subscription expiry and usage metadata;
+* existing event publishing;
+* current audit/logging conventions;
+* notification or message tables if any;
+* current retry framework;
+* current migration history;
+* test infrastructure.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Notification event inventory
+3. User preference design
+4. Quiet-hour design
+5. Notification aggregate design
+6. Idempotency-key strategy
+7. Scheduling and candidate-selection strategy
+8. Immediate versus scheduled notification strategy
+9. Telegram delivery strategy
+10. Retry and unknown-result strategy
+11. Traffic-alert reliability strategy
+12. Security and redaction design
+13. Planned files to create
+14. Planned files to modify
+15. Migration and operational risks
+
+---
+
+# 4. Notification categories
+
+Create:
+
+NotificationCategory
+
+Suggested package:
+
+com.parazit.panel.domain.notification
+
+Values:
+
+PAYMENT_REMINDER
+
+MANUAL_RECEIPT_REQUIRED
+
+MANUAL_RECEIPT_SUBMITTED
+
+MANUAL_RECEIPT_REJECTED
+
+PAYMENT_APPROVED
+
+PROVISIONING_STARTED
+
+PROVISIONING_COMPLETED
+
+PROVISIONING_FAILED
+
+SUBSCRIPTION_EXPIRING
+
+SUBSCRIPTION_EXPIRED
+
+TRAFFIC_LOW
+
+TRAFFIC_EXHAUSTED
+
+SUBSCRIPTION_TOKEN_ROTATED
+
+SUBSCRIPTION_REVOKED
+
+SYSTEM_OPERATIONAL
+
+Task 39 must primarily support user-facing transactional notifications.
+
+Do not implement promotional categories.
+
+---
+
+# 5. Notification status
+
+Create:
+
+NotificationStatus
+
+Values:
+
+PENDING
+
+CLAIMED
+
+SENDING
+
+SENT
+
+FAILED
+
+UNKNOWN
+
+CANCELLED
+
+DEAD
+
+SKIPPED
+
+Rules:
+
+* PENDING -> CLAIMED
+* CLAIMED -> SENDING
+* SENDING -> SENT
+* SENDING -> FAILED
+* SENDING -> UNKNOWN
+* FAILED -> PENDING for retry
+* UNKNOWN -> PENDING only after reconciliation policy
+* excessive attempts -> DEAD
+* PENDING/FAILED -> CANCELLED when notification is no longer relevant
+* preference-disabled or quiet-hour-deferred items may become SKIPPED or remain PENDING with future availableAt
+* SENT, CANCELLED, DEAD, and SKIPPED are terminal unless explicit resend is introduced later
+* no generic status setter
+
+---
+
+# 6. Notification aggregate
+
+Create:
+
+Notification
+
+Suggested package:
+
+com.parazit.panel.domain.notification
+
+Extend BaseEntity.
+
+Recommended fields:
+
+UUID id
+
+UUID userId
+
+long telegramUserId
+
+Long telegramChatId
+
+NotificationCategory category
+
+NotificationStatus status
+
+String notificationKey
+
+String templateKey
+
+String templateVersion
+
+String locale
+
+String payload
+
+int attemptCount
+
+Instant availableAt
+
+Instant scheduledFor
+
+Instant claimedAt
+
+Instant sendingStartedAt
+
+Instant sentAt
+
+Instant failedAt
+
+Instant cancelledAt
+
+Instant lastAttemptAt
+
+String failureCode
+
+String failureMessage
+
+Long telegramMessageId
+
+String deliveryFingerprint
+
+Instant createdAt
+
+Instant updatedAt
+
+Rules:
+
+* notificationKey globally unique.
+* payload must contain only safe structured template variables.
+* No raw credentials.
+* No full rendered message required in database.
+* telegramChatId must belong to User.
+* attemptCount nonnegative.
+* availableAt controls retry and quiet-hour deferral.
+* sentAt required for SENT.
+* failure metadata bounded and sanitized.
+* no stack trace.
+* history preserved.
+* no physical deletion in Task 39.
+
+---
+
+# 7. Notification payload
+
+Create versioned application/domain-safe payloads.
+
+Preferred:
+
+A JSON payload containing only non-sensitive template variables.
+
+Examples:
+
+## Payment reminder
+
+paymentId
+
+paymentMethod
+
+safe plan name
+
+amount
+
+currency
+
+expiresAt
+
+## Receipt rejected
+
+paymentId
+
+safe rejection reason code
+
+canResubmit
+
+## Subscription expiry
+
+subscriptionId
+
+safe plan name
+
+expiresAt
+
+daysRemaining
+
+## Traffic alert
+
+subscriptionId
+
+totalBytes
+
+remainingBytes
+
+thresholdPercent
+
+Requirements:
+
+* no Payment authority;
+* no card number;
+* no receipt hash;
+* no Subscription token;
+* no VLESS URI;
+* no XUI credential;
+* no private key;
+* no Telegram Bot token;
+* no raw provider response.
+
+Create:
+
+NotificationPayloadSerializer
+
+Use versioned payload schema.
+
+---
+
+# 8. Notification key strategy
+
+Every logical notification must have a deterministic idempotency key.
+
+Recommended format conceptually:
+
+`<category>:<resourceId>:<threshold-or-version>`
+
+Examples:
+
+PAYMENT_REMINDER:
+
+`PAYMENT_REMINDER:<paymentId>:T_MINUS_30M`
+
+MANUAL_RECEIPT_REQUIRED:
+
+`MANUAL_RECEIPT_REQUIRED:<paymentId>:V1`
+
+MANUAL_RECEIPT_REJECTED:
+
+`MANUAL_RECEIPT_REJECTED:<receiptId>:<reviewVersion>`
+
+PROVISIONING_COMPLETED:
+
+`PROVISIONING_COMPLETED:<orderId>:V1`
+
+SUBSCRIPTION_EXPIRING:
+
+`SUBSCRIPTION_EXPIRING:<subscriptionId>:T_MINUS_3D`
+
+TRAFFIC_LOW:
+
+`TRAFFIC_LOW:<subscriptionId>:THRESHOLD_20`
+
+Requirements:
+
+* deterministic;
+* bounded length;
+* no secret values;
+* database unique constraint;
+* repeated candidate scans create one row;
+* resource status change may cancel stale pending notification.
+
+Create:
+
+NotificationKeyFactory
+
+---
+
+# 9. Notification repository
+
+Create:
+
+NotificationRepository
+
+Suggested package:
+
+com.parazit.panel.domain.notification.repository
+
+Extend:
+
+UuidRepository<Notification>
+
+Add:
+
+Optional<Notification> findByNotificationKey(String notificationKey)
+
+boolean existsByNotificationKey(String notificationKey)
+
+List<Notification> findAvailableForDelivery(
+Instant now,
+int limit
+)
+
+List<Notification> findByUserIdOrderByCreatedAtDesc(
+UUID userId,
+int limit
+)
+
+List<Notification> findStaleSending(
+Instant before,
+int limit
+)
+
+List<Notification> findPendingByResourceReference if the payload/reference design supports it safely.
+
+Create Spring Data repository and adapter.
+
+No Spring Data leakage.
+
+Use PostgreSQL row claiming.
+
+---
+
+# 10. Notification migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V19__create_notifications_and_notification_preferences.sql
+
+Adjust to the actual migration order.
+
+Create table:
+
+notifications
+
+Columns:
+
+id UUID primary key
+
+user_id UUID not null
+
+telegram_user_id BIGINT not null
+
+telegram_chat_id BIGINT null
+
+category VARCHAR(64) not null
+
+status VARCHAR(32) not null
+
+notification_key VARCHAR(200) not null
+
+template_key VARCHAR(150) not null
+
+template_version VARCHAR(32) not null
+
+locale VARCHAR(16) not null
+
+payload JSONB not null
+
+attempt_count INTEGER not null
+
+available_at TIMESTAMPTZ not null
+
+scheduled_for TIMESTAMPTZ null
+
+claimed_at TIMESTAMPTZ null
+
+sending_started_at TIMESTAMPTZ null
+
+sent_at TIMESTAMPTZ null
+
+failed_at TIMESTAMPTZ null
+
+cancelled_at TIMESTAMPTZ null
+
+last_attempt_at TIMESTAMPTZ null
+
+failure_code VARCHAR(64) null
+
+failure_message VARCHAR(500) null
+
+telegram_message_id BIGINT null
+
+delivery_fingerprint VARCHAR(128) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique notification_key;
+* valid category/status;
+* attempt_count >= 0;
+* SENT requires sent_at;
+* FAILED/UNKNOWN/DEAD require failed_at or last_attempt_at according to model;
+* CANCELLED requires cancelled_at;
+* foreign key to users;
+* payload is JSONB.
+
+Indexes:
+
+status, available_at
+
+user_id, created_at desc
+
+category, status
+
+telegram_user_id
+
+scheduled_for
+
+sending_started_at
+
+Do not edit old migrations.
+
+---
+
+# 11. Notification preferences
+
+Extend UserSettings or create:
+
+NotificationPreference
+
+Preferred:
+
+Create a dedicated entity if notification settings are becoming complex.
+
+Suggested fields:
+
+UUID id
+
+UUID userId
+
+boolean telegramEnabled
+
+boolean paymentRemindersEnabled
+
+boolean receiptNotificationsEnabled
+
+boolean provisioningNotificationsEnabled
+
+boolean subscriptionExpiryEnabled
+
+boolean trafficAlertsEnabled
+
+int subscriptionExpiryDaysBefore
+
+int trafficLowPercentThreshold
+
+LocalTime quietHoursStart
+
+LocalTime quietHoursEnd
+
+String timezone
+
+Instant createdAt
+
+Instant updatedAt
+
+Rules:
+
+* one preference row per User.
+* safe defaults.
+* Telegram enabled by default only if existing product policy allows it.
+* percentage threshold between 1 and 100.
+* expiry days bounded.
+* timezone must be valid IANA zone.
+* quiet hours optional.
+* transactional critical notifications may optionally bypass quiet hours only according to explicit policy.
+* no promotional fields.
+
+If UserSettings already supports these fields cleanly, extend it instead of creating a duplicate aggregate.
+
+---
+
+# 12. Preference defaults
+
+Recommended defaults:
+
+telegramEnabled = true
+
+paymentRemindersEnabled = true
+
+receiptNotificationsEnabled = true
+
+provisioningNotificationsEnabled = true
+
+subscriptionExpiryEnabled = true
+
+trafficAlertsEnabled = true
+
+subscriptionExpiryDaysBefore = 3
+
+trafficLowPercentThreshold = 20
+
+quietHoursStart = null
+
+quietHoursEnd = null
+
+timezone = User’s configured timezone or system default policy
+
+Requirements:
+
+* defaults documented;
+* existing Users receive lazy/default preferences;
+* no duplicate row;
+* concurrency-safe initialization.
+
+---
+
+# 13. Notification preference APIs
+
+Create or extend user settings use cases:
+
+GetNotificationPreferencesUseCase
+
+UpdateNotificationPreferencesUseCase
+
+Input identity:
+
+Telegram user ID through existing User resolution.
+
+Internal endpoints:
+
+GET /internal/users/{telegramUserId}/notification-preferences
+
+PUT /internal/users/{telegramUserId}/notification-preferences
+
+Safe response fields only.
+
+Do not expose notification history through the public Subscription endpoint.
+
+Optional Telegram UX is handled later in this task.
+
+---
+
+# 14. Quiet hours
+
+Create:
+
+QuietHoursPolicy
+
+Input:
+
+NotificationPreference
+
+NotificationCategory
+
+Instant now
+
+Output:
+
+QuietHoursDecision
+
+Fields:
+
+boolean allowedNow
+
+Instant nextAllowedAt
+
+boolean bypassed
+
+Rules:
+
+* convert now using User’s IANA timezone;
+* support ranges crossing midnight;
+* exact boundary behavior documented;
+* if inside quiet hours:
+
+  * defer notification by setting availableAt to nextAllowedAt;
+* critical security notifications may bypass only if explicitly configured;
+* Task 39 recommended:
+
+  * token rotation/revocation may bypass;
+  * ordinary reminders do not bypass.
+* do not use server timezone implicitly.
+* invalid timezone must fail fast on update and fall back safely for legacy records.
+
+Use fixed-clock tests.
+
+---
+
+# 15. Notification templates
+
+Create:
+
+NotificationTemplateRenderer
+
+Create:
+
+NotificationTemplateCatalog
+
+Templates must be localized.
+
+Suggested template keys:
+
+payment.reminder.zarinpal
+
+payment.reminder.manual
+
+manual.receipt.required
+
+manual.receipt.submitted
+
+manual.receipt.rejected
+
+payment.approved
+
+provisioning.started
+
+provisioning.completed
+
+provisioning.failed
+
+subscription.expiring
+
+subscription.expired
+
+traffic.low
+
+traffic.exhausted
+
+subscription.token.rotated
+
+subscription.revoked
+
+Requirements:
+
+* FA and EN or all currently supported languages;
+* HTML-safe rendering;
+* typed variables;
+* no arbitrary template execution;
+* no SpEL;
+* no database-editable HTML templates in Task 39;
+* bounded message length;
+* no secrets;
+* safe fallback locale;
+* template version tracked.
+
+---
+
+# 16. Notification actions and keyboards
+
+Create:
+
+NotificationActionFactory
+
+Possible buttons:
+
+OPEN_PAYMENT
+
+REFRESH_PAYMENT_STATUS
+
+UPLOAD_RECEIPT
+
+MY_PAYMENTS
+
+MY_SUBSCRIPTIONS
+
+VIEW_SUBSCRIPTION
+
+CONTACT_SUPPORT
+
+BUY_NEW_PLAN
+
+Requirements:
+
+* callbacks signed through existing Telegram callback codec;
+* no raw token;
+* no amount;
+* no authority;
+* no VLESS URI;
+* no card number;
+* no unrestricted arbitrary URL.
+* Zarinpal payment URL button may only be included when a trusted active redirect URL is still available through existing safe use case.
+* If the raw URL cannot be safely reconstructed, use a callback to reopen Payment details instead.
+
+Prefer callback navigation over embedding financial URLs in reminders.
+
+---
+
+# 17. Immediate versus scheduled notifications
+
+Use two paths.
+
+## Immediate event-driven enqueue
+
+For events such as:
+
+* receipt submitted;
+* receipt rejected;
+* Payment approved;
+* provisioning completed;
+* provisioning failed;
+* token rotated;
+* Subscription revoked.
+
+The business transaction may create a Notification row through a transactional outbox-style enqueue.
+
+Requirements:
+
+* Notification row created in same local transaction as the relevant state transition where practical;
+* Telegram send occurs later;
+* no direct Telegram send inside business transaction;
+* repeated event creates one notification by notificationKey.
+
+## Scheduled candidate scanning
+
+For time/threshold notifications:
+
+* Payment approaching expiry;
+* Subscription approaching expiry;
+* traffic low/exhausted.
+
+Use Task 38 scheduled jobs to create Notification rows.
+
+Do not send directly from candidate scanner.
+
+---
+
+# 18. Notification enqueue service
+
+Create:
+
+EnqueueNotificationUseCase
+
+Implementation:
+
+NotificationEnqueueService
+
+Command fields:
+
+UUID userId
+
+long telegramUserId
+
+Long telegramChatId
+
+NotificationCategory category
+
+String notificationKey
+
+String templateKey
+
+String templateVersion
+
+String locale
+
+NotificationPayload payload
+
+Instant availableAt
+
+Behavior:
+
+* validate preference/category;
+* create one PENDING row;
+* duplicate notificationKey returns existing row;
+* no Telegram call;
+* no rendering required during enqueue;
+* quiet-hour policy may set availableAt;
+* if category disabled:
+
+  * return SKIPPED result or create SKIPPED row according to audit policy.
+
+Preferred:
+
+Create SKIPPED row only for important transactional audit events.
+
+For recurring reminder scans, simply skip creation when preference is disabled.
+
+Document the choice.
+
+---
+
+# 19. Immediate event integration
+
+Inspect existing completion services.
+
+Integrate notification enqueue minimally into:
+
+## Receipt submitted
+
+After receipt queued:
+
+MANUAL_RECEIPT_SUBMITTED
+
+## Receipt rejected
+
+After operator rejection:
+
+MANUAL_RECEIPT_REJECTED
+
+## Payment approved
+
+After Payment APPROVED:
+
+PAYMENT_APPROVED
+
+## Provisioning started
+
+Optional, when Order becomes PROVISIONING:
+
+PROVISIONING_STARTED
+
+## Provisioning completed
+
+When Order COMPLETED and provision ACTIVE:
+
+PROVISIONING_COMPLETED
+
+## Provisioning failed
+
+When Order PROVISIONING_FAILED:
+
+PROVISIONING_FAILED
+
+## Token rotation/revocation
+
+After successful commit:
+
+SUBSCRIPTION_TOKEN_ROTATED
+
+SUBSCRIPTION_REVOKED
+
+Requirements:
+
+* notification enqueue must not make the business transaction fail for optional notifications unless product policy requires guaranteed notification creation;
+* preferred:
+
+  * create Notification row transactionally for critical state events;
+  * if insert fails, fail the transaction only if notification durability is a stated requirement.
+* Avoid circular dependencies.
+
+Recommended architecture:
+
+Use domain/application events captured into Notification rows after commit only if safe durability exists.
+
+Better:
+
+Directly enqueue Notification row in the same transaction through a narrow application port.
+
+Do not send Telegram directly.
+
+---
+
+# 20. Payment-reminder candidate job
+
+Create:
+
+GeneratePaymentReminderNotificationsJob
+
+Add job key:
+
+GENERATE_PAYMENT_REMINDERS
+
+Candidate rules:
+
+* Payment method ZARINPAL or CARD_TO_CARD_MANUAL;
+* Payment status eligible and unpaid;
+* expiresAt in configured reminder window;
+* not expired;
+* User notifications enabled;
+* no existing notificationKey for threshold.
+
+Recommended thresholds:
+
+* 30 minutes before expiry;
+* optionally 2 hours before expiry for longer-lived Payments.
+
+Configure thresholds.
+
+Do not generate:
+
+* for APPROVED;
+* for CANCELLED;
+* for EXPIRED;
+* for FAILED terminal Payments unless retry is possible;
+* for WAITING_FOR_REVIEW unless using a separate review notification.
+
+Zarinpal message:
+
+* payment still incomplete;
+* expiry;
+* reopen Payment details.
+
+Manual message:
+
+* exact transfer remains pending;
+* expiry;
+* upload receipt if transfer completed.
+
+Do not include full card number or authority.
+
+---
+
+# 21. Manual receipt-required reminder
+
+Create:
+
+GenerateReceiptRequiredNotificationsJob
+
+Candidates:
+
+* manual Payment WAITING_FOR_PAYMENT;
+* instruction ACTIVE;
+* no active receipt;
+* instruction not expired;
+* reminder threshold reached;
+* preference enabled.
+
+Notification category:
+
+MANUAL_RECEIPT_REQUIRED
+
+Buttons:
+
+UPLOAD_RECEIPT
+
+VIEW_PAYMENT
+
+Requirements:
+
+* one notification per configured threshold;
+* do not send after receipt submitted;
+* pending notification must be cancelled if receipt appears before delivery.
+
+---
+
+# 22. Waiting-review notification
+
+The immediate receipt-submitted message may already inform the User.
+
+Optionally send a delayed waiting-review reminder only when review remains pending longer than configured threshold.
+
+Create:
+
+GenerateReviewPendingNotificationsJob
+
+only if justified.
+
+Candidate:
+
+* Payment WAITING_FOR_REVIEW;
+* receipt QUEUED_FOR_REVIEW;
+* review not terminal;
+* pending duration beyond threshold.
+
+Recommended Task 39:
+
+Do not repeatedly remind the User about waiting review.
+
+Send only:
+
+* immediate receipt-submitted notification;
+* immediate rejected/approved result.
+
+Avoid notification spam.
+
+---
+
+# 23. Provisioning notifications
+
+## Payment approved
+
+Message:
+
+* payment confirmed;
+* VPN creation started or will start shortly.
+
+## Provisioning completed
+
+Message:
+
+* service ready;
+* button to My Subscriptions.
+
+Do not include config/token automatically.
+
+## Provisioning failed
+
+Message:
+
+* payment remains valid;
+* setup encountered a temporary issue;
+* do not pay again;
+* support may be required.
+
+Do not expose:
+
+* XUI error;
+* retry count;
+* server name;
+* stack trace.
+
+Exactly one completion/failure notification per relevant transition version.
+
+If provisioning later succeeds after failure:
+
+* send completion notification;
+* do not resend old failure notification.
+
+---
+
+# 24. Subscription expiry notification job
+
+Create:
+
+GenerateSubscriptionExpiryNotificationsJob
+
+Add job key:
+
+GENERATE_SUBSCRIPTION_EXPIRY_NOTIFICATIONS
+
+Candidates:
+
+* Subscription ACTIVE;
+* expiresAt present;
+* expiry within configured User threshold;
+* not expired;
+* preference enabled.
+
+Recommended standard thresholds:
+
+* 7 days;
+* 3 days;
+* 1 day;
+* 6 hours.
+
+Avoid excessive messages.
+
+Use either:
+
+* global configured threshold list;
+* User-selected primary days threshold plus one final short reminder.
+
+Preferred Task 39:
+
+Configurable global thresholds with bounded list.
+
+Notification key includes threshold.
+
+Buttons:
+
+VIEW_SUBSCRIPTION
+
+BUY_NEW_PLAN
+
+Do not rotate token or include Subscription URL.
+
+---
+
+# 25. Subscription expired notification
+
+Create:
+
+GenerateSubscriptionExpiredNotificationsJob
+
+or enqueue during Subscription expiry transition.
+
+Preferred:
+
+When ExpireSubscriptionsJob marks Subscription EXPIRED, enqueue:
+
+SUBSCRIPTION_EXPIRED
+
+Requirements:
+
+* one notification;
+* message explains access ended;
+* button to Buy VPN or My Subscriptions;
+* no automatic renewal;
+* no new Payment;
+* no XUI lifecycle change beyond existing policy.
+
+---
+
+# 26. Traffic usage reliability assessment
+
+Before implementing traffic alerts, verify:
+
+* whether upload/download/total traffic are available reliably;
+* data freshness;
+* whether total traffic represents configured quota;
+* whether unlimited Plans are distinguishable;
+* whether reset semantics are correct;
+* whether the source is local or requires 3x-ui call;
+* whether usage polling can be performed safely.
+
+Do not create traffic alerts from unreliable or stale values.
+
+If reliable usage data is unavailable:
+
+* implement the framework and omit active traffic alert jobs;
+* document the limitation;
+* do not fabricate remaining traffic.
+
+---
+
+# 27. Traffic alert job
+
+Create only if usage data is reliable.
+
+Create:
+
+GenerateTrafficAlertNotificationsJob
+
+Add job key:
+
+GENERATE_TRAFFIC_ALERTS
+
+Candidate:
+
+* Subscription ACTIVE;
+* underlying provision ACTIVE;
+* traffic-limited Plan;
+* totalBytes > 0;
+* remainingBytes known;
+* preference enabled;
+* usage data freshness within configured maximum age.
+
+Thresholds:
+
+* configured percentage, such as 20%;
+* optional final 5%;
+* exhausted at 0.
+
+Notification keys:
+
+TRAFFIC_LOW threshold-specific
+
+TRAFFIC_EXHAUSTED once
+
+Requirements:
+
+* no alert for unlimited Plan;
+* no negative remaining value;
+* clamp to zero;
+* one alert per threshold;
+* do not call 3x-ui while holding DB transaction;
+* use bounded candidate batch;
+* do not disable VPN automatically.
+
+---
+
+# 28. Notification properties
+
+Create:
+
+NotificationProperties
+
+Prefix:
+
+app.notification
+
+Fields:
+
+boolean enabled
+
+int deliveryBatchSize
+
+int maxDeliveryAttempts
+
+Duration initialRetryDelay
+
+Duration maxRetryDelay
+
+double retryMultiplier
+
+Duration sendingTimeout
+
+Duration staleSendingTimeout
+
+List<Duration> paymentReminderThresholds
+
+List<Duration> subscriptionExpiryThresholds
+
+Duration receiptReminderThreshold
+
+Duration maximumUsageDataAge
+
+int maxNotificationsPerUserPerHour
+
+int maxNotificationsPerUserPerDay
+
+boolean enableTrafficAlerts
+
+boolean enableProvisioningStartedNotification
+
+boolean persistSkippedNotifications
+
+Validation:
+
+* batch bounded;
+* attempts bounded;
+* thresholds positive, unique, sorted;
+* retry multiplier valid;
+* rate limits positive;
+* no unbounded list.
+
+Update `.env.example`.
+
+---
+
+# 29. Per-user notification rate limiting
+
+Create:
+
+NotificationRateLimitPolicy
+
+Requirements:
+
+* prevent reminder spam;
+* count SENT/PENDING recent notifications per User;
+* transactional critical notifications may bypass only according to explicit policy;
+* use database-backed counts;
+* no Redis required;
+* low-volume design acceptable.
+
+Recommended:
+
+* maximum 5 notifications per hour;
+* maximum 20 per day;
+* critical categories:
+
+  * provisioning completed;
+  * receipt rejected;
+  * token rotated;
+  * revoked;
+    may bypass reminder-only limits.
+
+If rate-limited:
+
+* defer to later availableAt;
+* do not drop critical notification;
+* optional reminder may be SKIPPED.
+
+Document behavior.
+
+---
+
+# 30. Notification delivery processor
+
+Create:
+
+NotificationDeliveryProcessor
+
+Responsibilities:
+
+1. Claim available PENDING/FAILED rows.
+2. Mark CLAIMED/SENDING in short transactions.
+3. Load User preferences and validate relevance.
+4. Revalidate current resource status.
+5. Cancel stale notification if no longer relevant.
+6. Render localized message.
+7. Build signed callback keyboard.
+8. Send through TelegramBotClient outside DB transaction.
+9. Complete SENT in short transaction.
+10. On failure:
+
+    * classify;
+    * retry, UNKNOWN, DEAD, or CANCELLED.
+11. Respect rate limits and quiet hours.
+12. Process bounded batch.
+
+Do not hold row locks during Telegram API calls.
+
+---
+
+# 31. Notification relevance validation
+
+Create:
+
+NotificationRelevanceValidator
+
+Before send, revalidate current state.
+
+Examples:
+
+PAYMENT_REMINDER:
+
+* Payment still unpaid and not expired.
+
+MANUAL_RECEIPT_REQUIRED:
+
+* no receipt submitted.
+
+MANUAL_RECEIPT_REJECTED:
+
+* receipt remains rejected;
+* resubmission still allowed if button shown.
+
+PROVISIONING_COMPLETED:
+
+* Order still COMPLETED;
+* Subscription/provision exists.
+
+SUBSCRIPTION_EXPIRING:
+
+* Subscription still ACTIVE;
+* same expiry value/version;
+* not already expired.
+
+TRAFFIC_LOW:
+
+* current usage still at or below threshold;
+* data fresh.
+
+If no longer relevant:
+
+* mark CANCELLED;
+* do not send.
+
+This prevents stale queued notifications.
+
+---
+
+# 32. Notification claiming
+
+Use PostgreSQL:
+
+`FOR UPDATE SKIP LOCKED`
+
+or equivalent conditional update.
+
+Requirements:
+
+* multiple application instances;
+* each notification claimed once at a time;
+* stale SENDING recovery;
+* job-level lock reduces duplicate scanning but row claim remains final authority;
+* batch bounded;
+* oldest available first.
+
+---
+
+# 33. Delivery transaction phases
+
+## Phase A — Claim
+
+Short transaction:
+
+* select row;
+* status CLAIMED/SENDING;
+* attempt count;
+* commit.
+
+## Phase B — Resolve/render/send
+
+Outside transaction:
+
+* load safe read models as needed;
+* relevance check may use short independent transactions;
+* render;
+* Telegram send.
+
+## Phase C — Complete
+
+Short transaction:
+
+* SENT with Telegram message ID;
+* or FAILED/UNKNOWN/DEAD/CANCELLED;
+* schedule retry.
+
+Do not annotate the whole processor with one transaction.
+
+---
+
+# 34. Telegram delivery uncertainty
+
+Telegram sending is not exactly once.
+
+A timeout may happen after Telegram accepted the message.
+
+Policy:
+
+* mark UNKNOWN;
+* do not immediately resend credential or financial messages blindly;
+* transactional reminders may tolerate a possible duplicate after bounded delay;
+* use deliveryFingerprint;
+* reconcile only where Telegram message ID/result is known;
+* Telegram does not provide a universal client-defined idempotency key.
+
+Recommended:
+
+## Low-risk reminders
+
+* UNKNOWN may retry once after delay;
+* possible duplicate accepted.
+
+## Sensitive security events
+
+* avoid blind multiple retries;
+* mark DEAD or require operational review after uncertainty threshold.
+
+## Provisioning completed
+
+* one conservative retry allowed.
+
+Document limitations clearly.
+
+Never claim exactly-once Telegram delivery.
+
+---
+
+# 35. Failure classification
+
+Create:
+
+NotificationDeliveryFailureClassifier
+
+Retryable:
+
+* Telegram 429;
+* Telegram 500/502/503/504;
+* connect timeout before send;
+* temporary DNS failure;
+* temporary network issue.
+
+Non-retryable:
+
+* bot blocked;
+* chat not found;
+* User deactivated;
+* invalid Bot token;
+* malformed message;
+* invalid callback markup;
+* message too long after validation.
+
+Unknown:
+
+* timeout after request transmission;
+* connection reset after payload transmission.
+
+Behavior:
+
+* respect retry_after;
+* bounded exponential backoff;
+* bot-blocked notification becomes DEAD or CANCELLED;
+* optionally mark Telegram communication unavailable in preferences/User communication status;
+* do not disable User account.
+
+---
+
+# 36. Stale sending recovery
+
+Create:
+
+RecoverStaleNotificationsJob
+
+Add job key:
+
+RECOVER_STALE_NOTIFICATIONS
+
+Candidates:
+
+* CLAIMED or SENDING older than staleSendingTimeout.
+
+Behavior:
+
+* if Telegram message ID exists:
+
+  * mark SENT.
+* if delivery result unknown:
+
+  * mark UNKNOWN.
+* if send never began:
+
+  * mark FAILED and retry.
+* do not blindly duplicate sensitive notification.
+* preserve attempt count.
+
+---
+
+# 37. Notification scheduled jobs
+
+Integrate with Task 38.
+
+Add job keys:
+
+GENERATE_PAYMENT_REMINDERS
+
+GENERATE_RECEIPT_REMINDERS
+
+GENERATE_SUBSCRIPTION_EXPIRY_NOTIFICATIONS
+
+GENERATE_TRAFFIC_ALERTS
+
+DELIVER_NOTIFICATIONS
+
+RECOVER_STALE_NOTIFICATIONS
+
+Optional:
+
+GENERATE_SUBSCRIPTION_EXPIRED_NOTIFICATIONS
+
+Create trigger classes:
+
+NotificationGenerationJobsScheduler
+
+NotificationDeliveryJobsScheduler
+
+Each trigger calls ScheduledJobCoordinator only.
+
+No business logic inside `@Scheduled`.
+
+---
+
+# 38. Immediate notification event transaction design
+
+Avoid direct dependency cycles.
+
+Preferred approaches:
+
+## Option A — Narrow notification enqueue port
+
+Business completion services depend on:
+
+NotificationEnqueuePort
+
+The adapter persists Notification.
+
+## Option B — Transactional application events
+
+Publish local event and use a listener in the same transaction to persist Notification.
+
+Requirements:
+
+* Notification persistence must not happen only after commit in volatile memory.
+* No direct Telegram send in listener.
+* Duplicate event safe through notificationKey.
+* Keep domain independent from Telegram.
+
+Preferred:
+
+Application-layer event + durable Notification enqueue.
+
+---
+
+# 39. User notification preference Telegram UX
+
+Extend Telegram main menu or settings.
+
+Add callback:
+
+NOTIFICATION_SETTINGS
+
+Show:
+
+* Telegram notifications enabled/disabled;
+* payment reminders;
+* receipt updates;
+* provisioning updates;
+* expiry alerts;
+* traffic alerts;
+* quiet hours summary.
+
+Buttons:
+
+Toggle payment reminders
+
+Toggle receipt updates
+
+Toggle provisioning updates
+
+Toggle expiry alerts
+
+Toggle traffic alerts
+
+Disable all
+
+Enable defaults
+
+Task 39 may omit interactive quiet-hour editing if it becomes too large.
+
+Preferred:
+
+Expose quiet hours through internal API only, while Telegram supports simple toggles.
+
+Do not let callback carry the resulting boolean as trusted state without reloading current settings.
+
+---
+
+# 40. Preference update idempotency
+
+Toggle callbacks can replay.
+
+Requirements:
+
+* use sensitive action or explicit desired value rather than blind toggle;
+* callback contains desired state, signed and time-bounded;
+* update use case sets desired value idempotently;
+* replay leaves same result.
+
+Avoid:
+
+“toggle current value” on replay.
+
+Use:
+
+SET_PAYMENT_REMINDERS_ON
+
+SET_PAYMENT_REMINDERS_OFF
+
+or a signed action payload with desired value.
+
+---
+
+# 41. Payment reminder messages
+
+## Zarinpal
+
+Display:
+
+* payment pending;
+* Plan name;
+* amount;
+* expiry;
+* button to Payment details;
+* optional trusted payment-page button only if safely available.
+
+Do not display authority.
+
+## Manual transfer
+
+Display:
+
+* transfer/receipt still incomplete;
+* Plan name;
+* exact payable amount only if current secure display policy permits;
+* expiry;
+* Upload receipt button;
+* Payment details button.
+
+Do not display full destination card in reminder by default.
+
+Prefer reopening Payment details for financial instructions.
+
+---
+
+# 42. Receipt notifications
+
+## Receipt submitted
+
+Display:
+
+* receipt received;
+* awaiting review;
+* submission is not approval.
+
+## Receipt rejected
+
+Display:
+
+* receipt rejected;
+* safe rejection reason;
+* whether resubmission is allowed;
+* button to Upload receipt;
+* button to Payment details.
+
+Do not expose operator identity or internal notes unless explicitly designated user-safe.
+
+## Receipt approved
+
+Payment-approved/provisioning notification covers this.
+
+Avoid duplicate messages unless product UX requires both.
+
+---
+
+# 43. Provisioning notifications
+
+## Started
+
+Optional and disabled by default to reduce noise.
+
+## Completed
+
+Display:
+
+* VPN is ready;
+* Plan;
+* expiry if available;
+* button to My Subscriptions.
+
+Do not include:
+
+* Subscription URL;
+* token;
+* VLESS URI;
+* QR.
+
+## Failed
+
+Display:
+
+* payment remains confirmed;
+* setup could not complete yet;
+* do not pay again;
+* support/contact action.
+
+Do not include internal failure code.
+
+---
+
+# 44. Subscription expiry messages
+
+Display:
+
+* Plan;
+* expiry date/time in User timezone;
+* remaining time;
+* button to Buy VPN;
+* button to My Subscriptions.
+
+Do not imply automatic renewal.
+
+For already expired:
+
+* clearly state expired;
+* no existing config delivery;
+* offer purchase flow.
+
+Ensure localized date/time formatting.
+
+---
+
+# 45. Traffic messages
+
+If supported:
+
+## Low
+
+Display:
+
+* safe Plan name;
+* remaining traffic;
+* percentage;
+* button to My Subscriptions;
+* optional Buy Plan or Traffic Add-on only when such flow exists.
+
+Task 39 must not add traffic add-on purchase.
+
+## Exhausted
+
+Display:
+
+* traffic exhausted;
+* service may stop according to current server policy;
+* button to Buy VPN.
+
+Do not mutate traffic or disable service here.
+
+---
+
+# 46. Notification history APIs
+
+Create internal read-only APIs:
+
+GET /internal/admin/notifications
+
+GET /internal/admin/notifications/{notificationId}
+
+GET /internal/users/{telegramUserId}/notifications
+
+Filters:
+
+category
+
+status
+
+date range
+
+bounded limit
+
+Requirements:
+
+* User endpoint only shows User’s notifications;
+* payload summarized or mapped safely;
+* no raw JSON returned if it contains internal IDs;
+* no rendered credential content;
+* no Telegram Bot error description;
+* no stack trace.
+
+Optional admin retry endpoint:
+
+POST /internal/admin/notifications/{notificationId}/retry
+
+Only for FAILED/UNKNOWN/DEAD according to policy.
+
+Do not retry SENT.
+
+---
+
+# 47. Notification result models
+
+Create:
+
+NotificationResult
+
+Fields:
+
+UUID notificationId
+
+NotificationCategory category
+
+NotificationStatus status
+
+String title
+
+String safeSummary
+
+Instant scheduledFor
+
+Instant sentAt
+
+Instant failedAt
+
+int attemptCount
+
+boolean retryable
+
+Requirements:
+
+* no payload JSON;
+* no Telegram message body;
+* no resource secrets;
+* no Telegram chat ID for normal User result;
+* no failure details beyond safe code.
+
+---
+
+# 48. Logging
+
+INFO:
+
+* notification enqueued;
+* notification skipped by preference;
+* notification deferred by quiet hours;
+* notification claimed;
+* notification sent;
+* notification cancelled as stale;
+* notification retry scheduled;
+* notification dead;
+* reminder candidates generated.
+
+DEBUG:
+
+* notification key;
+* category;
+* template key/version;
+* relevance decision;
+* threshold;
+* batch summary;
+* rate-limit decision.
+
+WARN:
+
+* Telegram rate limit;
+* User blocked Bot;
+* stale notification;
+* unknown send result;
+* invalid payload;
+* preference inconsistency;
+* usage data stale.
+
+ERROR:
+
+* notification delivery job failure;
+* payload deserialization failure;
+* template rendering failure;
+* repeated poison notification;
+* Telegram authentication failure.
+
+Include:
+
+notificationId
+
+notificationKey
+
+category
+
+status
+
+userId
+
+paymentId/orderId/subscriptionId only when safe and available
+
+attemptCount
+
+jobRunId
+
+traceId
+
+Never include:
+
+Bot token
+
+full Telegram chat content
+
+rendered financial message
+
+card number
+
+authority
+
+receipt details
+
+Subscription token/URL
+
+VLESS URI
+
+QR bytes
+
+private key
+
+XUI credentials
+
+raw Telegram error response
+
+---
+
+# 49. Domain unit tests
+
+Notification:
+
+* creation;
+* key uniqueness semantics;
+* PENDING;
+* claim;
+* sending;
+* sent;
+* failed;
+* unknown;
+* retry;
+* dead;
+* cancelled;
+* skipped;
+* attempt count;
+* timestamps;
+* terminal behavior;
+* safe failure metadata;
+* safe toString.
+
+Preference:
+
+* defaults;
+* toggles;
+* thresholds;
+* quiet hours;
+* timezone;
+* invalid percent;
+* invalid days;
+* safe toString.
+
+---
+
+# 50. Quiet-hour tests
+
+Test:
+
+* no quiet hours;
+* inside daytime range;
+* outside daytime range;
+* range crossing midnight;
+* exact start boundary;
+* exact end boundary;
+* DST transition;
+* invalid timezone;
+* critical category bypass;
+* reminder deferral;
+* nextAllowedAt.
+
+Use fixed Instants and real ZoneId rules.
+
+---
+
+# 51. Notification-key tests
+
+Test exact keys for:
+
+* payment thresholds;
+* receipt submitted;
+* receipt rejected;
+* provisioning completed;
+* provisioning failure;
+* expiry thresholds;
+* expired Subscription;
+* traffic thresholds;
+* token rotation;
+* revocation.
+
+Verify:
+
+* stable;
+* bounded;
+* no secret;
+* different threshold creates different key;
+* same event creates same key.
+
+---
+
+# 52. Enqueue-service tests
+
+Test:
+
+* successful enqueue;
+* duplicate key replay;
+* preference disabled;
+* quiet-hour deferral;
+* locale selection;
+* missing User;
+* invalid payload;
+* rate-limited optional reminder;
+* critical notification preserved;
+* no Telegram call;
+* no rendered secret stored.
+
+---
+
+# 53. Candidate-generation job tests
+
+Payment reminders:
+
+* eligible threshold;
+* too early;
+* expired;
+* approved;
+* cancelled;
+* existing key;
+* preference disabled.
+
+Receipt reminders:
+
+* manual waiting;
+* receipt already submitted;
+* instruction expired.
+
+Subscription expiry:
+
+* each threshold;
+* unlimited/no-expiry;
+* expired;
+* revoked;
+* existing key.
+
+Traffic:
+
+* reliable fresh data;
+* stale data;
+* unlimited Plan;
+* threshold crossing;
+* already notified;
+* exhausted.
+
+Use fixed clock.
+
+---
+
+# 54. Delivery processor unit tests
+
+Test:
+
+* claim PENDING;
+* render;
+* send;
+* SENT;
+* preference changed before send;
+* quiet hours changed before send;
+* stale relevance cancellation;
+* Telegram retryable failure;
+* retry_after;
+* non-retryable blocked User;
+* UNKNOWN result;
+* max attempts DEAD;
+* malformed payload DEAD;
+* template failure;
+* batch limit;
+* no DB transaction during Telegram call.
+
+---
+
+# 55. Template renderer tests
+
+Test:
+
+* FA;
+* EN;
+* fallback;
+* HTML escaping;
+* Plan name special characters;
+* amount formatting;
+* date formatting;
+* missing variable;
+* extra variable;
+* message-length bound;
+* no secrets;
+* stable template version.
+
+---
+
+# 56. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+Notification:
+
+* save/load;
+* unique notificationKey;
+* JSONB payload;
+* available query;
+* row claiming;
+* status/timestamps;
+* attempt constraints;
+* User foreign key;
+* stale SENDING query;
+* recent history ordering.
+
+Preference:
+
+* one row per User;
+* defaults;
+* updates;
+* timezone/threshold constraints;
+* concurrent lazy creation.
+
+Flush persistence context for constraint tests.
+
+---
+
+# 57. Full Payment reminder integration scenario
+
+1. Create User with Telegram notifications enabled.
+2. Create unpaid Zarinpal Payment near expiry.
+3. Run reminder-generation job.
+4. Verify one PENDING Notification.
+5. Run generation again.
+6. Verify one Notification only.
+7. Run delivery processor with mock Telegram.
+8. Verify SENT.
+9. Verify message contains safe Payment information.
+10. Verify no authority.
+11. Approve another Payment before delivery.
+12. Verify pending reminder becomes CANCELLED and is not sent.
+
+Repeat for manual Payment.
+
+---
+
+# 58. Full receipt notification integration scenario
+
+1. User submits receipt.
+2. Verify MANUAL_RECEIPT_SUBMITTED Notification created.
+3. Deliver it.
+4. Operator rejects receipt.
+5. Verify MANUAL_RECEIPT_REJECTED Notification created.
+6. Deliver it.
+7. Verify Upload receipt callback exists when allowed.
+8. Replay rejection action.
+9. Verify no duplicate Notification.
+10. Verify operator identity/internal note is not exposed.
+
+---
+
+# 59. Full provisioning notification scenario
+
+1. Payment approved.
+2. Optional PAYMENT_APPROVED Notification.
+3. Outbox processes provisioning.
+4. On success:
+
+   * one PROVISIONING_COMPLETED Notification.
+5. Deliver it.
+6. Verify My Subscriptions button.
+7. Reprocess outbox.
+8. Verify no duplicate completion Notification.
+
+Failure path:
+
+* provisioning fails;
+* one failure Notification;
+* later retry succeeds;
+* completion Notification sent;
+* no duplicate failure for the same state version.
+
+---
+
+# 60. Full Subscription expiry scenario
+
+1. Create ACTIVE Subscription expiring in seven days.
+2. Run generation at seven-day threshold.
+3. Send one notification.
+4. Advance clock to three-day threshold.
+5. Send one new threshold notification.
+6. Replay jobs.
+7. No duplicates.
+8. Expire Subscription.
+9. Send one expired notification.
+10. Verify no token or config is included.
+
+---
+
+# 61. Full traffic-alert scenario
+
+Only when usage is reliable.
+
+1. Create traffic-limited Subscription.
+2. Usage above threshold:
+
+   * no notification.
+3. Usage crosses 20%:
+
+   * one TRAFFIC_LOW.
+4. Repeated polling:
+
+   * no duplicate.
+5. Usage reaches zero:
+
+   * one TRAFFIC_EXHAUSTED.
+6. Unlimited Subscription:
+
+   * no alert.
+7. Stale usage:
+
+   * no alert.
+
+---
+
+# 62. Quiet-hour integration scenario
+
+1. Set User timezone and quiet hours.
+2. Enqueue reminder during quiet period.
+3. Verify availableAt deferred.
+4. Delivery job before nextAllowedAt:
+
+   * no send.
+5. Delivery at nextAllowedAt:
+
+   * send.
+6. Enqueue critical token-revocation notification:
+
+   * verify bypass policy.
+
+---
+
+# 63. Multi-instance integration tests
+
+Use real PostgreSQL and two job coordinators.
+
+Verify:
+
+* one generation-job lock winner;
+* notification unique key prevents duplicate rows;
+* multiple delivery processors claim different rows;
+* same row delivered by one worker at a time;
+* stale SENDING recovery;
+* no JVM-only lock.
+
+---
+
+# 64. Concurrency tests
+
+Required scenarios:
+
+* two event handlers enqueue same notification;
+* generation job races business state change;
+* delivery races Payment approval;
+* delivery races receipt submission;
+* delivery races Subscription expiry;
+* preference disable races send;
+* token rotation/revocation event replay;
+* two workers deliver same Notification;
+* rate-limit counters under concurrent sends.
+
+Requirements:
+
+* deterministic barriers/latches;
+* real PostgreSQL;
+* mock Telegram;
+* no Thread.sleep;
+* executor shutdown;
+* explicit timeouts.
+
+---
+
+# 65. Telegram settings handler tests
+
+Test:
+
+* show settings;
+* set payment reminders ON;
+* set payment reminders OFF;
+* replay desired-state callback;
+* receipt notifications;
+* provisioning notifications;
+* expiry alerts;
+* traffic alerts;
+* disable all;
+* enable defaults;
+* ownership;
+* private chat;
+* signed callback;
+* no blind toggle replay bug.
+
+---
+
+# 66. Security tests
+
+Verify:
+
+* no credential content in Notification payload.
+* no token/URL/VLESS URI.
+* no authority.
+* no full card number.
+* no receipt bytes/hash.
+* no operator identity.
+* private chat required.
+* Telegram username not authorization.
+* callback signed and actor ownership rechecked.
+* preference update desired-state idempotency.
+* rendered message not persisted.
+* logs redacted.
+* JSON payload cannot inject HTML.
+* CRLF-safe URLs/buttons.
+* no arbitrary URL button.
+* no marketing broadcast API.
+* no automatic financial/domain transitions.
+* no direct XUI call.
+
+---
+
+# 67. Architecture verification
+
+Verify:
+
+* Notification domain does not depend on Telegram SDK.
+* Business domains do not depend on Telegram notification infrastructure.
+* Notification enqueue uses application port.
+* Scheduled triggers use Task 38 coordinator.
+* Notification delivery uses TelegramBotClient port.
+* No scheduler injects repository directly.
+* No controller injects Spring Data.
+* Template renderer does not execute dynamic code.
+* No raw message persistence.
+* No external call inside transaction.
+* No field injection.
+* No service locator.
+* No promotional campaign module.
+
+Extend ArchUnit tests.
+
+---
+
+# 68. Operational APIs and metrics
+
+Add Micrometer metrics if available:
+
+`notifications_enqueued_total`
+
+Tags:
+
+category
+
+`notifications_delivery_total`
+
+Tags:
+
+category
+
+status
+
+`notifications_delivery_duration_seconds`
+
+Tag:
+
+category
+
+`notifications_cancelled_total`
+
+Tag:
+
+reason
+
+`notifications_rate_limited_total`
+
+Tag:
+
+category
+
+Low-cardinality only.
+
+Add health detail:
+
+* delivery job last status;
+* oldest pending notification age;
+* dead notification count.
+
+Do not mark application DOWN for one optional reminder failure.
+
+---
+
+# 69. Documentation
+
+Create:
+
+docs/notifications/notification-architecture.md
+
+Document:
+
+* enqueue;
+* generation jobs;
+* delivery processor;
+* templates;
+* preferences;
+* quiet hours;
+* retries;
+* uncertainty;
+* multi-instance behavior.
+
+Create:
+
+docs/notifications/notification-catalog.md
+
+For each category document:
+
+* trigger;
+* idempotency key;
+* template;
+* buttons;
+* preference;
+* quiet-hour behavior;
+* cancellation/relevance rule;
+* sensitive-data policy.
+
+Create:
+
+docs/notifications/notification-idempotency.md
+
+Matrix columns:
+
+Notification
+
+Trigger
+
+Notification key
+
+Database constraint
+
+Replay behavior
+
+State-change cancellation
+
+Unknown-send behavior
+
+Create:
+
+docs/notifications/notification-security.md
+
+Document:
+
+* payload allowlist;
+* no rendered-body storage;
+* private-chat delivery;
+* callback signing;
+* logging redaction;
+* token/financial secrecy;
+* blocked-user behavior.
+
+Create:
+
+docs/notifications/notification-operations.md
+
+Document:
+
+* job configuration;
+* thresholds;
+* retry;
+* dead notifications;
+* metrics;
+* health;
+* diagnosis;
+* safe manual retry.
+
+Include Mermaid diagrams for:
+
+* immediate enqueue;
+* scheduled reminder generation;
+* delivery;
+* quiet-hour deferral;
+* stale cancellation;
+* retry;
+* unknown send;
+* multi-instance delivery.
+
+---
+
+# 70. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/notification/
+Notification.java
+NotificationCategory.java
+NotificationStatus.java
+NotificationPreference.java
+
+src/main/java/com/parazit/panel/domain/notification/repository/
+NotificationRepository.java
+NotificationPreferenceRepository.java
+
+src/main/java/com/parazit/panel/application/port/in/notification/
+EnqueueNotificationUseCase.java
+GetNotificationPreferencesUseCase.java
+UpdateNotificationPreferencesUseCase.java
+ListUserNotificationsUseCase.java
+
+src/main/java/com/parazit/panel/application/port/out/notification/
+NotificationEnqueuePort.java
+
+src/main/java/com/parazit/panel/application/notification/
+NotificationEnqueueService.java
+NotificationDeliveryProcessor.java
+NotificationRelevanceValidator.java
+NotificationFailureClassifier.java
+NotificationKeyFactory.java
+NotificationPayloadSerializer.java
+NotificationTemplateRenderer.java
+NotificationTemplateCatalog.java
+NotificationActionFactory.java
+QuietHoursPolicy.java
+NotificationRateLimitPolicy.java
+ClaimNotificationTransaction.java
+CompleteNotificationTransaction.java
+FailNotificationTransaction.java
+
+src/main/java/com/parazit/panel/application/notification/payload/
+PaymentReminderPayload.java
+ReceiptNotificationPayload.java
+ProvisioningNotificationPayload.java
+SubscriptionExpiryPayload.java
+TrafficAlertPayload.java
+
+src/main/java/com/parazit/panel/application/job/notification/
+GeneratePaymentReminderNotificationsJob.java
+GenerateReceiptRequiredNotificationsJob.java
+GenerateSubscriptionExpiryNotificationsJob.java
+GenerateTrafficAlertNotificationsJob.java
+DeliverNotificationsJob.java
+RecoverStaleNotificationsJob.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/notification/
+SpringDataNotificationRepository.java
+NotificationRepositoryAdapter.java
+SpringDataNotificationPreferenceRepository.java
+NotificationPreferenceRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/infrastructure/scheduling/
+NotificationGenerationJobsScheduler.java
+NotificationDeliveryJobsScheduler.java
+
+src/main/java/com/parazit/panel/api/internal/notification/
+NotificationController.java
+NotificationPreferenceController.java
+NotificationResponse.java
+NotificationPreferenceResponse.java
+UpdateNotificationPreferenceRequest.java
+NotificationApiMapper.java
+
+src/main/java/com/parazit/panel/application/telegram/handler/
+NotificationSettingsTelegramHandler.java
+
+src/main/java/com/parazit/panel/config/properties/
+NotificationProperties.java
+
+src/main/java/com/parazit/panel/observability/
+NotificationMetrics.java
+NotificationHealthIndicator.java
+
+src/main/resources/db/migration/
+V19__create_notifications_and_notification_preferences.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/notification/
+NotificationTest.java
+NotificationPreferenceTest.java
+
+src/test/java/com/parazit/panel/application/notification/
+NotificationEnqueueServiceTest.java
+NotificationDeliveryProcessorTest.java
+NotificationRelevanceValidatorTest.java
+NotificationKeyFactoryTest.java
+NotificationTemplateRendererTest.java
+QuietHoursPolicyTest.java
+NotificationRateLimitPolicyTest.java
+
+src/test/java/com/parazit/panel/application/job/notification/
+GeneratePaymentReminderNotificationsJobTest.java
+GenerateReceiptRequiredNotificationsJobTest.java
+GenerateSubscriptionExpiryNotificationsJobTest.java
+GenerateTrafficAlertNotificationsJobTest.java
+DeliverNotificationsJobTest.java
+RecoverStaleNotificationsJobTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/notification/
+NotificationRepositoryIntegrationTest.java
+NotificationPreferenceRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/notification/
+PaymentReminderNotificationIntegrationTest.java
+ReceiptNotificationIntegrationTest.java
+ProvisioningNotificationIntegrationTest.java
+SubscriptionExpiryNotificationIntegrationTest.java
+TrafficAlertNotificationIntegrationTest.java
+QuietHoursNotificationIntegrationTest.java
+MultiInstanceNotificationDeliveryIntegrationTest.java
+ConcurrentNotificationIntegrationTest.java
+
+src/test/java/com/parazit/panel/application/telegram/handler/
+NotificationSettingsTelegramHandlerTest.java
+
+docs/notifications/
+notification-architecture.md
+notification-catalog.md
+notification-idempotency.md
+notification-security.md
+notification-operations.md
+
+Adapt package names, class names, and migration versions to the existing project conventions.
+
+---
+
+# 71. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Notification domain tests pass;
+* preference tests pass;
+* quiet-hour tests pass;
+* template tests pass;
+* enqueue tests pass;
+* generation-job tests pass;
+* delivery tests pass;
+* repository tests pass;
+* Payment reminder integration tests pass;
+* receipt notification tests pass;
+* provisioning notification tests pass;
+* Subscription expiry tests pass;
+* traffic tests pass or are explicitly skipped because reliable usage is unavailable;
+* multi-instance tests pass;
+* concurrency tests pass;
+* architecture tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* application starts with notifications disabled;
+* application starts with notifications enabled and mock Telegram;
+* duplicate events create one Notification;
+* stale reminders are cancelled before send;
+* quiet hours defer ordinary reminders;
+* blocked Users are not retried indefinitely;
+* no Payment/Order/Subscription status is changed by notification delivery;
+* no secrets are stored or logged;
+* no promotional broadcast feature exists;
+* no tests are disabled.
+
+---
+
+# 72. Optional manual verification
+
+Use only:
+
+* test Telegram Bot;
+* test Users;
+* test Payments;
+* test Subscriptions;
+* mock or sandbox integrations.
+
+1. Enable notifications.
+2. Create an unpaid Payment near expiry.
+3. Run generation and delivery jobs.
+4. Verify reminder text and buttons.
+5. Submit a manual receipt.
+6. Verify receipt-submitted message.
+7. Reject it.
+8. Verify rejected message and resubmission button.
+9. Approve a Payment and process provisioning.
+10. Verify completed notification.
+11. Create Subscription expiry thresholds.
+12. Verify each threshold sends once.
+13. Configure quiet hours.
+14. Verify reminders defer.
+15. Disable payment reminders.
+16. Verify no new Payment reminder is generated.
+17. Block the Bot.
+18. Verify non-retryable handling.
+19. Run two application instances.
+20. Verify no duplicate logical notifications.
+21. Inspect logs and database.
+22. Confirm absence of:
+
+    * Bot token;
+    * authority;
+    * card number;
+    * receipt details;
+    * Subscription token;
+    * VLESS URI;
+    * rendered sensitive messages.
+
+Do not perform real financial transactions.
+
+---
+
+# 73. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Notification event inventory
+3. Notification aggregate design
+4. Preference and quiet-hour design
+5. Payload and template design
+6. Notification-key strategy
+7. Immediate enqueue strategy
+8. Scheduled generation strategy
+9. Payment reminder policy
+10. Receipt notification policy
+11. Provisioning notification policy
+12. Subscription expiry policy
+13. Traffic-alert feasibility
+14. Delivery processor design
+15. Retry and uncertainty design
+16. Rate-limit design
+17. Security and redaction design
+18. Planned files to create
+19. Planned files to modify
+20. Migration and operational risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Notification aggregate behavior
+6. Preference behavior
+7. Quiet-hour behavior
+8. Template rendering
+9. Notification-key behavior
+10. Immediate notification integration
+11. Payment reminder generation
+12. Receipt notifications
+13. Provisioning notifications
+14. Subscription expiry notifications
+15. Traffic-alert behavior or documented omission
+16. Delivery processor
+17. Relevance cancellation
+18. Retry and unknown-send handling
+19. Rate limiting
+20. Telegram settings UX
+21. Scheduled-job integration
+22. Multi-instance behavior
+23. Security and logging
+24. Metrics and health
+25. Unit-test results
+26. Repository-test results
+27. Reminder integration-test results
+28. Receipt/provisioning test results
+29. Expiry/traffic test results
+30. Quiet-hour test results
+31. Multi-instance/concurrency test results
+32. Architecture-test results
+33. Flyway and Hibernate results
+34. Build result
+35. Commands executed
+36. Remaining issues
+37. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(notification): add Telegram reminders and subscription alerts
+
+Stop after completing Task 39.
+
+Do not begin Task 40.
+

@@ -1,0 +1,2534 @@
+You are a senior Java 21, Spring Boot, 3x-ui, VLESS, subscription-delivery, and security engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 33 — Subscription Domain, Secure Access Token, and Subscription Content Endpoint
+
+## Goal
+
+Implement the first part of the subscription-delivery phase.
+
+After this task, the application must be able to:
+
+* create one stable Subscription for an successfully provisioned VPN client;
+* associate the Subscription with:
+
+  * User;
+  * Order;
+  * PlanSelection;
+  * XuiClientProvision;
+  * 3x-ui inbound;
+  * remote client UUID;
+* create a secure, opaque subscription access token;
+* store only a cryptographic hash of the token;
+* return the raw token only at creation or explicit rotation time;
+* expose a public subscription endpoint using the opaque token;
+* build client-compatible subscription content from trusted local and 3x-ui data;
+* support at least VLESS + REALITY links;
+* support plain-text and Base64 subscription responses;
+* include safe usage metadata headers where available;
+* preserve stable subscription identity across repeated requests;
+* revoke or rotate subscription access safely;
+* prevent users from accessing another user’s subscription;
+* prevent disabled, deleted, expired, or invalid provisions from returning usable configs;
+* avoid storing private keys or full raw subscription content unnecessarily;
+* keep QR Code generation and Telegram delivery for later tasks.
+
+Do not implement:
+
+* QR Code generation;
+* Telegram Bot handlers;
+* automatic Telegram delivery;
+* payment logic;
+* new VPN provisioning;
+* client renewal;
+* traffic purchase;
+* reminder jobs;
+* admin dashboard UI;
+* multiple protocol generation beyond what is already supported by the provisioned inbound;
+* deployment;
+* public user authentication.
+
+Stop after completing Task 33.
+
+Do not begin Task 34.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before making changes.
+* Preserve all working behavior from Tasks 1–32.
+* Reuse:
+
+  * User;
+  * Plan;
+  * PlanSelection;
+  * Order;
+  * Payment;
+  * XuiClientProvision;
+  * Xui inbound discovery;
+  * 3x-ui client-management ports;
+  * BaseEntity;
+  * SystemClockPort;
+  * repositories;
+  * exception handling;
+  * traceId;
+  * logging;
+  * Testcontainers;
+  * configuration conventions.
+* Use Java 21.
+* Use the existing Spring Boot and build-tool version.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into controllers or application services.
+* Do not trust caller-supplied inbound, host, SNI, public key, client UUID, port, protocol, or user ID.
+* Build subscription data from trusted persisted and remote-verified state.
+* Do not store raw subscription tokens in PostgreSQL.
+* Do not log raw subscription tokens.
+* Do not log complete VLESS URLs.
+* Do not log remote private keys.
+* Do not expose 3x-ui login cookies.
+* Do not expose subscription content through internal DTOs unnecessarily.
+* Do not create a second VPN client.
+* Do not call PaymentApprovalService.
+* Do not modify Payment or Order status in this task.
+* Do not begin Task 34.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* XuiClientProvision aggregate and statuses;
+* locally stored remote client data;
+* stored inbound ID;
+* remote client UUID;
+* remote email;
+* subscription ID generated in Task 24, if present;
+* PlanSelection snapshots;
+* Order relationship;
+* User relationship;
+* current 3x-ui inbound metadata;
+* Reality settings currently available;
+* whether inbound public key, SNI, short ID, fingerprint, transport, path, host, flow, and port are stored;
+* existing Xui inbound retrieval ports;
+* current client usage/statistics capability;
+* enabled/disabled/deleted behavior;
+* expiry handling;
+* any existing VLESS URI builder;
+* any existing subscription endpoint;
+* current secret/token generation utilities;
+* current hash utilities;
+* current public endpoint conventions;
+* current API security assumptions;
+* migration history;
+* current test fixtures.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Subscription ownership design
+3. Token-generation and hashing design
+4. Subscription lifecycle design
+5. Subscription-content generation strategy
+6. Remote-state validation strategy
+7. VLESS URI construction design
+8. Plain/Base64 response design
+9. Revocation and rotation design
+10. Public endpoint security design
+11. Planned files to create
+12. Planned files to modify
+13. Migration and compatibility risks
+
+---
+
+# 3. Subscription aggregate
+
+Create:
+
+Subscription
+
+Suggested package:
+
+com.parazit.panel.domain.subscription
+
+Extend BaseEntity.
+
+Recommended fields:
+
+UUID id inherited
+
+UUID userId
+
+UUID orderId
+
+UUID planSelectionId
+
+UUID xuiClientProvisionId
+
+Long inboundId
+
+UUID remoteClientId
+
+SubscriptionStatus status
+
+String accessTokenHash
+
+String accessTokenPrefix
+
+int tokenVersion
+
+Instant activatedAt
+
+Instant revokedAt
+
+Instant expiresAt
+
+Instant lastAccessedAt
+
+long accessCount
+
+String revokeReason
+
+Instant createdAt inherited
+
+Instant updatedAt inherited
+
+Optional fields only if required by the current architecture:
+
+String displayName
+
+String contentVersion
+
+Rules:
+
+* One current Subscription per XuiClientProvision.
+* A Subscription belongs to exactly one User.
+* Subscription identity is stable.
+* Raw token is never persisted.
+* accessTokenHash is immutable until token rotation.
+* accessTokenPrefix is safe and only used for operator lookup/logging.
+* tokenVersion starts at 1.
+* tokenVersion increments on rotation.
+* status controls public accessibility.
+* accessCount cannot be negative.
+* expiresAt should reflect the trusted provision/plan expiry where applicable.
+* Subscription must not outlive the VPN client.
+* No generic setters.
+* No physical deletion through application APIs.
+* Preserve history after revocation.
+
+---
+
+# 4. Subscription status
+
+Create:
+
+SubscriptionStatus
+
+Recommended values:
+
+PENDING
+
+ACTIVE
+
+SUSPENDED
+
+REVOKED
+
+EXPIRED
+
+INVALID
+
+Rules:
+
+* PENDING -> ACTIVE
+* ACTIVE -> SUSPENDED
+* SUSPENDED -> ACTIVE
+* ACTIVE -> REVOKED
+* SUSPENDED -> REVOKED
+* ACTIVE -> EXPIRED
+* SUSPENDED -> EXPIRED
+* PENDING -> INVALID
+* ACTIVE -> INVALID
+* SUSPENDED -> INVALID
+* REVOKED, EXPIRED, and INVALID are terminal for token access
+* Token rotation does not create another aggregate
+* Token rotation keeps status ACTIVE or SUSPENDED
+* No generic status setter
+* Same-state behavior must be deterministic
+
+Task 33 primarily uses:
+
+* ACTIVE
+* SUSPENDED
+* REVOKED
+* EXPIRED
+* INVALID
+
+---
+
+# 5. Subscription repository
+
+Create:
+
+SubscriptionRepository
+
+Suggested package:
+
+com.parazit.panel.domain.subscription.repository
+
+Extend:
+
+UuidRepository<Subscription>
+
+Add:
+
+Optional<Subscription> findByXuiClientProvisionId(UUID provisionId)
+
+Optional<Subscription> findByAccessTokenHash(String tokenHash)
+
+Optional<Subscription> findByUserIdAndId(
+UUID userId,
+UUID subscriptionId
+)
+
+List<Subscription> findAllByUserIdOrderByCreatedAtDesc(UUID userId)
+
+boolean existsByXuiClientProvisionId(UUID provisionId)
+
+Create Spring Data repository and adapter.
+
+Requirements:
+
+* No null returns.
+* No Spring Data type leakage.
+* Public token lookup should use the hash.
+* Token lookup must use a unique database index.
+* Repository naming must follow project conventions.
+
+---
+
+# 6. Subscription token value
+
+Create a safe application/domain representation:
+
+SubscriptionAccessToken
+
+Suggested responsibilities:
+
+* Validate raw token format when received.
+* Expose raw token only in the creation/rotation result.
+* Prevent accidental logging through safe `toString`.
+* Distinguish:
+
+  * raw token;
+  * hash;
+  * safe prefix.
+
+Do not store the raw token in the entity.
+
+Recommended token characteristics:
+
+* cryptographically random;
+* at least 256 bits of entropy;
+* URL-safe Base64 without padding, or an equivalent opaque format;
+* no user ID;
+* no Telegram ID;
+* no provision ID;
+* no sequential component;
+* no timestamp that reveals business information.
+
+Example conceptual format:
+
+sub_<random-url-safe-token>
+
+The exact format may follow project conventions.
+
+---
+
+# 7. Token generator port
+
+Create:
+
+SubscriptionTokenGenerator
+
+Suggested package:
+
+com.parazit.panel.application.port.out.security
+
+Method:
+
+GeneratedSubscriptionToken generate()
+
+Generated result:
+
+String rawToken
+
+String tokenHash
+
+String safePrefix
+
+Requirements:
+
+* Use SecureRandom.
+* Use SHA-256 or stronger hash.
+* Hash the complete normalized raw token.
+* Encode hash consistently, such as lowercase hexadecimal.
+* Compare hashes safely.
+* Do not use password encoders intended for human passwords unless justified.
+* Token lookup must be deterministic and fast.
+* Token entropy must not depend on UUID.randomUUID alone unless combined with sufficient entropy.
+* The adapter must be testable with deterministic fixtures.
+
+Create production adapter:
+
+SecureSubscriptionTokenGenerator
+
+---
+
+# 8. Token hashing port
+
+If token generation and hashing should be separated, create:
+
+SubscriptionTokenHasher
+
+Methods:
+
+String hash(String rawToken)
+
+boolean matches(String rawToken, String expectedHash)
+
+Preferred:
+
+Use SHA-256 directly because tokens are high-entropy machine-generated secrets.
+
+Document why a fast cryptographic hash is acceptable for high-entropy opaque tokens.
+
+Do not use plaintext comparison against stored raw tokens.
+
+---
+
+# 9. Subscription database migration
+
+Create the next Flyway migration.
+
+Suggested:
+
+V14__create_subscriptions.sql
+
+Adjust the version based on actual migration history.
+
+Create table:
+
+subscriptions
+
+Columns:
+
+id UUID primary key
+
+user_id UUID not null
+
+order_id UUID not null
+
+plan_selection_id UUID not null
+
+xui_client_provision_id UUID not null
+
+inbound_id BIGINT not null
+
+remote_client_id UUID not null
+
+status VARCHAR(32) not null
+
+access_token_hash VARCHAR(64) not null
+
+access_token_prefix VARCHAR(20) not null
+
+token_version INTEGER not null
+
+activated_at TIMESTAMPTZ null
+
+revoked_at TIMESTAMPTZ null
+
+expires_at TIMESTAMPTZ null
+
+last_accessed_at TIMESTAMPTZ null
+
+access_count BIGINT not null
+
+revoke_reason VARCHAR(500) null
+
+display_name VARCHAR(200) null
+
+content_version VARCHAR(32) null
+
+created_at TIMESTAMPTZ not null
+
+updated_at TIMESTAMPTZ not null
+
+Constraints:
+
+* unique xui_client_provision_id;
+* unique access_token_hash;
+* token_version > 0;
+* access_count >= 0;
+* valid status;
+* ACTIVE requires activated_at;
+* REVOKED requires revoked_at;
+* foreign keys to:
+
+  * users;
+  * orders;
+  * plan_selections;
+  * xui_client_provisions;
+* inbound_id > 0.
+
+Indexes:
+
+user_id
+
+order_id
+
+status
+
+expires_at
+
+access_token_prefix
+
+remote_client_id
+
+Use RESTRICT or NO ACTION deletion.
+
+Do not edit old migrations.
+
+---
+
+# 10. Subscription creation use case
+
+Create:
+
+CreateSubscriptionUseCase
+
+Suggested command:
+
+UUID xuiClientProvisionId
+
+The caller must not supply:
+
+* user ID;
+* order ID;
+* client UUID;
+* inbound ID;
+* token hash;
+* expiration;
+* host;
+* SNI;
+* public key.
+
+Behavior:
+
+1. Load XuiClientProvision.
+2. Validate provision status ACTIVE.
+3. Load trusted User, PlanSelection, and Order relationships.
+4. Validate linkage consistency.
+5. Ensure the provision is not deleted or invalid.
+6. Determine Subscription expiry from trusted provision/selection snapshot.
+7. If a Subscription already exists:
+
+   * return it idempotently;
+   * do not generate a new token;
+   * raw token cannot be returned again because it is not stored.
+8. If no Subscription exists:
+
+   * generate secure token;
+   * persist only hash and prefix;
+   * create ACTIVE Subscription;
+   * return metadata plus the raw token exactly once.
+9. Handle concurrent creation:
+
+   * exactly one Subscription row;
+   * one winning token;
+   * losing request must return a safe result.
+10. Never call 3x-ui create-client API.
+
+Important replay decision:
+
+Because raw tokens are not stored, repeated creation cannot reproduce the original token.
+
+Recommended result behavior:
+
+* first creation:
+
+  * `newlyCreated=true`
+  * rawToken present;
+* replay:
+
+  * `newlyCreated=false`
+  * rawToken absent;
+  * client may explicitly rotate the token if a new raw token is needed.
+
+Document this clearly.
+
+---
+
+# 11. Create Subscription result
+
+Create:
+
+CreateSubscriptionResult
+
+Fields:
+
+UUID subscriptionId
+
+UUID userId
+
+UUID orderId
+
+UUID xuiClientProvisionId
+
+SubscriptionStatus status
+
+String rawAccessToken
+
+String accessTokenPrefix
+
+int tokenVersion
+
+Instant activatedAt
+
+Instant expiresAt
+
+boolean newlyCreated
+
+Requirements:
+
+* rawAccessToken is present only for newly created Subscription.
+* Never serialize token hash.
+* Never return remote cookies.
+* Never return private keys.
+* Do not include complete subscription content in this result.
+* Use immutable result model.
+
+---
+
+# 12. Automatic subscription creation after provisioning
+
+Inspect Task 31 outbox completion behavior.
+
+Choose one correct design.
+
+Preferred design:
+
+After successful XUI provisioning, create the Subscription in the same local completion transaction that marks:
+
+* XuiClientProvision ACTIVE;
+* ProvisioningOutbox PROCESSED;
+* Order COMPLETED.
+
+However, because the raw token must be delivered somewhere, determine whether automatic creation can safely expose it.
+
+Recommended Task 33 approach:
+
+Option A — explicit creation:
+
+* Outbox completes provisioning.
+* Subscription remains absent.
+* Internal application creates it when delivery is requested.
+* Raw token is returned once.
+
+Option B — automatic creation with encrypted pending delivery:
+
+* Not recommended in Task 33 because raw-token storage would be required.
+
+Use Option A unless the existing project has a secure encrypted secret-delivery mechanism.
+
+Document why Subscription creation is explicit after provisioning.
+
+Do not store raw tokens merely to support automatic delivery.
+
+---
+
+# 13. Get Subscription metadata use case
+
+Create:
+
+GetUserSubscriptionUseCase
+
+Input:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+or use UUID userId internally according to current API conventions.
+
+Behavior:
+
+* Resolve User by trusted identity.
+* Load Subscription by User and ID.
+* Return safe metadata.
+* Do not return raw token.
+* Do not return token hash.
+* Do not return full VLESS URL.
+* Do not return remote private fields.
+* Return status, expiry, plan summary, and safe token prefix.
+
+Create:
+
+ListUserSubscriptionsUseCase
+
+Requirements:
+
+* bounded list or pagination abstraction;
+* newest first;
+* include revoked/expired history where appropriate;
+* optionally support status filter;
+* no Spring Pageable leakage.
+
+---
+
+# 14. Subscription metadata result
+
+Create:
+
+SubscriptionResult
+
+Fields:
+
+UUID subscriptionId
+
+UUID orderId
+
+UUID xuiClientProvisionId
+
+String planName
+
+SubscriptionStatus status
+
+String accessTokenPrefix
+
+int tokenVersion
+
+Instant activatedAt
+
+Instant expiresAt
+
+Instant revokedAt
+
+Instant lastAccessedAt
+
+long accessCount
+
+boolean accessible
+
+Requirements:
+
+* No raw token.
+* No hash.
+* No full client UUID unless needed internally.
+* No full subscription content.
+* No private 3x-ui information.
+
+---
+
+# 15. Token rotation use case
+
+Create:
+
+RotateSubscriptionTokenUseCase
+
+Command:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+Optional:
+
+String reason
+
+Behavior:
+
+1. Resolve User.
+2. Load Subscription owned by User.
+3. Reject terminal states:
+
+   * REVOKED;
+   * EXPIRED;
+   * INVALID.
+4. Generate a new raw token.
+5. Replace token hash and prefix.
+6. Increment tokenVersion.
+7. Invalidate the old token immediately after commit.
+8. Return the new raw token exactly once.
+9. Repeated request is not idempotent unless a requestId is introduced.
+
+Recommended:
+
+Add:
+
+UUID rotationRequestId
+
+Store a small token-rotation operation record only if the project already uses request-id operation records.
+
+Simpler Task 33 policy:
+
+* Rotation is intentionally non-idempotent.
+* Document that clients must not blindly retry after an unknown response.
+* Prefer adding requestId if the architecture already supports idempotent commands.
+
+Best implementation:
+
+Create:
+
+SubscriptionTokenRotation
+
+Fields:
+
+rotationRequestId
+
+subscriptionId
+
+previousTokenVersion
+
+newTokenVersion
+
+status
+
+createdAt
+
+Then make rotation idempotent.
+
+Use the simplest design consistent with the current codebase, but clearly document the uncertainty behavior.
+
+---
+
+# 16. Revoke subscription use case
+
+Create:
+
+RevokeSubscriptionUseCase
+
+Command:
+
+Long telegramUserId
+
+UUID subscriptionId
+
+String reason
+
+Behavior:
+
+* Verify ownership.
+* ACTIVE/SUSPENDED -> REVOKED.
+* Record revokedAt and bounded reason.
+* Public token endpoint becomes inaccessible.
+* Do not delete the 3x-ui client automatically.
+* Repeated revoke returns idempotently.
+* Revoking Subscription does not change Payment.
+* Revoking Subscription does not delete audit history.
+* If business policy requires disabling the VPN client, defer it to a separate explicit operation.
+
+Do not call DisableXuiClientUseCase automatically unless existing requirements explicitly demand it.
+
+---
+
+# 17. Suspend and resume subscription
+
+Create:
+
+SuspendSubscriptionUseCase
+
+ResumeSubscriptionUseCase
+
+Behavior:
+
+Suspend:
+
+* ACTIVE -> SUSPENDED.
+* Public endpoint returns a safe unavailable response.
+* Do not delete token.
+* Do not disable the VPN client automatically in Task 33.
+
+Resume:
+
+* SUSPENDED -> ACTIVE.
+* Only allowed when:
+
+  * underlying provision ACTIVE;
+  * not expired;
+  * not deleted;
+  * not revoked.
+
+Use cases may be internal/admin operations.
+
+Do not conflate subscription-access suspension with remote VPN-client disabling.
+
+Document the distinction:
+
+* Subscription access controls config retrieval.
+* XUI client lifecycle controls VPN connectivity.
+
+---
+
+# 18. Public subscription endpoint
+
+Create:
+
+PublicSubscriptionController
+
+Recommended base path:
+
+/sub/{token}
+
+or:
+
+/api/subscriptions/{token}
+
+Preferred simple path:
+
+GET /sub/{token}
+
+Supported query or format negotiation:
+
+GET /sub/{token}
+
+GET /sub/{token}?format=plain
+
+GET /sub/{token}?format=base64
+
+Optional:
+
+Accept header-based negotiation if it does not complicate client compatibility.
+
+Default:
+
+Base64-encoded subscription content, because many clients expect this.
+
+Requirements:
+
+* No authentication required beyond token possession.
+* Token is an opaque bearer secret.
+* Do not place token in logs.
+* Mask path in request logging.
+* No token in error messages.
+* No redirect.
+* No open redirect.
+* Disable caching.
+* Use `text/plain; charset=utf-8`.
+* Return no HTML.
+* Do not expose whether a token was never valid versus revoked.
+* Use a generic unavailable response for invalid/revoked/expired tokens.
+* Record safe access metadata after successful resolution.
+
+Recommended HTTP behavior:
+
+valid ACTIVE -> 200
+
+valid but SUSPENDED -> 404 or 410 according to chosen non-enumeration policy
+
+revoked -> 404 or 410
+
+expired -> 404 or 410
+
+invalid token format -> 404
+
+missing token -> 404
+
+remote metadata unavailable -> 503
+
+Preferred anti-enumeration behavior:
+
+Return 404 for invalid, revoked, suspended, expired, and unknown tokens.
+
+Return 503 only when a valid ACTIVE Subscription cannot be rendered because 3x-ui or trusted metadata is temporarily unavailable.
+
+Document the decision.
+
+---
+
+# 19. Token lookup service
+
+Create:
+
+ResolveSubscriptionByTokenUseCase
+
+Input:
+
+String rawToken
+
+Behavior:
+
+1. Validate bounded token format before hashing.
+2. Hash normalized token.
+3. Load by hash.
+4. Perform constant-time hash verification if needed.
+5. Validate Subscription ACTIVE.
+6. Validate expiry.
+7. Validate underlying XuiClientProvision ACTIVE.
+8. Validate the provision has not been deleted.
+9. Validate User/Order/PlanSelection linkage.
+10. Build the subscription content.
+11. Record lastAccessedAt and increment accessCount safely.
+12. Return rendered content and safe headers.
+
+Do not expose the Subscription entity to the controller.
+
+---
+
+# 20. Access-count update
+
+Access metadata must not make content retrieval fragile.
+
+Choose one design:
+
+Preferred:
+
+* Render content first.
+* Update `lastAccessedAt` and `accessCount` in a short best-effort transaction.
+* Failure to update metrics must not fail a valid subscription response.
+* Log metrics-update failure safely.
+
+Alternative:
+
+* update before rendering only if the project’s consistency rules require it.
+
+Concurrency:
+
+* Use atomic SQL increment or optimistic retry.
+* Do not lose all increments under concurrent access.
+* Exact analytics-grade counting is not required, but negative or decreasing counts are forbidden.
+
+Document whether accessCount is approximate or exact.
+
+---
+
+# 21. Subscription content model
+
+Create application-level models:
+
+SubscriptionContent
+
+SubscriptionConfigEntry
+
+Suggested fields for content:
+
+String title
+
+List<SubscriptionConfigEntry> entries
+
+Instant expiresAt
+
+Long uploadBytes
+
+Long downloadBytes
+
+Long totalBytes
+
+Long remainingBytes
+
+String supportUrl
+
+String profileUpdateInterval
+
+Config entry should represent trusted protocol fields without infrastructure DTO leakage.
+
+For VLESS + REALITY:
+
+String protocol
+
+UUID clientId
+
+String address
+
+int port
+
+String encryption
+
+String security
+
+String sni
+
+String publicKey
+
+String shortId
+
+String fingerprint
+
+String flow
+
+String transportType
+
+String path
+
+String host
+
+String mode
+
+String serviceName
+
+String remark
+
+Only include fields actually supported by the discovered inbound.
+
+Do not include:
+
+* Reality private key;
+* 3x-ui credentials;
+* cookies;
+* local database IDs not required by client;
+* raw gateway/payment fields.
+
+---
+
+# 22. Trusted inbound metadata strategy
+
+The VLESS URL requires accurate endpoint metadata.
+
+Inspect what is persisted locally.
+
+Preferred hierarchy:
+
+1. Use immutable provision-time inbound snapshot if Task 24 stored all required public fields.
+2. Otherwise retrieve the inbound by trusted `inboundId` using XuiInboundClient.
+3. Merge only trusted public metadata.
+4. Never accept metadata from public request.
+5. Never expose Reality private key.
+
+Required values may include:
+
+* server address;
+* port;
+* VLESS client UUID;
+* encryption;
+* security;
+* SNI/serverName;
+* Reality public key;
+* short ID;
+* fingerprint;
+* flow;
+* network type;
+* path;
+* host;
+* xHTTP mode;
+* gRPC service name.
+
+Server address must come from configuration or trusted inbound/public-endpoint configuration.
+
+Do not assume the 3x-ui panel host is the VPN server address.
+
+Create:
+
+SubscriptionEndpointProperties
+
+Prefix:
+
+app.subscription.endpoint
+
+Fields:
+
+String publicHost
+
+Integer overridePort
+
+String defaultFingerprint
+
+String defaultRemarkPrefix
+
+boolean preferIpv6
+
+Optional:
+
+String publicBaseUrl
+
+Requirements:
+
+* publicHost mandatory when subscription rendering is enabled;
+* must not include credentials;
+* host validation;
+* no path traversal;
+* no URL scheme where only host is expected;
+* safe defaults;
+* update `.env.example`.
+
+---
+
+# 23. VLESS URI builder
+
+Create:
+
+VlessUriBuilder
+
+Suggested package:
+
+com.parazit.panel.application.subscription.render
+
+Input:
+
+VlessSubscriptionConfig
+
+Output:
+
+String URI
+
+Requirements:
+
+* Correct URI format.
+* Correct UTF-8 percent-encoding.
+* Deterministic query parameter order.
+* No double encoding.
+* No untrusted raw concatenation.
+* Omit null/blank unsupported parameters.
+* Preserve required parameters.
+* `encryption=none`.
+* `security=reality` for Reality.
+* Include `pbk`, `sid`, `sni`, `fp`, `type`, `flow`, `path`, `host`, `mode`, or `serviceName` only when applicable.
+* Encode fragment/remark correctly.
+* Never include the Reality private key.
+* Never include panel credentials.
+* Never log the generated URI.
+
+Support current known transport combinations only.
+
+Expected minimum:
+
+VLESS + REALITY + TCP
+
+If the current provisioned inbound uses xHTTP:
+
+Support:
+
+VLESS + REALITY + xHTTP
+
+Do not fabricate unsupported values.
+
+---
+
+# 24. Subscription renderer
+
+Create:
+
+SubscriptionRenderer
+
+Methods:
+
+RenderedSubscription renderPlain(SubscriptionContent content)
+
+RenderedSubscription renderBase64(SubscriptionContent content)
+
+Plain format:
+
+* one URI per line;
+* UTF-8;
+* final newline optional but deterministic.
+
+Base64 format:
+
+* Base64 encoding of complete plain UTF-8 content;
+* use the encoding expected by supported clients;
+* no line wrapping unless client requirements demand it;
+* deterministic output.
+
+Create:
+
+RenderedSubscription
+
+Fields:
+
+byte[] body
+
+String contentType
+
+SubscriptionResponseHeaders headers
+
+Do not expose mutable internal arrays without defensive copying.
+
+---
+
+# 25. Subscription response headers
+
+Create safe response headers.
+
+Recommended:
+
+Content-Type: text/plain; charset=utf-8
+
+Cache-Control: no-store, no-cache, must-revalidate, private
+
+Pragma: no-cache
+
+Expires: 0
+
+X-Content-Type-Options: nosniff
+
+Content-Disposition: inline
+
+Optional widely supported subscription headers:
+
+subscription-userinfo:
+upload=<bytes>; download=<bytes>; total=<bytes>; expire=<unix-seconds>
+
+profile-title:
+base64:<encoded-title>
+
+profile-update-interval:
+24
+
+support-url: <trusted configured URL>
+
+Requirements:
+
+* Include only trusted values.
+* No negative values.
+* Correct Unix timestamp.
+* Do not claim traffic data if unavailable.
+* Do not block response if optional stats retrieval fails.
+* Header values must be sanitized against CRLF injection.
+* Do not include raw token.
+
+---
+
+# 26. Traffic and expiry metadata
+
+Inspect whether XUI usage statistics are already available.
+
+Preferred:
+
+Create optional port:
+
+SubscriptionUsageProvider
+
+Result:
+
+uploadBytes
+
+downloadBytes
+
+totalBytes
+
+expiresAt
+
+Implement using existing Xui client/inbound data where reliable.
+
+Requirements:
+
+* Subscription content must still work if usage data is unavailable.
+* Optional stats failure must not fail config delivery.
+* Plan traffic limit and remote total must not be confused.
+* Expiry must come from trusted provision/client state.
+* If remote expiry is `0` for unlimited/no-expiry, represent according to project policy.
+* Do not infer a false expiry.
+* Clamp remaining bytes to zero.
+
+Do not implement usage dashboard.
+
+---
+
+# 27. Content freshness and remote dependency
+
+Choose and document content-generation strategy.
+
+Recommended:
+
+* Build content dynamically from:
+
+  * Subscription;
+  * XuiClientProvision;
+  * trusted endpoint config;
+  * inbound public metadata.
+* Do not store full generated VLESS links.
+* Cache only if a cache abstraction already exists and invalidation is safe.
+* Task 33 should not require Redis caching.
+
+If 3x-ui is unavailable:
+
+* Use a persisted immutable public inbound snapshot if sufficient.
+* Otherwise return 503 for valid Subscription.
+* Do not return stale or fabricated values silently.
+
+Strong recommendation:
+
+Add public inbound snapshot fields to XuiClientProvision or a dedicated snapshot entity through a corrective migration if Task 24 did not persist enough public data.
+
+This avoids making every subscription retrieval depend on 3x-ui availability.
+
+---
+
+# 28. Provision-time public snapshot
+
+If missing, create:
+
+XuiProvisionedEndpointSnapshot
+
+Possible fields:
+
+Long inboundId
+
+String publicHost
+
+int port
+
+String protocol
+
+String networkType
+
+String security
+
+String serverName
+
+String realityPublicKey
+
+String shortId
+
+String fingerprint
+
+String flow
+
+String path
+
+String hostHeader
+
+String mode
+
+String serviceName
+
+Instant capturedAt
+
+Rules:
+
+* Contains only public client configuration.
+* Never contains Reality private key.
+* Immutable after successful provisioning.
+* Persisted with XuiClientProvision or a dedicated table.
+* Snapshot must reflect the actual inbound used.
+* Subscription generation should prefer this snapshot.
+* Any migration must be corrective and compatible with existing ACTIVE provisions.
+
+For older provisions without snapshot:
+
+* fetch inbound once;
+* validate;
+* backfill snapshot;
+* then render.
+
+---
+
+# 29. Create subscription API
+
+Create internal endpoint:
+
+POST /internal/users/{telegramUserId}/subscriptions
+
+Request:
+
+{
+"xuiClientProvisionId": "..."
+}
+
+Response:
+
+{
+"subscriptionId": "...",
+"status": "ACTIVE",
+"accessToken": "sub_...",
+"subscriptionUrl": "https://example.com/sub/sub_...",
+"tokenVersion": 1,
+"expiresAt": "...",
+"newlyCreated": true
+}
+
+Requirements:
+
+* Raw accessToken appears only when newly created.
+* subscriptionUrl appears only when raw token is present.
+* URL built from trusted configured public base URL.
+* Do not build URL from untrusted Host or X-Forwarded-Host by default.
+* Repeated creation:
+
+  * returns existing metadata;
+  * accessToken null;
+  * subscriptionUrl null;
+  * newlyCreated false.
+
+Controller depends on use case.
+
+No repository injection.
+
+---
+
+# 30. User subscription APIs
+
+Create:
+
+GET /internal/users/{telegramUserId}/subscriptions
+
+GET /internal/users/{telegramUserId}/subscriptions/{subscriptionId}
+
+POST /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/rotate-token
+
+POST /internal/users/{telegramUserId}/subscriptions/{subscriptionId}/revoke
+
+Optional internal/admin:
+
+POST /internal/admin/subscriptions/{subscriptionId}/suspend
+
+POST /internal/admin/subscriptions/{subscriptionId}/resume
+
+Requirements:
+
+* Telegram user ID is resolved to User.
+* Verify ownership for user endpoints.
+* Rotation response includes raw token once.
+* Metadata endpoints never include raw token.
+* Revocation reason bounded.
+* Standard error format.
+* No public authentication implementation yet.
+
+---
+
+# 31. Response DTOs
+
+Create:
+
+CreateSubscriptionRequest
+
+CreateSubscriptionResponse
+
+SubscriptionResponse
+
+RotateSubscriptionTokenRequest
+
+RotateSubscriptionTokenResponse
+
+RevokeSubscriptionRequest
+
+SubscriptionApiMapper
+
+Rules:
+
+* No entity exposure.
+* No token hash.
+* No storage secrets.
+* No Reality private key.
+* No XUI credentials.
+* No remote cookie.
+* No raw VLESS config in metadata APIs.
+* Token present only in creation/rotation response.
+
+---
+
+# 32. Exceptions
+
+Create or reuse:
+
+SubscriptionNotFoundException
+
+SubscriptionAlreadyExistsException if needed
+
+SubscriptionNotAccessibleException
+
+SubscriptionExpiredException
+
+SubscriptionRevokedException
+
+SubscriptionOwnershipException
+
+SubscriptionTokenInvalidException
+
+SubscriptionRenderingException
+
+SubscriptionEndpointConfigurationException
+
+UnsupportedInboundConfigurationException
+
+Map safely.
+
+Public `/sub/{token}` endpoint must not leak detailed exception reasons.
+
+Internal APIs may use:
+
+404 not found
+
+409 invalid lifecycle state
+
+422 unsupported provision/inbound state
+
+503 remote metadata temporarily unavailable
+
+Do not expose token, hash, client UUID, public key, storage details, SQL, or stack trace.
+
+---
+
+# 33. Public endpoint request logging
+
+Update request logging behavior.
+
+Requirements:
+
+* Public subscription token path must be redacted.
+* Log path template:
+
+/sub/{redacted}
+
+* Never log the raw URI containing token.
+* Never log query parameters containing token.
+* Do not log response body.
+* Include:
+
+  * subscriptionId after resolution;
+  * provisionId;
+  * status;
+  * format;
+  * traceId;
+  * duration.
+* Client IP logging should follow current privacy policy.
+* Do not introduce fingerprinting.
+
+Add log-capture tests where practical.
+
+---
+
+# 34. Expiration reconciliation
+
+On public access:
+
+* If Subscription expiry is reached:
+
+  * transition ACTIVE/SUSPENDED -> EXPIRED in a short transaction;
+  * return unavailable.
+* If underlying provision is:
+
+  * DISABLED;
+  * DELETING;
+  * DELETED;
+  * FAILED;
+  * INVALID;
+    then Subscription must not return usable config.
+
+Recommended mapping:
+
+Provision ACTIVE -> Subscription may be ACTIVE
+
+Provision DISABLED -> Subscription SUSPENDED or unavailable
+
+Provision DELETED -> Subscription INVALID or REVOKED according to policy
+
+Provision UNKNOWN -> temporary unavailable
+
+Do not mutate provision lifecycle from subscription access.
+
+Document lifecycle reconciliation.
+
+---
+
+# 35. Ownership and relationship validation
+
+At creation and rendering validate:
+
+* Subscription.userId equals provision.userId.
+* Subscription.planSelectionId equals provision.planSelectionId.
+* Order belongs to User.
+* Order belongs to PlanSelection.
+* Provision belongs to PlanSelection.
+* remote client UUID matches provision.
+* inbound ID matches provision/snapshot.
+
+If mismatch:
+
+* do not render;
+* mark Subscription INVALID where appropriate;
+* log safe IDs;
+* return generic unavailable response publicly.
+
+Never repair ownership automatically.
+
+---
+
+# 36. Idempotency
+
+Create a documented idempotency strategy.
+
+Subscription creation:
+
+Key:
+
+xuiClientProvisionId
+
+Database:
+
+unique xui_client_provision_id
+
+Replay:
+
+existing metadata, no raw token
+
+Token rotation:
+
+Use requestId if implemented.
+
+Public rendering:
+
+Safe to repeat.
+
+Revocation:
+
+Idempotent.
+
+Access metrics:
+
+Best effort and monotonic.
+
+No repeated operation may:
+
+* create another Subscription;
+* create another VPN client;
+* change Payment;
+* change Order;
+* generate another token except explicit rotation.
+
+---
+
+# 37. Concurrency
+
+Handle:
+
+* two concurrent Subscription creations for one provision;
+* token rotation racing public access;
+* token rotation racing another rotation;
+* revocation racing access;
+* revocation racing rotation;
+* expiry transition racing access;
+* concurrent access-count increments;
+* provision disable/delete racing rendering.
+
+Requirements:
+
+* database constraints are final authority;
+* no JVM-only locks;
+* use optimistic versioning or short pessimistic locking where appropriate;
+* no remote call while holding long DB locks;
+* old token becomes invalid after successful rotation commit;
+* public access may succeed with old token only if lookup began before rotation commit; document this narrow race if unavoidable;
+* revoked token must fail after revoke commit.
+
+---
+
+# 38. Security properties
+
+Create:
+
+SubscriptionProperties
+
+Prefix:
+
+app.subscription
+
+Suggested fields:
+
+boolean enabled
+
+String publicBaseUrl
+
+int tokenBytes
+
+int tokenPrefixLength
+
+int maxTokenLength
+
+Duration metadataRemoteTimeout
+
+boolean includeUsageHeaders
+
+boolean allowPlainFormat
+
+boolean allowBase64Format
+
+String defaultFormat
+
+String profileTitle
+
+Integer profileUpdateIntervalHours
+
+String supportUrl
+
+Validation:
+
+* tokenBytes at least 32;
+* prefix length safe;
+* max token length bounded;
+* publicBaseUrl HTTPS in production profile;
+* supportUrl trusted and optional;
+* allowed default format;
+* positive timeout;
+* safe title length.
+
+Update `.env.example`.
+
+Do not include raw secrets.
+
+---
+
+# 39. Domain unit tests
+
+Subscription tests:
+
+* creation;
+* ACTIVE status;
+* ownership fields;
+* token hash required;
+* token prefix required;
+* token version;
+* expiration;
+* suspend;
+* resume;
+* revoke;
+* expire;
+* invalid;
+* terminal behavior;
+* rotation;
+* access counter;
+* last-accessed timestamp;
+* no generic setters;
+* safe toString.
+
+Token tests:
+
+* entropy length;
+* URL-safe format;
+* different tokens;
+* deterministic hashing;
+* match;
+* mismatch;
+* safe prefix;
+* token never appears in toString.
+
+---
+
+# 40. URI builder tests
+
+Test VlessUriBuilder with exact expected URIs.
+
+Cover:
+
+* VLESS + REALITY + TCP;
+* VLESS + REALITY + xHTTP if supported;
+* optional flow;
+* optional path;
+* optional host;
+* optional mode;
+* fingerprint;
+* public key;
+* short ID;
+* SNI;
+* IPv4 host;
+* IPv6 host formatting;
+* Unicode remark;
+* spaces and special characters;
+* deterministic query order;
+* omitted null values;
+* double-encoding prevention;
+* no private key;
+* invalid port;
+* missing client UUID;
+* missing public host;
+* unsupported transport;
+* unsupported security.
+
+Avoid assertions based only on substring presence.
+
+Use exact URI or parsed-query assertions.
+
+---
+
+# 41. Renderer tests
+
+Test:
+
+* one config plain;
+* multiple configs plain;
+* deterministic newline behavior;
+* Base64 decode equals plain content;
+* empty content rejected;
+* UTF-8 remark;
+* immutable response bytes;
+* correct content type;
+* safe headers;
+* usage header;
+* no CRLF injection;
+* expiry Unix timestamp;
+* negative values rejected or normalized safely.
+
+---
+
+# 42. Creation service tests
+
+Test:
+
+* ACTIVE provision creates Subscription;
+* generated raw token returned once;
+* only hash persisted;
+* repeated creation returns no raw token;
+* missing provision;
+* provision not ACTIVE;
+* deleted provision;
+* missing User;
+* missing Order;
+* missing PlanSelection;
+* ownership mismatch;
+* expiry mapping;
+* concurrent creation;
+* token-hash collision retry if implemented;
+* no XUI create call;
+* no Payment/Order mutation.
+
+---
+
+# 43. Token rotation tests
+
+Test:
+
+* successful rotation;
+* tokenVersion increment;
+* new raw token returned;
+* old hash replaced;
+* old token fails;
+* new token succeeds;
+* wrong owner;
+* revoked Subscription;
+* expired Subscription;
+* invalid Subscription;
+* simultaneous rotations;
+* requestId replay if implemented;
+* no provision mutation;
+* no client recreation.
+
+---
+
+# 44. Public resolution tests
+
+Test:
+
+* valid ACTIVE token;
+* invalid token;
+* malformed token;
+* unknown token;
+* revoked;
+* suspended;
+* expired;
+* underlying provision disabled;
+* underlying provision deleted;
+* underlying provision unknown;
+* ownership mismatch;
+* remote metadata temporarily unavailable;
+* plain format allowed;
+* Base64 default;
+* unsupported format;
+* no detailed public errors;
+* access count update;
+* metrics update failure does not break response;
+* no token in logs.
+
+---
+
+# 45. Repository integration tests
+
+Using PostgreSQL Testcontainers:
+
+* save and load;
+* unique provision;
+* unique token hash;
+* token prefix lookup if supported;
+* user history;
+* status persistence;
+* timestamps;
+* expiration;
+* access count;
+* token rotation;
+* foreign keys;
+* check constraints;
+* terminal state mapping;
+* Hibernate validation.
+
+Flush persistence context for constraint tests.
+
+---
+
+# 46. Full integration test
+
+Create a complete scenario:
+
+1. Create User.
+2. Create and activate Plan.
+3. Create PlanSelection.
+4. Create Order.
+5. Create approved Payment.
+6. Create XuiClientProvision ACTIVE using mock 3x-ui flow.
+7. Create Subscription.
+8. Verify:
+
+   * one Subscription;
+   * raw token returned;
+   * raw token not stored;
+   * hash stored;
+   * ACTIVE.
+9. Call public endpoint with token.
+10. Verify:
+
+    * 200;
+    * expected VLESS URI;
+    * correct Base64/plain behavior;
+    * no private key;
+    * safe headers.
+11. Repeat public access.
+12. Verify no new Subscription or client.
+13. Rotate token.
+14. Verify old token fails.
+15. Verify new token works.
+16. Revoke Subscription.
+17. Verify new token fails.
+18. Verify XUI client remains unchanged.
+19. Verify Payment and Order unchanged.
+
+---
+
+# 47. Concurrency integration tests
+
+Scenario A: two creation requests
+
+* exactly one Subscription;
+* one token hash;
+* one request receives raw token;
+* losing request receives existing metadata without raw token.
+
+Scenario B: rotation and access race
+
+* after rotation commit, old token unavailable;
+* new token available;
+* no invalid intermediate database state.
+
+Scenario C: two rotations
+
+* deterministic winner or serialized versions;
+* no duplicate tokenVersion;
+* final token hash unique.
+
+Scenario D: revoke and access
+
+* access after revoke commit fails.
+
+Scenario E: concurrent access
+
+* content correct;
+* accessCount monotonic;
+* no lock timeout under normal batch.
+
+Requirements:
+
+* real PostgreSQL;
+* barriers/latches;
+* no Thread.sleep;
+* separate transactions;
+* ExecutorService shutdown;
+* explicit timeouts.
+
+---
+
+# 48. Controller tests
+
+Internal APIs:
+
+* creation success;
+* replay without token;
+* get;
+* list;
+* rotate;
+* revoke;
+* wrong owner;
+* invalid state;
+* missing User;
+* missing Subscription.
+
+Public endpoint:
+
+* valid token;
+* invalid token;
+* revoked;
+* expired;
+* default Base64;
+* plain format;
+* unsupported format;
+* correct headers;
+* no cache;
+* no token leakage;
+* standard safe 503 for temporary render failure.
+
+Ensure standard internal errors include:
+
+timestamp
+status
+error
+message
+path
+traceId
+
+Public endpoint may return minimal empty/body-safe errors.
+
+---
+
+# 49. Architecture verification
+
+Verify:
+
+* Subscription domain does not depend on API or infrastructure.
+* Application does not depend on RestClient or JPA.
+* Public controller depends on input port.
+* Controllers do not inject repositories.
+* Services do not inject Spring Data repositories.
+* Raw token is not stored.
+* Token hash does not leak through API.
+* VLESS URI builder does not depend on controller DTOs.
+* 3x-ui infrastructure DTOs do not leak into subscription domain.
+* Reality private key is never part of content models.
+* Subscription creation does not create VPN clients.
+* Public rendering does not modify Payment or Order.
+* Multipart/QR/Telegram libraries are absent.
+* No field injection.
+* No service locator.
+
+Extend ArchUnit tests.
+
+---
+
+# 50. Logging
+
+INFO:
+
+* Subscription created;
+* token rotated;
+* Subscription revoked;
+* Subscription suspended/resumed;
+* public content rendered;
+* Subscription expired;
+* invalid linkage detected.
+
+DEBUG:
+
+* content format selected;
+* snapshot used;
+* optional stats unavailable;
+* idempotent creation replay;
+* access metrics update.
+
+WARN:
+
+* invalid token format;
+* unavailable Subscription;
+* underlying provision not ACTIVE;
+* snapshot missing;
+* remote metadata unavailable;
+* ownership mismatch;
+* token collision.
+
+ERROR:
+
+* rendering failed for valid ACTIVE Subscription;
+* token-generation failure;
+* persistence inconsistency.
+
+Include safe IDs:
+
+subscriptionId
+
+userId
+
+orderId
+
+provisionId
+
+inboundId
+
+tokenVersion
+
+format
+
+traceId
+
+Never log:
+
+raw token
+
+token hash
+
+complete subscription URL
+
+complete VLESS URL
+
+client password/UUID unless current policy allows safe IDs; preferably avoid raw UUID in logs
+
+Reality private key
+
+panel username/password
+
+cookies
+
+payment data
+
+---
+
+# 51. Documentation
+
+Create:
+
+docs/subscription/subscription-domain.md
+
+Document:
+
+* aggregate;
+* ownership;
+* lifecycle;
+* relationship to provision;
+* distinction between subscription access and VPN connectivity;
+* expiry;
+* revocation;
+* rotation.
+
+Create:
+
+docs/subscription/subscription-security.md
+
+Document:
+
+* opaque bearer token;
+* entropy;
+* hash-at-rest;
+* token delivery once;
+* replay behavior;
+* rotation;
+* revocation;
+* logging redaction;
+* public endpoint enumeration protection;
+* HTTPS requirement;
+* proxy log redaction;
+* no raw token storage.
+
+Create:
+
+docs/subscription/subscription-content.md
+
+Document:
+
+* VLESS URI format;
+* trusted field sources;
+* Reality public/private key distinction;
+* supported transports;
+* plain/Base64 formats;
+* response headers;
+* optional traffic metadata;
+* fallback behavior.
+
+Create:
+
+docs/subscription/subscription-api.md
+
+Document:
+
+* internal APIs;
+* public endpoint;
+* example responses using fake tokens and fake keys;
+* status codes;
+* token rotation behavior;
+* creation replay behavior.
+
+Include Mermaid diagrams for:
+
+* create Subscription;
+* public token resolution;
+* content generation;
+* rotation;
+* revocation;
+* concurrency;
+* provision-state validation.
+
+---
+
+# 52. Expected structure
+
+The final structure should be similar to:
+
+src/main/java/com/parazit/panel/domain/subscription/
+Subscription.java
+SubscriptionStatus.java
+SubscriptionAccessToken.java
+
+src/main/java/com/parazit/panel/domain/subscription/repository/
+SubscriptionRepository.java
+
+src/main/java/com/parazit/panel/application/port/out/security/
+SubscriptionTokenGenerator.java
+SubscriptionTokenHasher.java
+
+src/main/java/com/parazit/panel/application/port/in/subscription/
+CreateSubscriptionUseCase.java
+GetUserSubscriptionUseCase.java
+ListUserSubscriptionsUseCase.java
+RotateSubscriptionTokenUseCase.java
+RevokeSubscriptionUseCase.java
+SuspendSubscriptionUseCase.java
+ResumeSubscriptionUseCase.java
+ResolveSubscriptionByTokenUseCase.java
+
+src/main/java/com/parazit/panel/application/subscription/command/
+CreateSubscriptionCommand.java
+RotateSubscriptionTokenCommand.java
+RevokeSubscriptionCommand.java
+
+src/main/java/com/parazit/panel/application/subscription/result/
+CreateSubscriptionResult.java
+SubscriptionResult.java
+ResolvedSubscriptionContent.java
+
+src/main/java/com/parazit/panel/application/subscription/
+CreateSubscriptionService.java
+GetUserSubscriptionService.java
+ListUserSubscriptionsService.java
+RotateSubscriptionTokenService.java
+RevokeSubscriptionService.java
+SuspendSubscriptionService.java
+ResumeSubscriptionService.java
+ResolveSubscriptionByTokenService.java
+SubscriptionResultMapper.java
+SubscriptionAccessMetricsService.java
+
+src/main/java/com/parazit/panel/application/subscription/model/
+SubscriptionContent.java
+SubscriptionConfigEntry.java
+VlessSubscriptionConfig.java
+SubscriptionResponseHeaders.java
+RenderedSubscription.java
+
+src/main/java/com/parazit/panel/application/subscription/render/
+VlessUriBuilder.java
+SubscriptionRenderer.java
+Base64SubscriptionRenderer.java
+PlainSubscriptionRenderer.java
+
+src/main/java/com/parazit/panel/infrastructure/security/
+SecureSubscriptionTokenGenerator.java
+Sha256SubscriptionTokenHasher.java
+
+src/main/java/com/parazit/panel/infrastructure/persistence/subscription/
+SpringDataSubscriptionRepository.java
+SubscriptionRepositoryAdapter.java
+
+src/main/java/com/parazit/panel/api/internal/subscription/
+UserSubscriptionController.java
+CreateSubscriptionRequest.java
+CreateSubscriptionResponse.java
+SubscriptionResponse.java
+RotateSubscriptionTokenRequest.java
+RotateSubscriptionTokenResponse.java
+RevokeSubscriptionRequest.java
+SubscriptionApiMapper.java
+
+src/main/java/com/parazit/panel/api/publicapi/subscription/
+PublicSubscriptionController.java
+
+src/main/java/com/parazit/panel/config/properties/
+SubscriptionProperties.java
+SubscriptionEndpointProperties.java
+
+src/main/resources/db/migration/
+V14__create_subscriptions.sql
+or the actual next migration
+
+src/test/java/com/parazit/panel/domain/subscription/
+SubscriptionTest.java
+SubscriptionAccessTokenTest.java
+
+src/test/java/com/parazit/panel/application/subscription/
+CreateSubscriptionServiceTest.java
+RotateSubscriptionTokenServiceTest.java
+RevokeSubscriptionServiceTest.java
+ResolveSubscriptionByTokenServiceTest.java
+SubscriptionAccessMetricsServiceTest.java
+
+src/test/java/com/parazit/panel/application/subscription/render/
+VlessUriBuilderTest.java
+PlainSubscriptionRendererTest.java
+Base64SubscriptionRendererTest.java
+
+src/test/java/com/parazit/panel/infrastructure/persistence/subscription/
+SubscriptionRepositoryIntegrationTest.java
+
+src/test/java/com/parazit/panel/integration/subscription/
+SubscriptionLifecycleIntegrationTest.java
+PublicSubscriptionEndpointIntegrationTest.java
+ConcurrentSubscriptionCreationIntegrationTest.java
+ConcurrentSubscriptionRotationIntegrationTest.java
+
+src/test/java/com/parazit/panel/api/internal/subscription/
+UserSubscriptionControllerTest.java
+
+src/test/java/com/parazit/panel/api/publicapi/subscription/
+PublicSubscriptionControllerTest.java
+
+docs/subscription/
+subscription-domain.md
+subscription-security.md
+subscription-content.md
+subscription-api.md
+
+Adapt package names and migration versions to existing project conventions.
+
+---
+
+# 53. Verification commands
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew check
+
+./gradlew build
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Verify:
+
+* all previous tests pass;
+* Flyway passes;
+* Hibernate validation passes;
+* Subscription domain tests pass;
+* token-generation tests pass;
+* URI builder tests pass;
+* renderer tests pass;
+* repository tests pass;
+* public endpoint tests pass;
+* rotation/revocation tests pass;
+* concurrency tests pass;
+* application starts;
+* raw tokens are not persisted;
+* raw tokens are not logged;
+* token hashes are not exposed;
+* Reality private keys are not exposed;
+* repeated creation creates one Subscription;
+* repeated public access creates no client;
+* old token fails after rotation;
+* revoked Subscription is inaccessible;
+* Payment and Order remain unchanged;
+* no QR Code implementation exists;
+* no Telegram handler exists;
+* no production secret is committed;
+* no tests are disabled.
+
+---
+
+# 54. Optional manual verification
+
+Use only test data.
+
+1. Create a User.
+2. Create and activate a Plan.
+3. Create PlanSelection and Order.
+4. Complete a fake approved Payment.
+5. Provision one test 3x-ui client.
+6. Create Subscription.
+7. Copy the raw token once.
+8. Call:
+   GET /sub/{token}
+9. Decode Base64 result.
+10. Import the resulting VLESS link into a compatible test client.
+11. Verify:
+
+    * host;
+    * port;
+    * client UUID;
+    * SNI;
+    * public key;
+    * short ID;
+    * fingerprint;
+    * transport fields.
+12. Rotate token.
+13. Confirm old URL fails.
+14. Confirm new URL works.
+15. Revoke Subscription.
+16. Confirm new URL fails.
+17. Confirm the 3x-ui client still exists.
+18. Confirm no Payment or Order data changed.
+
+Do not use production users, production tokens, or production inbounds.
+
+---
+
+# 55. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Subscription ownership design
+3. Subscription lifecycle design
+4. Token format and entropy design
+5. Hash-at-rest design
+6. Creation replay behavior
+7. Rotation behavior
+8. Revocation behavior
+9. Public endpoint security behavior
+10. Trusted inbound metadata strategy
+11. VLESS URI design
+12. Plain/Base64 rendering design
+13. Usage-header design
+14. Concurrency strategy
+15. Planned files to create
+16. Planned files to modify
+17. Migration and compatibility risks
+
+After implementation provide:
+
+1. Summary
+2. Created files
+3. Modified files
+4. Database migration details
+5. Subscription aggregate behavior
+6. Token generation and hashing
+7. Creation replay behavior
+8. Token rotation behavior
+9. Revocation/suspension behavior
+10. Public endpoint contract
+11. VLESS URI rendering
+12. Plain/Base64 content behavior
+13. Response headers
+14. Usage and expiry metadata
+15. Trusted endpoint snapshot behavior
+16. Provision-state validation
+17. Ownership validation
+18. Idempotency behavior
+19. Transaction boundaries
+20. Concurrency handling
+21. Security and logging behavior
+22. Unit-test results
+23. Integration-test results
+24. Controller-test results
+25. Concurrency-test results
+26. Flyway and Hibernate results
+27. Build result
+28. Commands executed
+29. Remaining issues
+30. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(subscription): add secure subscription token and content endpoint
+
+Stop after completing Task 33.
+
+Do not begin Task 34.

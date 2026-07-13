@@ -1,0 +1,3002 @@
+You are a senior Java 21, Spring Boot, PostgreSQL, Docker, Linux, Nginx, observability, backup, security, and production-readiness engineer.
+
+Continue implementing the existing VPN Automation Platform project.
+
+# Task 40 — Admin Operations, Production Deployment, Backup, Monitoring, and Final Quality Gate
+
+## Goal
+
+Complete the current project roadmap by preparing the VPN Automation Platform for secure and maintainable deployment on a Linux VPS.
+
+After this task, the platform must provide:
+
+* an internal operational admin API;
+* secure admin authentication and authorization;
+* operational views for:
+
+  * Users;
+  * Plans;
+  * Orders;
+  * Payments;
+  * manual receipt reviews;
+  * provisioning;
+  * Subscriptions;
+  * Telegram processing;
+  * Notifications;
+  * scheduled jobs;
+* safe manual operational actions;
+* Docker-based production packaging;
+* production configuration profiles;
+* Nginx reverse-proxy configuration;
+* HTTPS deployment guidance;
+* PostgreSQL backup and restore automation;
+* receipt-storage backup policy;
+* database migration strategy;
+* health, metrics, logs, and alerting foundations;
+* secret-management guidance;
+* firewall and network-hardening instructions;
+* graceful startup and shutdown;
+* resource limits;
+* production smoke tests;
+* disaster-recovery documentation;
+* final end-to-end quality verification.
+
+Do not implement:
+
+* a complex frontend dashboard;
+* a public administration website;
+* Kubernetes;
+* Terraform;
+* Ansible;
+* cloud-vendor-specific infrastructure;
+* multi-region deployment;
+* Kafka;
+* event sourcing;
+* CQRS;
+* promotional campaigns;
+* new payment providers;
+* refunds;
+* chargebacks;
+* automatic receipt approval;
+* new VPN protocols;
+* mobile applications;
+* customer web frontend;
+* reseller or multi-tenant support.
+
+A minimal internal admin API and operational documentation are sufficient.
+
+Stop after completing Task 40.
+
+Do not create Task 41.
+
+---
+
+# 1. Important rules
+
+* Inspect the entire repository before changing anything.
+* Preserve all working behavior from Tasks 1–39.
+* Treat this task as the final production-readiness and quality-gate task.
+* Use Java 21.
+* Use the existing Spring Boot and build-tool versions.
+* Use PostgreSQL and Flyway.
+* Use constructor injection only.
+* Do not use field injection.
+* Do not expose JPA entities.
+* Do not inject Spring Data repositories into controllers or application services.
+* Do not weaken existing domain invariants.
+* Do not bypass:
+
+  * Payment approval;
+  * manual receipt review;
+  * provisioning outbox;
+  * Subscription ownership;
+  * Telegram idempotency;
+  * notification idempotency;
+  * scheduled-job locking.
+* Do not create admin endpoints that directly mutate database rows.
+* Admin actions must use application use cases.
+* Do not log:
+
+  * secrets;
+  * passwords;
+  * Bot tokens;
+  * merchant IDs;
+  * authorities;
+  * full bank-card numbers;
+  * receipt contents;
+  * Subscription tokens;
+  * VLESS URIs;
+  * Reality private keys;
+  * XUI credentials;
+  * database passwords;
+  * backup encryption keys.
+* Do not commit production secrets.
+* Do not place secrets in Docker images.
+* Do not expose PostgreSQL, Redis, Adminer, 3x-ui panel, or Actuator publicly.
+* Do not use default credentials.
+* Do not implement admin authentication through an insecure header.
+* Replace temporary operator-header authentication from Task 31 for production.
+* Do not begin another task.
+
+---
+
+# 2. Current-state assessment
+
+Inspect and report:
+
+* complete module inventory;
+* package and architecture structure;
+* current admin/internal controllers;
+* temporary operator identity implementation;
+* current Spring Security configuration;
+* User roles or absence of roles;
+* Actuator endpoints;
+* Micrometer metrics;
+* tracing/logging;
+* health indicators;
+* Dockerfile and Compose files;
+* environment profiles;
+* Flyway configuration;
+* receipt and temporary-file storage;
+* PostgreSQL volume configuration;
+* Redis usage;
+* Nginx configuration, if any;
+* TLS assumptions;
+* current backup scripts;
+* current deployment docs;
+* CI configuration;
+* test-source sets;
+* coverage;
+* vulnerability scanning;
+* current production risks;
+* all TODOs and temporary security assumptions.
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Production architecture diagram
+3. Admin security design
+4. Admin capability inventory
+5. Deployment topology
+6. Docker-image strategy
+7. Configuration and secret strategy
+8. Nginx and TLS strategy
+9. Firewall strategy
+10. Backup and restore strategy
+11. Receipt-storage durability strategy
+12. Monitoring and alerting strategy
+13. Logging and retention strategy
+14. Database migration strategy
+15. Rollback strategy
+16. Final quality-gate strategy
+17. Planned files to create
+18. Planned files to modify
+19. Migration, security, and operational risks
+
+---
+
+# 3. Target production topology
+
+Prepare the project for a simple single-VPS deployment.
+
+Recommended topology:
+
+Internet
+-> Nginx
+-> Spring Boot application
+-> PostgreSQL
+
+Optional internal dependencies:
+
+* Redis, only if currently required;
+* 3x-ui panel/API on private or restricted interface;
+* local receipt-storage volume;
+* local backup volume or remote backup target;
+* Prometheus/Grafana only if already included or intentionally added through an optional profile.
+
+Requirements:
+
+* only ports 80 and 443 publicly accessible;
+* SSH restricted separately by operator policy;
+* application listens on an internal Docker network;
+* PostgreSQL not exposed publicly;
+* Redis not exposed publicly;
+* Actuator not exposed publicly;
+* 3x-ui panel not exposed without strict access controls;
+* receipt and backup paths stored on persistent volumes;
+* application container remains replaceable.
+
+Create Mermaid topology documentation.
+
+---
+
+# 4. Production admin authentication
+
+Replace the temporary Task 31 operator-header authentication for production.
+
+Implement Spring Security for internal admin APIs.
+
+Preferred Task 40 approach:
+
+HTTP Basic authentication backed by securely configured admin credentials for the first production version.
+
+Better alternative if Keycloak or an existing identity provider already exists:
+
+JWT/OIDC Resource Server with ADMIN/OPERATOR roles.
+
+Choose the simplest secure option consistent with the repository.
+
+Requirements:
+
+* no plaintext password in source code;
+* password hash or credentials from environment/secret file;
+* HTTPS mandatory;
+* role-based authorization;
+* stateless authentication;
+* CSRF decision documented;
+* public Subscription endpoint remains accessible by opaque token;
+* Zarinpal callback remains publicly accessible;
+* Telegram webhook, if present, uses its secret-token validation;
+* internal/admin endpoints require authentication;
+* Actuator management endpoints restricted;
+* standard unauthorized/forbidden JSON responses;
+* no login form required;
+* no session cookie required unless architecture explicitly chooses it.
+
+If using HTTP Basic:
+
+* credentials supplied through:
+
+  * environment;
+  * Docker secret-style mounted file;
+  * or external secret manager.
+* password must not be logged.
+* support multiple roles only if justified.
+
+---
+
+# 5. Admin roles
+
+Create:
+
+AdminRole
+
+Recommended roles:
+
+ROLE_ADMIN
+
+ROLE_OPERATOR
+
+ROLE_SUPPORT
+
+Capabilities:
+
+## ADMIN
+
+* all operational read APIs;
+* Plan management;
+* receipt approval/rejection;
+* provisioning retry;
+* job inspection;
+* notification retry;
+* User block/unblock if implemented;
+* sensitive operational actions.
+
+## OPERATOR
+
+* manual payment review;
+* receipt-content access;
+* Payment/Order read access;
+* limited provisioning read access.
+
+## SUPPORT
+
+* User;
+* Order;
+* Payment;
+* Subscription;
+* Notification read-only views;
+* no receipt approval;
+* no provisioning retry;
+* no Plan modification.
+
+Use method or endpoint authorization.
+
+Do not rely on frontend visibility.
+
+Add authorization tests.
+
+---
+
+# 6. Current operator provider replacement
+
+Replace:
+
+HeaderBasedCurrentOperatorProvider
+
+with:
+
+SpringSecurityCurrentOperatorProvider
+
+Behavior:
+
+* resolves authenticated principal;
+* returns stable admin/operator identity;
+* includes role information where required;
+* rejects unauthenticated request;
+* no user-supplied reviewer ID;
+* audit review decisions using authenticated principal.
+
+Keep header provider only under:
+
+* test profile;
+* explicitly disabled local-development profile if still needed.
+
+It must not be active in production.
+
+---
+
+# 7. Admin audit identity
+
+Ensure admin actions record:
+
+* principal ID;
+* role;
+* action;
+* target resource;
+* timestamp;
+* traceId;
+* success/failure outcome.
+
+Do not store:
+
+* authentication password;
+* Authorization header;
+* receipt bytes;
+* raw provider response;
+* Subscription credential;
+* private key.
+
+Create a lightweight:
+
+AdminAuditEvent
+
+or reuse existing audit infrastructure.
+
+Do not build a large audit subsystem if none exists.
+
+At minimum, structured security logs are required.
+
+---
+
+# 8. Operational admin API
+
+Create or consolidate:
+
+AdminOperationsController
+
+Suggested base path:
+
+/internal/admin
+
+Areas:
+
+* `/users`
+* `/plans`
+* `/orders`
+* `/payments`
+* `/manual-payments`
+* `/provisioning`
+* `/subscriptions`
+* `/telegram`
+* `/notifications`
+* `/jobs`
+* `/system`
+
+Use dedicated controllers if that matches current conventions.
+
+Requirements:
+
+* authenticated;
+* role-restricted;
+* pagination/bounded results;
+* deterministic sorting;
+* safe filters;
+* no entity exposure;
+* no raw JSON payload exposure;
+* no secrets;
+* no receipt content in list endpoints;
+* receipt content only through dedicated authorized endpoint;
+* no arbitrary database query API.
+
+---
+
+# 9. Admin User operations
+
+Provide safe read capabilities:
+
+GET /internal/admin/users
+
+GET /internal/admin/users/{userId}
+
+Search filters:
+
+* Telegram user ID;
+* username;
+* status;
+* blocked state;
+* registration date.
+
+Optional actions if existing domain supports them:
+
+POST /internal/admin/users/{userId}/block
+
+POST /internal/admin/users/{userId}/unblock
+
+Rules:
+
+* use application use cases;
+* preserve history;
+* blocking User must not silently revoke Payments or Subscriptions unless explicit domain policy exists;
+* do not expose private settings unnecessarily;
+* do not expose Telegram chat history.
+
+Do not physically delete Users.
+
+---
+
+# 10. Admin Order and Payment views
+
+Provide:
+
+GET /internal/admin/orders
+
+GET /internal/admin/orders/{orderId}
+
+GET /internal/admin/payments
+
+GET /internal/admin/payments/{paymentId}
+
+Filters:
+
+* User;
+* method;
+* Payment status;
+* Order status;
+* date range;
+* Plan;
+* provider.
+
+Safe details may include:
+
+* amount;
+* currency;
+* method;
+* statuses;
+* timestamps;
+* safe provider reference suffix;
+* receipt/review status;
+* provisioning status.
+
+Do not expose:
+
+* Zarinpal authority;
+* merchant ID;
+* raw provider request/response;
+* full card number;
+* receipt storage key;
+* receipt hash;
+* Subscription token;
+* VLESS URI.
+
+---
+
+# 11. Manual review operational completion
+
+Verify and harden the existing review APIs.
+
+Required:
+
+* list review queue;
+* get review details;
+* claim;
+* release;
+* approve;
+* reject;
+* access receipt content;
+* claim ownership;
+* claim expiration;
+* role authorization;
+* audit log.
+
+Content endpoint:
+
+* OPERATOR and ADMIN only;
+* `Cache-Control: no-store`;
+* `X-Content-Type-Options: nosniff`;
+* safe filename;
+* no path exposure;
+* no public URL;
+* access audit event.
+
+Review approval must still:
+
+* use shared PaymentApprovalService;
+* create one outbox;
+* never call 3x-ui in approval transaction.
+
+---
+
+# 12. Provisioning operations
+
+Provide:
+
+GET /internal/admin/provisioning
+
+GET /internal/admin/provisioning/{provisionId}
+
+GET /internal/admin/provisioning/outbox
+
+GET /internal/admin/provisioning/outbox/{eventId}
+
+POST /internal/admin/provisioning/outbox/{eventId}/retry
+
+Optional:
+
+POST /internal/admin/provisioning/{provisionId}/reconcile
+
+Rules:
+
+* retry only eligible statuses;
+* processed outbox cannot be retried;
+* retry reuses same outbox row;
+* no duplicate XUI client;
+* no direct arbitrary remote payload;
+* ADMIN only for retry/reconcile;
+* SUPPORT/OPERATOR may have read-only access according to role policy.
+
+Do not expose XUI credentials, cookies, private keys, or raw responses.
+
+---
+
+# 13. Subscription operations
+
+Provide:
+
+GET /internal/admin/subscriptions
+
+GET /internal/admin/subscriptions/{subscriptionId}
+
+Optional actions:
+
+POST /internal/admin/subscriptions/{subscriptionId}/suspend
+
+POST /internal/admin/subscriptions/{subscriptionId}/resume
+
+POST /internal/admin/subscriptions/{subscriptionId}/revoke
+
+Rules:
+
+* never expose raw token or token hash;
+* never expose complete VLESS URI;
+* token rotation through admin only if product policy explicitly permits it;
+* preferred:
+
+  * User rotates through Telegram;
+  * admin may revoke/suspend only.
+* ADMIN only for state mutation;
+* SUPPORT read-only.
+
+---
+
+# 14. Telegram operational views
+
+Provide:
+
+GET /internal/admin/telegram/updates
+
+GET /internal/admin/telegram/updates/{updateId}
+
+GET /internal/admin/telegram/purchase-sessions
+
+GET /internal/admin/telegram/receipt-attempts
+
+Filters:
+
+* status;
+* date;
+* User;
+* failure code.
+
+Do not expose:
+
+* raw Telegram update payload;
+* file ID;
+* file path;
+* callback signature;
+* message bodies containing financial/credential content;
+* Bot token;
+* QR bytes.
+
+Safe operational summaries only.
+
+---
+
+# 15. Notification and job operations
+
+Reuse and secure existing Task 38–39 APIs.
+
+Notifications:
+
+* list;
+* detail;
+* retry eligible item;
+* dead count;
+* oldest pending age.
+
+Jobs:
+
+* status;
+* recent runs;
+* run detail.
+
+Optional manual job trigger:
+
+POST /internal/admin/jobs/{jobKey}/run
+
+Only implement if:
+
+* ADMIN-authenticated;
+* same coordinator/lock used;
+* no overlapping execution;
+* request is audited;
+* result bounded.
+
+Do not allow arbitrary cron or class execution.
+
+---
+
+# 16. System information endpoint
+
+Create:
+
+GET /internal/admin/system/info
+
+Return safe data:
+
+* application version;
+* build timestamp;
+* Java version;
+* active profile;
+* database migration version;
+* uptime;
+* instance ID;
+* enabled integrations by boolean only;
+* scheduler enabled;
+* Telegram enabled;
+* notification enabled;
+* receipt storage provider name;
+* build commit if available.
+
+Do not return:
+
+* environment variables;
+* passwords;
+* URLs containing credentials;
+* Bot token;
+* merchant ID;
+* database URL with password;
+* filesystem secrets;
+* internal cookies.
+
+ADMIN and SUPPORT read access may be allowed.
+
+---
+
+# 17. Admin API pagination
+
+Create application-owned pagination models if not already available:
+
+PageRequest
+
+PageResult<T>
+
+Fields:
+
+page
+
+size
+
+sort
+
+totalElements
+
+totalPages
+
+Requirements:
+
+* max page size bounded;
+* allowlisted sort fields;
+* no Spring Pageable leakage;
+* stable secondary sort;
+* safe date filters;
+* avoid unbounded queries.
+
+Recommended maximum:
+
+100
+
+Operational high-volume tables may use cursor pagination if already supported.
+
+Do not implement a generic dynamic-query language.
+
+---
+
+# 18. Admin error behavior
+
+Admin errors use standard response:
+
+timestamp
+
+status
+
+error
+
+message
+
+path
+
+traceId
+
+For 401/403:
+
+* safe generic message;
+* no indication of valid usernames;
+* no authentication detail.
+
+For database constraints:
+
+* map to safe conflict;
+* do not expose constraint names or SQL.
+
+For provider failures:
+
+* safe operational code;
+* no raw provider body.
+
+---
+
+# 19. Production profile
+
+Create or harden:
+
+application-prod.yml
+
+Requirements:
+
+* `ddl-auto=validate`;
+* Flyway enabled;
+* SQL logging disabled;
+* sensitive request/response logging disabled;
+* secure error messages;
+* Actuator exposure allowlisted;
+* production timeouts;
+* bounded connection pool;
+* graceful shutdown;
+* forwarded headers configured correctly behind Nginx;
+* no default development credentials;
+* providers disabled unless explicitly enabled;
+* receipt storage path mandatory;
+* HTTPS public URL mandatory for:
+
+  * callback;
+  * Subscription base URL;
+  * Telegram webhook if used.
+* temporary header-based operator provider disabled;
+* test endpoints disabled;
+* Adminer disabled.
+
+Use environment variables for deployment-specific values.
+
+---
+
+# 20. Configuration validation
+
+Production startup must fail fast when enabled features lack required configuration.
+
+Validate:
+
+* PostgreSQL credentials;
+* admin credentials/security config;
+* Telegram Bot token;
+* Telegram callback-signing secret;
+* Telegram file-identity secret;
+* Zarinpal merchant credentials;
+* manual payment card configuration;
+* 3x-ui URL and credentials;
+* Subscription public URL;
+* receipt-storage root;
+* backup configuration if in-app checks exist;
+* allowed CORS origins if CORS is needed.
+
+Do not validate disabled integrations as required.
+
+No secret may appear in configuration exception messages.
+
+---
+
+# 21. Secret-management strategy
+
+Document supported production secret methods.
+
+Preferred single-VPS strategy:
+
+* root-owned environment file outside repository;
+* mode `600`;
+* mounted secret files where practical;
+* Docker Compose `env_file`;
+* secret rotation procedure.
+
+Do not:
+
+* bake secrets into image;
+* commit `.env`;
+* place secrets in Nginx config;
+* echo secrets in startup scripts;
+* include secrets in backup logs;
+* expose secrets through `/actuator/env`.
+
+Create:
+
+`.env.production.example`
+
+with placeholders only.
+
+Ensure `.gitignore` covers:
+
+* `.env`;
+* `.env.production`;
+* secret files;
+* certificates;
+* backup encryption keys;
+* database dumps;
+* receipts;
+* generated QR files;
+* Telegram files.
+
+---
+
+# 22. Dockerfile
+
+Create or harden a production Dockerfile.
+
+Requirements:
+
+* multi-stage build;
+* pinned suitable JDK/JRE base image;
+* Java 21;
+* non-root runtime user;
+* minimal runtime image;
+* no source code in runtime stage unless required;
+* no build cache/secrets copied;
+* deterministic artifact copy;
+* healthcheck only if safe and useful;
+* writable paths explicitly created:
+
+  * logs if file logging used;
+  * receipt storage;
+  * temp storage.
+* no secrets in image;
+* expose only application port;
+* graceful JVM signal handling;
+* container-aware JVM memory settings;
+* timezone policy explicit;
+* labels for version/build metadata if useful.
+
+Avoid:
+
+* running as root;
+* using `latest`;
+* package-manager installation in runtime stage unless necessary;
+* copying `.env`;
+* copying local receipts or backups.
+
+---
+
+# 23. JVM production options
+
+Configure recommended defaults through environment:
+
+* `-XX:MaxRAMPercentage`
+* `-XX:InitialRAMPercentage`
+* `-XX:+ExitOnOutOfMemoryError`
+* optional GC logging according to operational policy;
+* UTF-8;
+* secure entropy behavior;
+* timezone.
+
+Do not hardcode an excessive heap.
+
+Document examples for:
+
+* 1 GB VPS;
+* 2 GB VPS;
+* 4 GB VPS.
+
+Leave enough memory for:
+
+* PostgreSQL;
+* Nginx;
+* Docker;
+* OS;
+* 3x-ui if on same VPS.
+
+Do not claim one size fits all.
+
+---
+
+# 24. Docker Compose production file
+
+Create:
+
+docker-compose.prod.yml
+
+Services:
+
+* app;
+* postgres;
+* optional Redis only if needed;
+* optional Nginx;
+* optional monitoring profile.
+
+Requirements:
+
+* persistent named/bind volumes;
+* health checks;
+* startup dependencies based on health;
+* restart policy;
+* internal network;
+* no public PostgreSQL port;
+* no public Redis port;
+* resource limits or documented Compose-compatible constraints;
+* read-only filesystem where practical;
+* `tmpfs` for temporary runtime paths where compatible;
+* application receipt volume persistent;
+* PostgreSQL data volume persistent;
+* backup volume separate;
+* logs through stdout preferred;
+* secrets/environment externalized.
+
+Do not include production credentials.
+
+---
+
+# 25. Compose service hardening
+
+For application container:
+
+* non-root;
+* drop unnecessary Linux capabilities;
+* `no-new-privileges`;
+* internal application port only;
+* writable volumes limited;
+* no Docker socket;
+* no host network;
+* no privileged mode.
+
+For PostgreSQL:
+
+* internal network only;
+* strong password;
+* persistent volume;
+* health check;
+* backup user or role strategy documented.
+
+For Nginx:
+
+* only 80/443 published;
+* certificate paths mounted read-only;
+* security headers;
+* upload-size limits matching receipt policy;
+* proxy timeouts aligned with application behavior.
+
+---
+
+# 26. Nginx reverse proxy
+
+Create example production configuration:
+
+deploy/nginx/vpn-platform.conf
+
+Route:
+
+* application API;
+* Zarinpal callback;
+* public Subscription endpoint;
+* optional Telegram webhook;
+* internal admin endpoints.
+
+Requirements:
+
+* HTTPS;
+* HTTP to HTTPS redirect;
+* correct proxy headers;
+* trusted forwarded-header handling;
+* request-size limits;
+* no buffering issues for receipt upload where applicable;
+* timeout limits;
+* tokenized Subscription path excluded/redacted from access logs if possible;
+* admin endpoints optionally IP-restricted;
+* Actuator not publicly proxied;
+* no directory listing;
+* no server version exposure;
+* no arbitrary upstream host.
+
+Security headers where compatible:
+
+* `X-Content-Type-Options: nosniff`;
+* `Referrer-Policy: no-referrer`;
+* `X-Frame-Options: DENY`;
+* suitable CSP for JSON/API;
+* HSTS after HTTPS is verified;
+* Permissions-Policy.
+
+Do not set headers that break Telegram/Zarinpal callbacks without testing.
+
+---
+
+# 27. Sensitive URL logging
+
+Nginx and application logs must redact:
+
+* `/sub/{token}`;
+* payment callback query values where sensitive;
+* Telegram webhook secret-related paths if present;
+* admin Authorization headers.
+
+Provide Nginx `map` or custom log format guidance to avoid logging full Subscription token.
+
+Do not log query strings by default for sensitive routes.
+
+Document reverse-proxy, application, and external load-balancer logging risk.
+
+---
+
+# 28. TLS strategy
+
+Document two supported approaches:
+
+## Let’s Encrypt with Certbot
+
+* domain DNS;
+* ports 80/443;
+* certificate renewal;
+* Nginx reload;
+* certificate permissions.
+
+## Caddy or another automatic TLS proxy
+
+Only as an alternative if already used.
+
+Preferred artifact:
+
+Nginx + Certbot documentation.
+
+Requirements:
+
+* TLS 1.2+;
+* modern cipher policy delegated to maintained defaults;
+* certificate renewal test;
+* no self-signed certificate in production;
+* HTTPS public base URL validation;
+* callback and Subscription URL updated to HTTPS.
+
+Do not include private keys in repository.
+
+---
+
+# 29. Firewall strategy
+
+Create deployment documentation for UFW.
+
+Recommended public ports:
+
+* SSH port chosen by operator;
+* 80/tcp;
+* 443/tcp.
+
+Do not publicly expose:
+
+* application internal port;
+* PostgreSQL 5432;
+* Redis 6379;
+* 3x-ui panel port;
+* Prometheus;
+* Grafana unless separately protected;
+* Actuator.
+
+If 3x-ui protocol inbound requires a public port such as 443 or 8443:
+
+* document the conflict with Nginx;
+* clearly separate:
+
+  * VPN traffic port;
+  * web/API port.
+* use distinct IP/port/domain architecture as needed.
+
+Do not blindly assign the same port to Nginx and Xray on one IP.
+
+Document alternatives:
+
+* separate VPS;
+* separate public IP;
+* different port;
+* L4 routing only when explicitly designed.
+
+---
+
+# 30. 3x-ui network hardening
+
+Document and configure where possible:
+
+* panel bound to localhost or private interface;
+* panel not exposed publicly;
+* application accesses panel through internal network/VPN/SSH tunnel;
+* strong credentials;
+* TLS verification policy;
+* credential rotation;
+* IP allowlisting;
+* Xray inbound public ports separate from admin panel;
+* panel backup strategy.
+
+The application must not expose panel credentials.
+
+Do not automate unsafe public panel exposure.
+
+---
+
+# 31. Database connection pooling
+
+Review HikariCP configuration.
+
+Production properties:
+
+* maximum pool size;
+* minimum idle;
+* connection timeout;
+* validation timeout;
+* idle timeout;
+* max lifetime;
+* leak detection only when needed;
+* application name;
+* transaction isolation policy.
+
+Size pool according to:
+
+* VPS CPU;
+* PostgreSQL capacity;
+* scheduled jobs;
+* Telegram polling;
+* outbox/notification workers.
+
+Avoid a pool much larger than needed.
+
+Add configuration validation and documentation.
+
+---
+
+# 32. PostgreSQL production configuration
+
+Document:
+
+* supported PostgreSQL version;
+* database/user creation;
+* encoding;
+* timezone;
+* connection restriction;
+* strong password;
+* `pg_hba.conf` or Docker-network isolation;
+* volume durability;
+* disk monitoring;
+* VACUUM/autovacuum;
+* WAL growth;
+* backup retention;
+* restore testing.
+
+Do not expose superuser credentials to the application.
+
+Use a dedicated application role.
+
+Optional:
+
+dedicated backup role.
+
+---
+
+# 33. Flyway deployment policy
+
+Document:
+
+* migrations run before accepting traffic;
+* one application instance performs migration safely;
+* Flyway locking behavior;
+* never edit applied migrations;
+* backup before risky migration;
+* schema validation;
+* rollback policy;
+* forward-fix preference.
+
+Production startup:
+
+* Flyway enabled;
+* Hibernate validate;
+* startup fails on migration mismatch.
+
+Do not use `ddl-auto=update`.
+
+Create migration verification script if useful.
+
+---
+
+# 34. Zero/minimal-downtime deployment strategy
+
+For a single VPS, document a realistic deployment process.
+
+Preferred simple strategy:
+
+1. backup;
+2. pull new image;
+3. run migration validation;
+4. stop old app;
+5. start new app;
+6. run health checks;
+7. rollback image if application fails and migration is backward compatible.
+
+Alternative:
+
+blue/green with two application containers behind Nginx if current Compose design supports it.
+
+Do not claim full zero downtime if database migrations are not backward compatible.
+
+Document:
+
+* compatible migration patterns;
+* expand/migrate/contract approach;
+* image rollback limitations after destructive migration.
+
+---
+
+# 35. PostgreSQL backup script
+
+Create:
+
+deploy/scripts/backup-postgres.sh
+
+Requirements:
+
+* `set -euo pipefail`;
+* no password printed;
+* timestamped dump;
+* custom or compressed format;
+* temporary filename then atomic rename;
+* checksum;
+* retention cleanup;
+* configurable database/container/host;
+* failure exit code;
+* logs without secrets;
+* backup directory confinement;
+* lock preventing overlapping backups;
+* optional encryption hook;
+* optional remote-copy hook;
+* no hardcoded credentials.
+
+Recommended:
+
+`pg_dump --format=custom`
+
+Store:
+
+* dump;
+* SHA-256 checksum;
+* metadata file with safe version/timestamp.
+
+Do not include credentials in process arguments if avoidable.
+
+---
+
+# 36. PostgreSQL restore script
+
+Create:
+
+deploy/scripts/restore-postgres.sh
+
+Requirements:
+
+* explicit confirmation;
+* target database parameter;
+* verify backup file;
+* verify checksum;
+* test mode/list contents;
+* restore into an empty/test database recommended;
+* no automatic production overwrite;
+* stop application or block writes before production restore;
+* safe error handling;
+* no secrets printed;
+* document ownership and extensions.
+
+Do not make production restore a one-command destructive operation without confirmation.
+
+---
+
+# 37. Backup retention policy
+
+Document recommended retention:
+
+Example:
+
+* daily backups: 7;
+* weekly: 4;
+* monthly: 3.
+
+Adapt through environment variables.
+
+Requirements:
+
+* local backup is not sufficient alone;
+* recommend encrypted offsite copy;
+* test restoration regularly;
+* monitor backup age and size;
+* protect backup permissions;
+* backups contain sensitive personal/financial metadata.
+
+Do not store backups in Git or public object storage.
+
+---
+
+# 38. Receipt-storage backup
+
+Receipt files and PostgreSQL metadata must remain consistent.
+
+Document strategy:
+
+* back up receipt-storage volume;
+* preserve directory hierarchy;
+* checksum files where practical;
+* coordinate database and file backup timestamps;
+* restoration order;
+* orphan detection;
+* missing-file detection;
+* rejected/approved receipt retention policy.
+
+Create:
+
+deploy/scripts/backup-receipts.sh
+
+Requirements:
+
+* configured root only;
+* no symlink following;
+* archive with restrictive permissions;
+* checksum;
+* retention;
+* no content logging;
+* no public upload.
+
+Do not put receipts inside database dumps.
+
+---
+
+# 39. Backup consistency
+
+A strict distributed snapshot across PostgreSQL and filesystem may not be available.
+
+Choose and document a practical policy.
+
+Recommended:
+
+1. database backup;
+2. receipt archive immediately after;
+3. record shared backup-set ID and timestamps;
+4. run integrity report:
+
+   * metadata without file;
+   * file without metadata.
+
+Create optional:
+
+ReceiptStorageIntegrityCheckUseCase
+
+or an operational script.
+
+Do not delete detected orphans automatically.
+
+Produce a safe report with IDs only.
+
+---
+
+# 40. Backup scheduler
+
+Prefer host-level scheduling:
+
+* systemd timer;
+* cron;
+* or external backup system.
+
+Do not run database backup as an application `@Scheduled` job.
+
+Reason:
+
+* separate failure domain;
+* app credentials should not require backup privileges;
+* restore tools should remain operational when app is down.
+
+Provide:
+
+* example systemd service/timer;
+* or cron entry.
+
+Do not include real paths or credentials without placeholders.
+
+---
+
+# 41. Backup encryption
+
+Document optional encryption:
+
+* age;
+* GPG;
+* encrypted remote storage.
+
+Requirements:
+
+* encryption key stored separately;
+* recovery key tested;
+* no key in repository;
+* no key in backup directory;
+* encryption failure fails the backup;
+* unencrypted temporary dump removed securely where feasible.
+
+Do not implement custom cryptography.
+
+---
+
+# 42. Monitoring
+
+Use existing Actuator and Micrometer.
+
+Required signals:
+
+* application health;
+* PostgreSQL health;
+* disk/receipt-storage health;
+* Telegram integration status;
+* 3x-ui connectivity status;
+* notification backlog;
+* provisioning outbox backlog;
+* dead outbox records;
+* dead notifications;
+* failed scheduled jobs;
+* oldest pending item ages;
+* JVM memory;
+* CPU;
+* threads;
+* HikariCP;
+* HTTP latency/error count.
+
+Do not expose sensitive metric labels.
+
+---
+
+# 43. Prometheus configuration
+
+If Prometheus dependency already exists or is accepted:
+
+* expose `/actuator/prometheus` internally;
+* configure scrape example;
+* restrict endpoint to internal network;
+* no public exposure.
+
+Create optional:
+
+deploy/monitoring/prometheus.yml
+
+Do not hardcode public credentials.
+
+If Prometheus is not part of current project:
+
+* add only when consistent with existing stack;
+* otherwise document Actuator-compatible integration.
+
+---
+
+# 44. Grafana dashboards
+
+Optional but recommended if monitoring stack exists.
+
+Create documented dashboard requirements rather than a complex handcrafted dashboard if time is limited.
+
+Panels:
+
+* request rate/errors/latency;
+* JVM heap;
+* database pool;
+* Payment status counts;
+* review queue size/age;
+* outbox pending/dead;
+* notification pending/dead;
+* job failures;
+* Telegram failures;
+* Subscription expiry/active count.
+
+No high-cardinality labels.
+
+Do not display User IDs, Telegram IDs, tokens, Payment references, or receipt data.
+
+---
+
+# 45. Application health indicators
+
+Review all custom health indicators.
+
+Recommended indicators:
+
+* database;
+* receipt storage writable/available;
+* Telegram, with disabled/optional behavior;
+* 3x-ui connectivity;
+* notification backlog;
+* provisioning backlog;
+* scheduled jobs.
+
+Health policy:
+
+* essential dependency unavailable may mark DOWN;
+* disabled optional integration must not mark DOWN;
+* one failed reminder must not mark DOWN;
+* large critical backlog may mark DEGRADED if supported.
+
+No secrets or raw exception messages in health output.
+
+---
+
+# 46. Readiness and liveness
+
+Configure:
+
+* liveness:
+
+  * JVM/application process only;
+  * should not depend on external services.
+* readiness:
+
+  * database;
+  * migrations;
+  * essential storage;
+  * required integrations according to enabled feature policy.
+
+Do not make liveness fail because Telegram or 3x-ui is temporarily unavailable.
+
+Document Docker/Nginx health behavior.
+
+---
+
+# 47. Alerting recommendations
+
+Document alerts for:
+
+Critical:
+
+* application unavailable;
+* PostgreSQL unavailable;
+* disk almost full;
+* backup older than threshold;
+* repeated backup failure;
+* receipt storage unavailable;
+* many DEAD provisioning outbox records;
+* admin authentication failures spike.
+
+Warning:
+
+* notification backlog age;
+* scheduled job failures;
+* Telegram blocked/error rate;
+* 3x-ui temporary outage;
+* Hikari saturation;
+* high memory;
+* certificate expiry.
+
+Do not build an alert manager if not already included.
+
+Provide Prometheus-rule examples only if Prometheus is present.
+
+---
+
+# 48. Logging strategy
+
+Prefer structured stdout logs for containers.
+
+Requirements:
+
+* JSON or consistent structured format;
+* traceId;
+* request method/path template;
+* status;
+* duration;
+* principal ID for admin actions;
+* safe resource IDs;
+* integration;
+* error code.
+
+Redact:
+
+* Authorization;
+* Cookie;
+* Set-Cookie;
+* Subscription token;
+* payment callback values;
+* Telegram file paths/IDs;
+* card data;
+* receipt data;
+* VLESS URI;
+* XUI credentials;
+* environment variables.
+
+Define production log levels.
+
+Avoid DEBUG for sensitive infrastructure in production.
+
+---
+
+# 49. Log rotation and retention
+
+If Docker logging driver is used:
+
+Document:
+
+* max-size;
+* max-file;
+* centralized logging option.
+
+If file logging is used:
+
+* Logback rolling policy;
+* size/time rotation;
+* retention;
+* disk cap;
+* restrictive permissions.
+
+Do not allow unbounded logs.
+
+Do not log into the receipt-storage volume.
+
+---
+
+# 50. Disk-space monitoring
+
+Receipt files, PostgreSQL, logs, Docker images, and backups can fill disk.
+
+Implement:
+
+ReceiptStorageHealthIndicator
+
+Optional:
+
+DiskSpaceOperationalService
+
+Check:
+
+* usable space;
+* minimum required threshold;
+* receipt root;
+* backup root if local.
+
+Do not expose full filesystem paths publicly.
+
+Document:
+
+* Docker image cleanup;
+* backup retention;
+* PostgreSQL volume growth;
+* log limits.
+
+---
+
+# 51. Production CORS policy
+
+Inspect whether a browser frontend currently exists.
+
+If none:
+
+* disable unnecessary CORS.
+
+If admin/frontend origin exists:
+
+* explicit allowlist;
+* HTTPS origins;
+* no `*` with credentials;
+* methods/headers bounded;
+* preflight tested.
+
+Public Telegram, Subscription, and provider callbacks do not require broad CORS.
+
+Do not retain development wildcard origins in production.
+
+---
+
+# 52. HTTP security headers
+
+Configure through Nginx or Spring Security as appropriate:
+
+* `X-Content-Type-Options`;
+* `X-Frame-Options`;
+* `Referrer-Policy`;
+* HSTS;
+* CSP;
+* Permissions-Policy;
+* cache controls for sensitive endpoints.
+
+Sensitive responses:
+
+* admin;
+* receipt content;
+* Subscription content;
+* QR;
+* Payment information;
+
+must use no-store where appropriate.
+
+Do not apply CSP that breaks binary Subscription responses without testing.
+
+---
+
+# 53. API rate limiting
+
+Assess whether public endpoints need basic rate limiting:
+
+* `/sub/{token}`;
+* Zarinpal callback;
+* Telegram webhook;
+* admin login;
+* receipt upload.
+
+Preferred simple production strategy:
+
+Nginx `limit_req` for public abuse-prone endpoints.
+
+Requirements:
+
+* avoid blocking normal Telegram/Zarinpal retries;
+* separate rate zones;
+* admin brute-force protection;
+* Subscription endpoint bounded by IP while acknowledging shared NATs;
+* no Redis dependency.
+
+Application-level rate limiting is optional.
+
+Do not implement an elaborate billing/rate-limit platform.
+
+---
+
+# 54. Admin brute-force protection
+
+For HTTP Basic:
+
+* Nginx rate limit;
+* fail2ban guidance;
+* strong random password;
+* optional IP allowlist;
+* HTTPS only;
+* no default username.
+
+For OIDC:
+
+* delegate login protection to identity provider;
+* still restrict admin API network exposure where possible.
+
+Log authentication failures safely:
+
+* source IP according to privacy policy;
+* principal if known;
+* no password/Authorization header.
+
+---
+
+# 55. Linux host hardening documentation
+
+Create checklist covering:
+
+* supported Ubuntu LTS;
+* system updates;
+* non-root deployment user;
+* SSH key authentication;
+* disable password SSH if operationally safe;
+* disable root SSH;
+* UFW;
+* fail2ban optional;
+* Docker group privilege warning;
+* automatic security updates;
+* time synchronization;
+* disk monitoring;
+* swap policy;
+* file permissions;
+* secret-file ownership;
+* backup permissions.
+
+Do not perform destructive host changes automatically.
+
+---
+
+# 56. Container resource limits
+
+Document and configure reasonable defaults:
+
+Application:
+
+* CPU;
+* memory;
+* pids;
+* restart policy.
+
+PostgreSQL:
+
+* memory;
+* shared buffers guidance;
+* disk;
+* CPU.
+
+Nginx:
+
+* modest limits.
+
+Do not set limits so low that startup or migrations fail.
+
+Include profiles/examples for:
+
+* minimal test VPS;
+* recommended small production VPS.
+
+---
+
+# 57. Graceful shutdown
+
+Configure:
+
+* `server.shutdown=graceful`;
+* shutdown timeout;
+* scheduler stop behavior;
+* Telegram polling stop;
+* outbox/notification processor stop;
+* database pool close;
+* advisory-lock release;
+* active file stream closure.
+
+Tests should verify lifecycle components stop.
+
+Do not start new jobs after shutdown begins.
+
+---
+
+# 58. Startup sequencing
+
+Production startup should:
+
+1. validate configuration;
+2. connect to database;
+3. run Flyway;
+4. validate Hibernate;
+5. initialize application;
+6. begin readiness;
+7. start scheduled workers;
+8. start Telegram polling if enabled.
+
+Workers must not process before application readiness and migrations complete.
+
+If startup fails:
+
+* container exits;
+* no partial “healthy” state.
+
+---
+
+# 59. CI pipeline finalization
+
+Create or harden CI.
+
+For GitHub Actions or GitLab CI according to repository:
+
+Stages:
+
+* compile;
+* unit tests;
+* integration tests;
+* architecture tests;
+* coverage;
+* dependency/vulnerability scan;
+* build image;
+* optional container smoke test.
+
+Requirements:
+
+* PostgreSQL Testcontainers support;
+* Docker available;
+* cache dependencies safely;
+* no production secrets;
+* no disabled tests;
+* artifacts:
+
+  * test reports;
+  * coverage;
+  * built JAR;
+  * optionally image metadata.
+* fail on Flyway/Hibernate mismatch;
+* fail on quality gate.
+
+Do not automatically deploy production unless deployment credentials and policy already exist.
+
+---
+
+# 60. Dependency and vulnerability scanning
+
+Use an appropriate existing tool.
+
+Possible:
+
+* OWASP Dependency-Check;
+* Gradle/Maven dependency audit;
+* Trivy for container image;
+* GitHub Dependabot or GitLab dependency scanning.
+
+Requirements:
+
+* document suppression policy;
+* do not suppress without justification;
+* pin image versions;
+* scan runtime image;
+* avoid duplicate scanners if current CI already provides one.
+
+Do not claim zero vulnerabilities without actual scan results.
+
+---
+
+# 61. Docker image smoke test
+
+Create an automated smoke test:
+
+1. build image;
+2. start PostgreSQL;
+3. start application with:
+
+   * Telegram disabled;
+   * providers disabled;
+   * temp receipt storage;
+   * test admin credentials.
+4. wait for readiness;
+5. call:
+
+   * public health/liveness;
+   * authenticated admin system info;
+6. stop containers;
+7. verify graceful exit.
+
+No real providers.
+
+---
+
+# 62. Production smoke-test script
+
+Create:
+
+deploy/scripts/smoke-test.sh
+
+Inputs:
+
+BASE_URL
+
+ADMIN_USERNAME
+
+ADMIN_PASSWORD or secure password-file mechanism
+
+Checks:
+
+* HTTPS endpoint;
+* liveness;
+* readiness;
+* authenticated system info;
+* public Subscription invalid-token response;
+* no public Actuator metrics;
+* no public admin access without auth;
+* security headers;
+* safe error response.
+
+Do not print credentials.
+
+Avoid placing password in command history where possible.
+
+---
+
+# 63. Deployment script
+
+Create a conservative helper:
+
+deploy/scripts/deploy.sh
+
+Responsibilities:
+
+* validate required files;
+* run backup hook;
+* pull/build image;
+* validate Compose config;
+* start/update services;
+* wait for readiness;
+* run smoke test;
+* show rollback guidance.
+
+Requirements:
+
+* `set -euo pipefail`;
+* no secrets printed;
+* no destructive automatic database restore;
+* no automatic certificate issuance without explicit setup;
+* no `docker system prune -a`;
+* preserve volumes;
+* failure returns nonzero;
+* log safe steps.
+
+Do not pretend deployment is atomic.
+
+---
+
+# 64. Rollback script or procedure
+
+Create:
+
+deploy/scripts/rollback.sh
+
+or detailed documented procedure.
+
+Requirements:
+
+* rollback application image tag;
+* preserve database and files;
+* warn about migration compatibility;
+* require explicit previous image tag;
+* run health check;
+* do not rollback database automatically;
+* do not delete current backup.
+
+Document when rollback is unsafe after migration.
+
+---
+
+# 65. Image versioning
+
+Use immutable tags:
+
+* semantic version;
+* Git commit SHA;
+* build number.
+
+Avoid production deployment with only `latest`.
+
+Expose application version safely through build info.
+
+Document image-tag promotion.
+
+---
+
+# 66. Database and filesystem permissions
+
+Application:
+
+* database role has only required permissions;
+* receipt root owned by runtime UID;
+* temp root writable only by runtime UID;
+* backup root not writable by app unless explicitly required;
+* certificates read-only to Nginx;
+* secret files readable only by intended service.
+
+No world-readable receipts/backups/secrets.
+
+Add startup checks for receipt-root permissions where practical.
+
+---
+
+# 67. Production data retention
+
+Document retention for:
+
+* Payments;
+* Orders;
+* receipts;
+* reviews;
+* notifications;
+* processed Telegram updates;
+* job runs;
+* logs;
+* backups.
+
+Task 40 should not implement destructive retention jobs for business records.
+
+For large operational tables:
+
+* recommend future archival policy;
+* keep current history.
+
+Temporary files and logs remain the only automatically cleaned data under existing policies.
+
+---
+
+# 68. Privacy and sensitive-data inventory
+
+Create:
+
+docs/operations/data-classification.md
+
+Classify:
+
+Highly sensitive:
+
+* receipt files;
+* Subscription raw tokens;
+* VLESS credentials;
+* card details;
+* provider secrets;
+* Bot token;
+* XUI credentials;
+* backup encryption keys.
+
+Sensitive:
+
+* Telegram ID;
+* payment metadata;
+* Order history;
+* Subscription state;
+* IP/access logs.
+
+Operational:
+
+* job status;
+* counters;
+* application version.
+
+Document:
+
+* storage location;
+* encryption expectations;
+* logging policy;
+* backup inclusion;
+* access roles;
+* retention.
+
+Do not claim legal compliance certification.
+
+---
+
+# 69. Database encryption and transport
+
+Document:
+
+* PostgreSQL TLS when database is remote;
+* internal Docker-network isolation when local;
+* disk encryption recommendation;
+* encrypted backups;
+* HTTPS external traffic;
+* secure 3x-ui connection.
+
+Do not implement custom field encryption without a complete key-management design.
+
+For raw Subscription token:
+
+* continue hash-at-rest design.
+
+For receipt files:
+
+* disk/volume encryption is recommended.
+
+---
+
+# 70. Final architecture verification
+
+Run comprehensive architecture checks:
+
+* domain independent from infrastructure/API;
+* application independent from Spring Data;
+* controllers depend on use cases;
+* no entity exposure;
+* no field injection;
+* no service locator;
+* no direct provider call from controllers/Telegram handlers;
+* no direct XUI call from Payment approval;
+* durable outbox used;
+* raw Subscription tokens not stored;
+* QR bytes not stored;
+* Telegram files not stored outside receipt flow;
+* schedulers use coordinator;
+* notification delivery outside transaction;
+* admin actions use application services;
+* production security provider replaces header provider;
+* secrets remain external.
+
+Produce a final architecture report.
+
+---
+
+# 71. Final functional end-to-end test
+
+Create or consolidate a full test scenario using:
+
+* PostgreSQL Testcontainers;
+* mock Telegram;
+* mock Zarinpal;
+* mock 3x-ui;
+* temporary receipt storage;
+* fixed clock.
+
+Scenario:
+
+1. User starts Telegram Bot.
+2. User registers.
+3. User lists Plans.
+4. User selects Plan.
+5. User creates manual Payment.
+6. User receives unique amount.
+7. User uploads receipt.
+8. Operator authenticates.
+9. Operator claims and approves receipt.
+10. Payment becomes APPROVED.
+11. Order becomes PAID.
+12. Outbox is created.
+13. Provisioning processor creates one XUI client.
+14. Order becomes COMPLETED.
+15. Notification is generated and delivered.
+16. User lists Subscriptions.
+17. User rotates Subscription token.
+18. User receives Subscription URL and QR.
+19. Public Subscription endpoint returns correct config.
+20. Duplicate Telegram updates/callbacks/actions are replayed.
+21. Verify no duplicate:
+
+* User;
+* selection;
+* Order;
+* Payment;
+* receipt;
+* approval;
+* outbox;
+* XUI client;
+* Subscription;
+* logical notification.
+
+22. Admin views safe operational data.
+23. No secrets appear in logs or API responses.
+
+Also retain a Zarinpal end-to-end scenario.
+
+---
+
+# 72. Final concurrency quality gate
+
+Verify critical races:
+
+* User registration;
+* Plan selection;
+* Order creation;
+* Payment creation;
+* Zarinpal callback;
+* manual instruction allocation;
+* receipt upload;
+* review approval/rejection;
+* one approved Payment per Order;
+* outbox processing;
+* Subscription creation/rotation;
+* Telegram duplicate update;
+* notification enqueue/delivery;
+* scheduled-job lock;
+* admin retry versus background worker.
+
+Use real PostgreSQL.
+
+No `Thread.sleep`.
+
+No flaky time assumptions.
+
+---
+
+# 73. Final security test suite
+
+Verify:
+
+* admin endpoints unauthenticated -> 401;
+* wrong role -> 403;
+* correct role succeeds;
+* production header operator identity disabled;
+* public callback remains accessible;
+* public Subscription token behavior unchanged;
+* invalid token does not reveal state;
+* receipt content role restriction;
+* no public Actuator metrics;
+* no CORS wildcard in production;
+* no raw secrets in config responses;
+* no sensitive logs;
+* no directory traversal;
+* no open redirect;
+* no arbitrary provider URL;
+* no full card number exposure;
+* no Subscription token/hash exposure;
+* no VLESS/private-key exposure;
+* no Telegram file path/ID exposure;
+* backup scripts do not echo passwords;
+* Docker runtime user is non-root;
+* PostgreSQL port not published in production Compose.
+
+---
+
+# 74. Final performance sanity checks
+
+This is not a full load-testing task.
+
+Verify:
+
+* bounded admin pagination;
+* bounded jobs;
+* bounded notification delivery;
+* bounded Telegram processing;
+* bounded file upload;
+* bounded DB pool;
+* no N+1 in key operational lists;
+* indexes support common filters;
+* application starts within reasonable resource limits;
+* one simple concurrent smoke load does not produce errors.
+
+Optional:
+
+Add a lightweight k6 or shell-based smoke-load script for:
+
+* health;
+* public Subscription endpoint with test token;
+* admin list endpoint.
+
+Do not run destructive load against production.
+
+---
+
+# 75. Backup and restore verification
+
+Automated/local verification:
+
+1. create test database;
+2. populate representative data;
+3. create test receipt files;
+4. run PostgreSQL backup;
+5. run receipt backup;
+6. verify checksums;
+7. restore into new database;
+8. restore receipt archive into new root;
+9. start application against restored data;
+10. run Hibernate validation;
+11. verify:
+
+    * Users;
+    * Orders;
+    * Payments;
+    * receipts;
+    * reviews;
+    * outbox;
+    * Subscriptions;
+    * notifications.
+12. verify no raw token can be recovered because it was never stored.
+
+Do not restore over active development database automatically.
+
+---
+
+# 76. Disaster recovery runbook
+
+Create:
+
+docs/operations/disaster-recovery.md
+
+Scenarios:
+
+* application container lost;
+* VPS reboot;
+* database corruption;
+* PostgreSQL volume lost;
+* receipt volume lost;
+* secrets exposed;
+* Telegram Bot token exposed;
+* Zarinpal credential exposed;
+* XUI credentials exposed;
+* TLS certificate failure;
+* disk full;
+* backup failure;
+* deployment rollback.
+
+For each:
+
+* detection;
+* containment;
+* recovery;
+* verification;
+* rotation requirements;
+* data-loss expectation;
+* escalation.
+
+Use realistic single-VPS limitations.
+
+---
+
+# 77. Production deployment documentation
+
+Create:
+
+docs/deployment/production-deployment.md
+
+Include:
+
+* prerequisites;
+* DNS;
+* VPS sizing;
+* directory layout;
+* Docker installation;
+* environment configuration;
+* secret files;
+* certificate setup;
+* firewall;
+* Compose startup;
+* migrations;
+* health checks;
+* Telegram setup;
+* Zarinpal callback URL;
+* Subscription public URL;
+* Nginx;
+* backup timer;
+* monitoring;
+* upgrades;
+* rollback.
+
+Commands must use placeholders.
+
+Do not include real credentials or domains.
+
+---
+
+# 78. Production checklist
+
+Create:
+
+docs/deployment/production-checklist.md
+
+Sections:
+
+## Before deployment
+
+* DNS;
+* backups;
+* secrets;
+* firewall;
+* TLS;
+* database;
+* storage;
+* provider configuration;
+* admin credentials.
+
+## Deployment
+
+* image tag;
+* Compose validation;
+* backup;
+* migration;
+* readiness;
+* smoke test.
+
+## After deployment
+
+* Telegram;
+* Zarinpal callback;
+* receipt upload;
+* review;
+* provisioning;
+* Subscription;
+* notifications;
+* jobs;
+* metrics;
+* backup test.
+
+## Security
+
+* no default credentials;
+* no public DB;
+* no public Actuator;
+* no public panel;
+* logs redacted;
+* file permissions;
+* admin role tests.
+
+Mark only verified items.
+
+---
+
+# 79. Operations runbook
+
+Create:
+
+docs/operations/runbook.md
+
+Common procedures:
+
+* check application health;
+* inspect logs;
+* inspect job backlog;
+* inspect outbox;
+* retry provisioning;
+* inspect notifications;
+* resolve dead notification;
+* review manual Payment;
+* rotate admin credentials;
+* rotate Telegram Bot token;
+* rotate XUI credentials;
+* run backup;
+* verify backup;
+* restore test;
+* renew TLS;
+* deploy;
+* rollback;
+* handle disk pressure.
+
+No secret-bearing command examples.
+
+---
+
+# 80. Final quality report
+
+Create:
+
+docs/tasks/final-production-readiness-report.md
+
+Include:
+
+* implemented modules;
+* architecture summary;
+* test counts by category;
+* coverage;
+* Flyway status;
+* Hibernate status;
+* dependency scan;
+* image scan;
+* security findings;
+* backup/restore result;
+* deployment smoke-test result;
+* known limitations;
+* deferred features;
+* production readiness verdict.
+
+Do not mark READY unless evidence supports it.
+
+Possible verdicts:
+
+READY
+
+READY_WITH_KNOWN_LIMITATIONS
+
+NOT_READY
+
+Every limitation must be explicit.
+
+---
+
+# 81. Expected deployment structure
+
+The repository should contain a structure similar to:
+
+deploy/
+docker-compose.prod.yml
+nginx/
+vpn-platform.conf
+scripts/
+deploy.sh
+rollback.sh
+smoke-test.sh
+backup-postgres.sh
+restore-postgres.sh
+backup-receipts.sh
+verify-backup.sh
+systemd/
+vpn-platform-backup.service
+vpn-platform-backup.timer
+monitoring/
+prometheus.yml
+alert-rules.yml
+if monitoring is included
+
+Dockerfile
+
+.env.production.example
+
+docs/deployment/
+production-deployment.md
+production-checklist.md
+nginx-and-tls.md
+firewall.md
+upgrades-and-rollback.md
+
+docs/operations/
+runbook.md
+backup-and-restore.md
+disaster-recovery.md
+monitoring-and-alerting.md
+data-classification.md
+security-hardening.md
+
+docs/tasks/
+final-production-readiness-report.md
+
+Adapt paths to current repository conventions.
+
+---
+
+# 82. Expected application structure
+
+The final application changes may include:
+
+src/main/java/com/parazit/panel/config/security/
+SecurityConfiguration.java
+AdminSecurityProperties.java
+SpringSecurityCurrentOperatorProvider.java
+AdminRole.java
+AdminAuthenticationEntryPoint.java
+AdminAccessDeniedHandler.java
+
+src/main/java/com/parazit/panel/application/admin/
+UserAdminQueryService.java
+OrderAdminQueryService.java
+PaymentAdminQueryService.java
+SubscriptionAdminQueryService.java
+SystemInformationService.java
+
+src/main/java/com/parazit/panel/application/admin/result/
+AdminUserResult.java
+AdminOrderResult.java
+AdminPaymentResult.java
+AdminSubscriptionResult.java
+SystemInformationResult.java
+
+src/main/java/com/parazit/panel/api/internal/admin/
+AdminUserController.java
+AdminOrderController.java
+AdminPaymentController.java
+AdminSubscriptionController.java
+AdminSystemController.java
+AdminApiMapper.java
+
+src/main/java/com/parazit/panel/application/audit/
+AdminAuditService.java
+AdminAuditEvent.java
+
+src/main/java/com/parazit/panel/observability/
+ReceiptStorageHealthIndicator.java
+OperationalBacklogHealthIndicator.java
+ProductionMetrics.java
+
+src/main/java/com/parazit/panel/config/properties/
+ProductionStorageProperties.java
+BackupHealthProperties.java
+OperationalLimitsProperties.java
+
+Create only components actually required.
+
+Do not duplicate existing controllers/services.
+
+---
+
+# 83. Unit tests
+
+Add or complete tests for:
+
+* Security configuration;
+* role authorization;
+* current operator provider;
+* admin query services;
+* admin result redaction;
+* pagination;
+* system-info redaction;
+* receipt-storage health;
+* backlog health;
+* production property validation;
+* audit event sanitization;
+* backup metadata parsing if implemented;
+* deployment helper logic if written in Java.
+
+Pure application/domain tests should not start Spring context unnecessarily.
+
+---
+
+# 84. Security integration tests
+
+Using Spring Security test support:
+
+* public health endpoint policy;
+* public Zarinpal callback;
+* public Subscription endpoint;
+* internal API unauthenticated;
+* ADMIN access;
+* OPERATOR access;
+* SUPPORT access;
+* receipt review authorization;
+* receipt-content authorization;
+* provisioning retry authorization;
+* Plan modification authorization;
+* job manual-trigger authorization;
+* notification retry authorization;
+* production header identity disabled;
+* secure error bodies.
+
+Do not use real passwords in test source beyond obvious fake test values.
+
+---
+
+# 85. Admin API integration tests
+
+Using PostgreSQL Testcontainers:
+
+* User search;
+* Order filters;
+* Payment filters;
+* review queue;
+* provisioning views;
+* Subscription views;
+* Telegram operational summaries;
+* Notification views;
+* Job views;
+* pagination;
+* sorting;
+* no N+1 where detectable;
+* safe response fields;
+* role checks.
+
+Populate representative data.
+
+Verify no sensitive fields appear in serialized responses.
+
+---
+
+# 86. Production configuration tests
+
+Test:
+
+* production profile with required minimal features;
+* missing database secret;
+* missing admin credential;
+* Telegram enabled without token;
+* Zarinpal enabled without merchant data;
+* XUI enabled without credentials;
+* Subscription enabled without HTTPS base URL;
+* invalid receipt root;
+* wildcard CORS rejected;
+* test operator provider absent;
+* secrets absent from `toString`.
+
+Use isolated property tests.
+
+---
+
+# 87. Docker and Compose validation
+
+Automate:
+
+* Dockerfile build;
+* non-root user verification;
+* image does not contain `.env`;
+* image does not contain receipt/backup/test data;
+* Compose config validation;
+* PostgreSQL port not published;
+* Redis port not published;
+* only expected web ports published;
+* persistent volumes defined;
+* health checks present;
+* image tag parameterized.
+
+Use shell tests or CI checks.
+
+---
+
+# 88. Nginx configuration verification
+
+Validate:
+
+* syntax where Nginx is available;
+* HTTPS server block;
+* HTTP redirect;
+* proxy target;
+* no public Actuator;
+* sensitive path logging policy;
+* upload limit;
+* proxy timeout;
+* security headers;
+* admin rate limiting;
+* Subscription route behavior.
+
+Document parts that cannot be automatically tested in CI.
+
+---
+
+# 89. Final full verification commands
+
+Use actual supported build commands.
+
+For Gradle:
+
+./gradlew clean test
+
+./gradlew integrationTest
+
+./gradlew jacocoTestReport
+
+./gradlew jacocoTestCoverageVerification
+
+./gradlew check
+
+./gradlew build
+
+Only use `integrationTest` if configured.
+
+For Maven:
+
+./mvnw clean test
+
+./mvnw verify
+
+Additional:
+
+docker build -t vpn-platform:test .
+
+docker compose -f deploy/docker-compose.prod.yml config
+
+Run container smoke test.
+
+Run dependency scan.
+
+Run image scan when scanner is available.
+
+Run backup and test restore.
+
+Run production-profile startup using fake/test secrets and disabled external providers.
+
+---
+
+# 90. Final acceptance criteria
+
+The project is complete for the current roadmap only if:
+
+* all previous Tasks remain functional;
+* all tests pass;
+* no tests are disabled;
+* Flyway works from an empty database;
+* Hibernate validation passes;
+* production profile starts with valid configuration;
+* invalid production configuration fails safely;
+* admin APIs require authentication;
+* roles are enforced;
+* temporary operator-header authentication is not active in production;
+* receipt content is role-restricted;
+* one approved Payment per Order remains enforced;
+* provisioning remains outbox-driven;
+* no duplicate VPN client is created;
+* raw Subscription tokens are not stored;
+* Telegram duplicate updates remain safe;
+* notifications remain idempotent;
+* jobs remain multi-instance safe;
+* Docker image runs non-root;
+* PostgreSQL is not public in production Compose;
+* secrets are external;
+* Nginx/HTTPS configuration is documented;
+* backup scripts succeed;
+* restore test succeeds;
+* receipt backup is included;
+* health/metrics/logging are operational;
+* smoke test succeeds;
+* known limitations are documented;
+* no production secrets are committed.
+
+---
+
+# 91. Known limitations section
+
+Explicitly document remaining limitations, likely including:
+
+* single-VPS availability;
+* no automatic failover;
+* no multi-region database;
+* Telegram exactly-once delivery is impossible;
+* local filesystem receipt storage requires backup;
+* HTTP Basic admin authentication may be an interim solution;
+* no frontend admin dashboard;
+* no automated refunds;
+* no chargebacks;
+* no reseller support;
+* no automatic traffic add-on;
+* no Kubernetes;
+* no managed secret store by default.
+
+Do not hide limitations.
+
+---
+
+# 92. Output format
+
+Before implementation provide:
+
+1. Current-state assessment
+2. Production topology
+3. Admin authentication and role design
+4. Admin API inventory
+5. Temporary operator-provider replacement
+6. Docker image design
+7. Production Compose design
+8. Nginx/TLS design
+9. Firewall/network design
+10. Configuration and secret strategy
+11. PostgreSQL deployment strategy
+12. Migration and rollback strategy
+13. Backup and restore strategy
+14. Receipt-storage backup strategy
+15. Monitoring and alerting strategy
+16. Logging and retention strategy
+17. CI and scanning strategy
+18. Final test strategy
+19. Planned files to create
+20. Planned files to modify
+21. Security, migration, and operational risks
+
+After implementation provide:
+
+1. Executive summary
+2. Created files
+3. Modified files
+4. Admin authentication
+5. Role authorization
+6. Operator identity replacement
+7. Admin APIs
+8. Admin audit behavior
+9. Production profile
+10. Dockerfile
+11. Production Compose
+12. Nginx configuration
+13. TLS documentation
+14. Firewall guidance
+15. 3x-ui hardening
+16. Secret management
+17. PostgreSQL configuration
+18. Flyway deployment policy
+19. Backup scripts
+20. Restore verification
+21. Receipt backup
+22. Monitoring and health
+23. Metrics and alerts
+24. Logging and retention
+25. Graceful shutdown/startup
+26. CI pipeline
+27. Dependency/image scan results
+28. Security-test results
+29. Admin integration-test results
+30. End-to-end test results
+31. Concurrency-test results
+32. Docker/Compose validation
+33. Backup/restore test results
+34. Production smoke-test result
+35. Coverage result
+36. Flyway and Hibernate result
+37. Build result
+38. Commands executed
+39. Known limitations
+40. Final production-readiness verdict
+41. Suggested commit message
+
+Use this commit message unless the repository follows another convention:
+
+feat(operations): complete production deployment and final quality gate
+
+Stop after completing Task 40.
+
+Do not create Task 41.
+
