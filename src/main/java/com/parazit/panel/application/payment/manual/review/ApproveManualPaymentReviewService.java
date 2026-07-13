@@ -64,7 +64,7 @@ public class ApproveManualPaymentReviewService implements ApproveManualPaymentRe
         ManualPaymentReceipt receipt = receiptRepository.findById(command.receiptId())
                 .orElseThrow(() -> new ManualPaymentReviewNotFoundException(command.receiptId()));
         ManualPaymentReviewSupport.ManualReviewContext context = support.loadQueuedContext(receipt);
-        ManualPaymentReview review = reviewRepository.findByReceiptId(receipt.getId())
+        ManualPaymentReview review = reviewRepository.findByReceiptIdForUpdate(receipt.getId())
                 .orElseThrow(() -> new ManualPaymentReviewNotFoundException(receipt.getId()));
         if (review.getStatus() == ManualPaymentReviewStatus.APPROVED) {
             return mapper.toResult(review, context.payment(), context.order(), receipt, context.instruction(), false);

@@ -63,7 +63,7 @@ public class RejectManualPaymentReviewService implements RejectManualPaymentRevi
                 .orElseThrow(() -> new ManualPaymentReviewNotFoundException(command.receiptId()));
         ManualPaymentReviewSupport.ManualReviewContext context = support.loadQueuedContext(receipt);
         support.validateReviewable(context);
-        ManualPaymentReview review = reviewRepository.findByReceiptId(receipt.getId())
+        ManualPaymentReview review = reviewRepository.findByReceiptIdForUpdate(receipt.getId())
                 .orElseThrow(() -> new ManualPaymentReviewNotFoundException(receipt.getId()));
         validateClaim(review, operatorId, now);
 

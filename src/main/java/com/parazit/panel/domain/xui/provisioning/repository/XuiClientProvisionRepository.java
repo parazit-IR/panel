@@ -9,6 +9,10 @@ import java.util.UUID;
 
 public interface XuiClientProvisionRepository extends UuidRepository<XuiClientProvision> {
 
+    default Optional<XuiClientProvision> findByIdForUpdate(UUID id) {
+        return findById(id);
+    }
+
     Optional<XuiClientProvision> findByPlanSelectionId(UUID planSelectionId);
 
     Optional<XuiClientProvision> findByRemoteClientId(String remoteClientId);

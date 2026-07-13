@@ -3,13 +3,18 @@ package com.parazit.panel.infrastructure.persistence.payment.manual.review;
 import com.parazit.panel.domain.payment.manual.review.ManualPaymentReview;
 import com.parazit.panel.domain.payment.manual.review.ManualPaymentReviewStatus;
 import com.parazit.panel.infrastructure.persistence.repository.SpringDataUuidRepository;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.jpa.repository.Lock;
 
 public interface SpringDataManualPaymentReviewRepository extends SpringDataUuidRepository<ManualPaymentReview> {
 
     Optional<ManualPaymentReview> findByReceiptId(UUID receiptId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<ManualPaymentReview> findWithLockByReceiptId(UUID receiptId);
 
     Optional<ManualPaymentReview> findByReceiptIdAndStatus(UUID receiptId, ManualPaymentReviewStatus status);
 

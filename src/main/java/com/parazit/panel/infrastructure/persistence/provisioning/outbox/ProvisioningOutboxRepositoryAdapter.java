@@ -5,6 +5,7 @@ import com.parazit.panel.domain.provisioning.outbox.ProvisioningOutboxStatus;
 import com.parazit.panel.domain.provisioning.outbox.ProvisioningOutboxType;
 import com.parazit.panel.domain.provisioning.outbox.repository.ProvisioningOutboxRepository;
 import com.parazit.panel.infrastructure.persistence.repository.JpaRepositoryAdapter;
+import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -25,10 +26,15 @@ public class ProvisioningOutboxRepositoryAdapter
     );
 
     private final SpringDataProvisioningOutboxRepository repository;
+    private final EntityManager entityManager;
 
-    public ProvisioningOutboxRepositoryAdapter(SpringDataProvisioningOutboxRepository repository) {
+    public ProvisioningOutboxRepositoryAdapter(
+            SpringDataProvisioningOutboxRepository repository,
+            EntityManager entityManager
+    ) {
         super(repository);
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.entityManager = Objects.requireNonNull(entityManager, "entityManager must not be null");
     }
 
     @Override
@@ -47,6 +53,37 @@ public class ProvisioningOutboxRepositoryAdapter
                 Objects.requireNonNull(orderId, "orderId must not be null"),
                 Objects.requireNonNull(type, "type must not be null")
         );
+    }
+
+    @Override
+    public Optional<ProvisioningOutbox> claimAvailableByEventId(UUID eventId, Instant now) {
+        Objects.requireNonNull(eventId, "eventId must not be null");
+        Objects.requireNonNull(now, "now must not be null");
+        List<?> results = entityManager.createNativeQuery("""
+                        WITH candidate AS (
+                            SELECT id
+                            FROM provisioning_outbox
+                            WHERE event_id = :eventId
+                              AND status IN ('PENDING', 'FAILED', 'UNKNOWN')
+                              AND available_at <= :now
+                            ORDER BY available_at ASC
+                            FOR UPDATE SKIP LOCKED
+                            LIMIT 1
+                        )
+                        UPDATE provisioning_outbox outbox
+                        SET status = 'PROCESSING',
+                            processing_started_at = :now,
+                            updated_at = :now
+                        FROM candidate
+                        WHERE outbox.id = candidate.id
+                        RETURNING outbox.*
+                        """, ProvisioningOutbox.class)
+                .setParameter("eventId", eventId)
+                .setParameter("now", now)
+                .getResultList();
+        return results.stream()
+                .map(ProvisioningOutbox.class::cast)
+                .findFirst();
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.parazit.panel.domain.order.Order;
 import com.parazit.panel.domain.order.repository.OrderRepository;
 import com.parazit.panel.domain.provisioning.outbox.ProvisioningOutbox;
 import com.parazit.panel.domain.provisioning.outbox.repository.ProvisioningOutboxRepository;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,16 +31,20 @@ public class ClaimProvisioningOutboxTransaction {
 
     @Transactional
     public Optional<ProvisioningOutbox> claim(UUID eventId) {
-        ProvisioningOutbox outbox = outboxRepository.findByEventId(eventId)
-                .orElseThrow(() -> new ProvisioningOutboxNotFoundException(eventId));
-        if (!outbox.isAvailable(clock.now())) {
+        Objects.requireNonNull(eventId, "eventId must not be null");
+        Instant now = clock.now();
+        Optional<ProvisioningOutbox> claimed = outboxRepository.claimAvailableByEventId(eventId, now);
+        if (claimed.isEmpty()) {
+            if (outboxRepository.findByEventId(eventId).isEmpty()) {
+                throw new ProvisioningOutboxNotFoundException(eventId);
+            }
             return Optional.empty();
         }
+        ProvisioningOutbox outbox = claimed.orElseThrow();
         Order order = orderRepository.findById(outbox.getOrderId())
                 .orElseThrow(() -> new ProvisioningOutboxException("Provisioning order could not be found"));
-        outbox.markProcessing(clock.now());
-        order.markProvisioning(clock.now());
+        order.markProvisioning(now);
         orderRepository.save(order);
-        return Optional.of(outboxRepository.save(outbox));
+        return Optional.of(outbox);
     }
 }

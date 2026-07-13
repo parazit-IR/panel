@@ -10,6 +10,10 @@ public interface ManualPaymentReviewRepository extends UuidRepository<ManualPaym
 
     Optional<ManualPaymentReview> findByReceiptId(UUID receiptId);
 
+    default Optional<ManualPaymentReview> findByReceiptIdForUpdate(UUID receiptId) {
+        return findByReceiptId(receiptId);
+    }
+
     Optional<ManualPaymentReview> findClaimedByReceiptId(UUID receiptId);
 
     List<ManualPaymentReview> findAllByReviewerIdOrderByClaimedAtDesc(String reviewerId);

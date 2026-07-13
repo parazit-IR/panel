@@ -14,6 +14,8 @@ public interface ProvisioningOutboxRepository extends UuidRepository<Provisionin
 
     Optional<ProvisioningOutbox> findByOrderIdAndType(UUID orderId, ProvisioningOutboxType type);
 
+    Optional<ProvisioningOutbox> claimAvailableByEventId(UUID eventId, Instant now);
+
     List<ProvisioningOutbox> findAvailableForProcessing(Instant now, int limit);
 
     List<ProvisioningOutbox> findStaleProcessing(Instant staleBefore, int limit);

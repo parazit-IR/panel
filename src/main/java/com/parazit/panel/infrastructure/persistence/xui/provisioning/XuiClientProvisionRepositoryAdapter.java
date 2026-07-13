@@ -29,6 +29,11 @@ public class XuiClientProvisionRepositoryAdapter
     }
 
     @Override
+    public Optional<XuiClientProvision> findByIdForUpdate(UUID id) {
+        return repository.findByIdForUpdate(Objects.requireNonNull(id, "id must not be null"));
+    }
+
+    @Override
     public Optional<XuiClientProvision> findByPlanSelectionId(UUID planSelectionId) {
         return repository.findByPlanSelectionId(Objects.requireNonNull(planSelectionId, "planSelectionId must not be null"));
     }

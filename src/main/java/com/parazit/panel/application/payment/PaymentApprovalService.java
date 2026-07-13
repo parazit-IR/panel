@@ -47,7 +47,7 @@ public class PaymentApprovalService {
         Objects.requireNonNull(command, "command must not be null");
         Payment payment = paymentRepository.findById(command.paymentId())
                 .orElseThrow(() -> new PaymentNotFoundException(command.paymentId()));
-        Order order = orderRepository.findById(payment.getOrderId())
+        Order order = orderRepository.findByIdForUpdate(payment.getOrderId())
                 .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
         if (!payment.getUserId().equals(order.getUserId())) {
             throw new PaymentApprovalException("Payment owner does not match order owner");

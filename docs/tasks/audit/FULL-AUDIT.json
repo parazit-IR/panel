@@ -1,0 +1,143 @@
+{
+  "auditDate": "2026-07-13",
+  "scope": "FINAL_VERIFICATION",
+  "overallResult": "FAIL",
+  "reason": "Final verification independently reran repository checks. No P0 or P1 defects remain and migrations/tests pass, but P2/P3 gaps remain, including the legacy broad XUI port, ambiguous PaymentOperation history semantics, temporary header-based operator identity, local/dev credential literals, local untracked logs, and inherited Java 11 JAVA_HOME.",
+  "taskInventory": {
+    "expectedRange": "1-32",
+    "allExist": true,
+    "missing": [],
+    "duplicates": [],
+    "emptyFiles": [],
+    "suspiciouslyShort": [2, 3, 4, 5],
+    "suspiciouslyShortConclusion": "short but coherent setup specifications"
+  },
+  "canonicalPaymentMethod": {
+    "status": "IMPLEMENTED_AND_TESTED",
+    "enumValues": ["ZARINPAL", "CARD_TO_CARD"],
+    "cardToCardManualFound": false,
+    "evidence": [
+      "src/main/java/com/parazit/panel/domain/payment/PaymentMethod.java declares exactly ZARINPAL and CARD_TO_CARD",
+      "src/main/resources/db/migration/V10__create_orders_and_payments.sql chk_payments_method allows ZARINPAL and CARD_TO_CARD",
+      "grep over docs/tasks/tasks, src/main, src/test, and src/main/resources found no CARD_TO_CARD_MANUAL"
+    ]
+  },
+  "taskStatuses": [
+    {"task": 1, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 2, "status": "PASS"},
+    {"task": 3, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 4, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 5, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 6, "status": "PASS"},
+    {"task": 7, "status": "PASS"},
+    {"task": 8, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 9, "status": "PASS"},
+    {"task": 10, "status": "PASS"},
+    {"task": 11, "status": "PASS"},
+    {"task": 12, "status": "PASS"},
+    {"task": 13, "status": "PASS"},
+    {"task": 14, "status": "PASS"},
+    {"task": 15, "status": "PASS"},
+    {"task": 16, "status": "PASS"},
+    {"task": 17, "status": "PASS"},
+    {"task": 18, "status": "PASS"},
+    {"task": 19, "status": "PASS"},
+    {"task": 20, "status": "PASS"},
+    {"task": 21, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 22, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 23, "status": "PASS"},
+    {"task": 24, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 25, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 26, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 27, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 28, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 29, "status": "PASS"},
+    {"task": 30, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 31, "status": "PASS_WITH_MINOR_GAPS"},
+    {"task": 32, "status": "FAIL"}
+  ],
+  "defectCounts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 8,
+    "P3": 3
+  },
+  "remainingDefects": [
+    {"id": "DEF-P2-001", "priority": "P2", "summary": "Legacy broad XuiClient port remains after capability-specific ports"},
+    {"id": "DEF-P2-002", "priority": "P2", "summary": "PaymentOperation history semantics remain ambiguous"},
+    {"id": "DEF-P2-003", "priority": "P2", "summary": "Untracked local logs remain in workspace"},
+    {"id": "DEF-P2-004", "priority": "P2", "summary": "HeaderBasedCurrentOperatorProvider still trusts X-OPERATOR-ID"},
+    {"id": "DEF-P2-005", "priority": "P2", "summary": "Security endpoint behavior documentation/tests need clarification"},
+    {"id": "DEF-P2-006", "priority": "P2", "summary": "XUI property classes remain split across packages"},
+    {"id": "DEF-P2-007", "priority": "P2", "summary": "Docker/local development credential literals remain"},
+    {"id": "DEF-P2-008", "priority": "P2", "summary": "Inherited JAVA_HOME points to Java 11 and blocks Gradle"},
+    {"id": "DEF-P3-001", "priority": "P3", "summary": "README remains minimal"},
+    {"id": "DEF-P3-003", "priority": "P3", "summary": "Task ordering override remains documentation-only"},
+    {"id": "DEF-P3-004", "priority": "P3", "summary": "Audit artifacts are not linked from task acceptance docs"}
+  ],
+  "specificationConflictCount": 10,
+  "migrationVerification": {
+    "status": "PASS",
+    "productionMigrations": ["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11", "V12", "V13", "V14"],
+    "historicalMigrationsModified": false,
+    "cleanPostgresFlywayAndHibernateValidation": "PASS via JAVA_HOME= ./gradlew clean test",
+    "jsonbOutbox": true
+  },
+  "runtime": {
+    "commands": [
+      {"command": "./gradlew tasks --all", "result": "FAIL", "duration": "<1s", "summary": "Inherited JAVA_HOME points to Java 11; Gradle requires JVM 17+"},
+      {"command": "JAVA_HOME= ./gradlew tasks --all", "result": "PASS", "duration": "about 1s"},
+      {"command": "JAVA_HOME= ./gradlew clean test", "result": "PASS", "duration": "1m57s", "tests": 467, "failures": 0, "errors": 0, "skipped": 0, "disabled": 0},
+      {"command": "JAVA_HOME= ./gradlew check", "result": "PASS", "duration": "3s"},
+      {"command": "JAVA_HOME= ./gradlew build", "result": "PASS", "duration": "2s"},
+      {"command": "JAVA_HOME= ./gradlew jacocoTestReport jacocoTestCoverageVerification", "result": "PASS", "duration": "2m2s"},
+      {"command": "JAVA_HOME= ./gradlew test --tests '*Concurrent*' --tests '*Concurrency*'", "result": "PASS", "duration": "33s"},
+      {"command": "JAVA_HOME= ./gradlew test --tests '*Architecture*'", "result": "PASS", "duration": "4s"},
+      {"command": "JAVA_HOME= ./gradlew test --tests '*Context*' --tests '*Configuration*'", "result": "PASS", "duration": "23s"},
+      {"command": "JAVA_HOME= ./gradlew test --tests '*ControllerTest'", "result": "PASS", "duration": "53s"},
+      {"command": "JAVA_HOME= ./gradlew test --tests '*IntegrationTest'", "result": "PASS", "duration": "1m3s"},
+      {"command": "JAVA_HOME= ./gradlew test --rerun-tasks", "result": "PASS", "duration": "1m58s", "tests": 467, "failures": 0, "errors": 0, "skipped": 0, "disabled": 0}
+    ],
+    "invalidRuns": [
+      {"command": "parallel coverage and filtered concurrency Gradle invocations", "result": "INVALID", "summary": "Gradle NoSuchFileException for in-progress binary test result due concurrent writes to test output directory; rerun sequentially passed"}
+    ],
+    "finalTests": {"suites": 122, "total": 467, "passed": 467, "failed": 0, "errors": 0, "skipped": 0, "disabled": 0},
+    "coverage": {
+      "instructionPercent": 74.07,
+      "branchPercent": 53.15,
+      "linePercent": 76.18,
+      "methodPercent": 77.32,
+      "classPercent": 81.59,
+      "coverageVerification": "PASS"
+    }
+  },
+  "categoryResults": {
+    "unitTests": "PASS as part of full test suite",
+    "integrationTests": "PASS via JAVA_HOME= ./gradlew test --tests '*IntegrationTest'",
+    "controllerTests": "PASS via JAVA_HOME= ./gradlew test --tests '*ControllerTest'",
+    "concurrencyTests": "PASS via JAVA_HOME= ./gradlew test --tests '*Concurrent*' --tests '*Concurrency*'",
+    "architectureTests": "PASS via JAVA_HOME= ./gradlew test --tests '*Architecture*', with legacy XuiClient P2 gap still open",
+    "applicationStartup": "PASS via context/configuration tests and integration test contexts",
+    "security": "FAIL_WITH_P2_GAPS"
+  },
+  "transactionVerification": {
+    "status": "PASS",
+    "evidence": [
+      "Zarinpal create and verify gateway calls occur between prepare and complete transaction beans",
+      "receipt file inspection/storage occurs between prepare and complete transaction beans with storage compensation on completion failure",
+      "PaymentApprovalService locks order row and atomically approves payment, marks order paid, and creates outbox",
+      "ProvisioningOutboxProcessor claims, executes remote XUI handler outside claim transaction, then completes/fails in short transactions"
+    ]
+  },
+  "securityVerification": {
+    "status": "FAIL_WITH_P2_GAPS",
+    "activeTrackedSecretLeakFound": false,
+    "remainingGaps": [
+      "docker/docker-compose.yml and .env.example contain literal development defaults",
+      "HeaderBasedCurrentOperatorProvider still trusts X-OPERATOR-ID",
+      "untracked local logs exist under logs/",
+      "test fixtures and docs contain card-like placeholders and fixture URLs that are noisy for secret scanning"
+    ]
+  },
+  "nextRemediationAction": "Fix DEF-P2-001 by removing or quarantining the legacy broad XuiClient port and adapter usage, then add an architecture test that only capability-specific XUI ports remain."
+}

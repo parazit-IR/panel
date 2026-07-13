@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -132,17 +133,32 @@ public class XuiClientOperationTransaction {
         }
         XuiClientOperation operation = XuiClientOperation.create(operationId, provision.getId(), type, fingerprint, requestedAt);
         operation.markInProgress();
-        return new PreparedXuiClientUpdateOperation(provision, operationRepository.save(operation), true, false);
+        try {
+            return new PreparedXuiClientUpdateOperation(provision, operationRepository.save(operation), true, false);
+        } catch (DataIntegrityViolationException exception) {
+            if (operationRepository.existsByOperationId(operationId)) {
+                throw new XuiOperationIdConflictException();
+            }
+            if (operationRepository.existsByProvisionIdAndStatus(provision.getId(), XuiClientOperationStatus.IN_PROGRESS)) {
+                throw new XuiClientOperationInProgressException();
+            }
+            throw exception;
+        }
     }
 
     private XuiClientProvision verifiedProvision(Long telegramUserId, UUID provisionId) {
         User user = userRepository.findByTelegramUserId(telegramUserId)
                 .orElseThrow(() -> new UserNotFoundException(telegramUserId));
-        XuiClientProvision provision = findProvision(provisionId);
+        XuiClientProvision provision = findProvisionForUpdate(provisionId);
         if (!provision.getUserId().equals(user.getId())) {
             throw new XuiProvisionOwnershipException();
         }
         return provision;
+    }
+
+    private XuiClientProvision findProvisionForUpdate(UUID provisionId) {
+        return provisionRepository.findByIdForUpdate(provisionId)
+                .orElseThrow(() -> new XuiClientProvisionNotFoundException(provisionId));
     }
 
     private static void assertAllowedProvisionState(XuiClientProvision provision, XuiClientOperationType type) {

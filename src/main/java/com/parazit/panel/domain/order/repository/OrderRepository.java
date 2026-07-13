@@ -8,6 +8,10 @@ import java.util.UUID;
 
 public interface OrderRepository extends UuidRepository<Order> {
 
+    default Optional<Order> findByIdForUpdate(UUID id) {
+        return findById(id);
+    }
+
     List<Order> findAllByUserId(UUID userId);
 
     Optional<Order> findByPlanSelectionId(UUID planSelectionId);

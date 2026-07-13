@@ -26,6 +26,11 @@ public class OrderRepositoryAdapter extends JpaRepositoryAdapter<Order, UUID> im
     }
 
     @Override
+    public Optional<Order> findByIdForUpdate(UUID id) {
+        return repository.findByIdForUpdate(Objects.requireNonNull(id, "id must not be null"));
+    }
+
+    @Override
     public List<Order> findAllByUserId(UUID userId) {
         return repository.findAllByUserId(Objects.requireNonNull(userId, "userId must not be null"));
     }

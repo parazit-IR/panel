@@ -3,6 +3,8 @@ package com.parazit.panel.application.xui.client;
 import com.parazit.panel.application.user.UserNotFoundException;
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.xui.operation.XuiClientOperationStatus;
+import com.parazit.panel.domain.xui.operation.repository.XuiClientOperationRepository;
 import com.parazit.panel.domain.xui.provisioning.XuiClientProvision;
 import com.parazit.panel.domain.xui.provisioning.XuiProvisionStatus;
 import com.parazit.panel.domain.xui.provisioning.repository.XuiClientProvisionRepository;
@@ -17,18 +19,22 @@ public class XuiClientLifecycleTransaction {
 
     private final UserRepository userRepository;
     private final XuiClientProvisionRepository provisionRepository;
+    private final XuiClientOperationRepository operationRepository;
 
     public XuiClientLifecycleTransaction(
             UserRepository userRepository,
-            XuiClientProvisionRepository provisionRepository
+            XuiClientProvisionRepository provisionRepository,
+            XuiClientOperationRepository operationRepository
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.provisionRepository = Objects.requireNonNull(provisionRepository, "provisionRepository must not be null");
+        this.operationRepository = Objects.requireNonNull(operationRepository, "operationRepository must not be null");
     }
 
     @Transactional
     public PreparedXuiClientLifecycleOperation prepareDisable(Long telegramUserId, UUID provisionId) {
         XuiClientProvision provision = verifiedProvision(telegramUserId, provisionId);
+        assertNoOperationInProgress(provision);
         if (provision.getStatus() == XuiProvisionStatus.DISABLED) {
             return new PreparedXuiClientLifecycleOperation(provision, false, true);
         }
@@ -50,6 +56,7 @@ public class XuiClientLifecycleTransaction {
     @Transactional
     public PreparedXuiClientLifecycleOperation prepareDelete(Long telegramUserId, UUID provisionId, boolean force) {
         XuiClientProvision provision = verifiedProvision(telegramUserId, provisionId);
+        assertNoOperationInProgress(provision);
         if (provision.getStatus() == XuiProvisionStatus.DELETED) {
             return new PreparedXuiClientLifecycleOperation(provision, false, true);
         }
@@ -106,10 +113,17 @@ public class XuiClientLifecycleTransaction {
     private XuiClientProvision verifiedProvision(Long telegramUserId, UUID provisionId) {
         User user = userRepository.findByTelegramUserId(telegramUserId)
                 .orElseThrow(() -> new UserNotFoundException(telegramUserId));
-        XuiClientProvision provision = find(provisionId);
+        XuiClientProvision provision = provisionRepository.findByIdForUpdate(provisionId)
+                .orElseThrow(() -> new XuiClientProvisionNotFoundException(provisionId));
         if (!provision.getUserId().equals(user.getId())) {
             throw new XuiProvisionOwnershipException();
         }
         return provision;
+    }
+
+    private void assertNoOperationInProgress(XuiClientProvision provision) {
+        if (operationRepository.existsByProvisionIdAndStatus(provision.getId(), XuiClientOperationStatus.IN_PROGRESS)) {
+            throw new XuiClientOperationInProgressException();
+        }
     }
 }

@@ -23,3 +23,7 @@ Telegram Bot + Spring Boot + 3x-ui Automation
 ## Status
 
 🚧 Under Development
+
+## License
+
+This project uses the MIT License. See [LICENSE](LICENSE).

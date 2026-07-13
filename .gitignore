@@ -1,18 +1,100 @@
+# IntelliJ IDEA
 .idea/
 *.iml
+*.ipr
+*.iws
+out/
 
-target/
-build/
+# VS Code
+.vscode/
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Gradle
 .gradle/
+build/
+!gradle/
+!gradle/wrapper/
+!gradle/wrapper/gradle-wrapper.jar
 
-gradle/
-gradlew
-gradlew.bat
+# Maven
+target/
+.mvn/timing.properties
 
+# Java
+*.class
+hs_err_pid*
+replay_pid*
+
+# Logs
 logs/
-
-.env
-
 *.log
+*.log.*
 
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+secrets/
+credentials/
+private/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Operating systems
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*~
+
+# Local databases and volumes
+data/
+postgres-data/
+redis-data/
+docker-data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded and generated application files
+uploads/
+storage/
+receipts/
+manual-payment-receipts/
+generated/
+qr-codes/
+subscriptions/
+downloads/
+
+# Test-generated files
+test-output/
+test-results/
+coverage/
+jacoco/
+*.exec
+
+# Local application configuration
+application-local.yml
+application-local.yaml
+application-secrets.yml
+application-secrets.yaml
+
+# Docker override files with local secrets
+docker-compose.override.yml
+compose.override.yml

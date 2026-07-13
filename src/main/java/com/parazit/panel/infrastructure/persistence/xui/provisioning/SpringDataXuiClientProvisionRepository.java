@@ -3,14 +3,20 @@ package com.parazit.panel.infrastructure.persistence.xui.provisioning;
 import com.parazit.panel.domain.xui.provisioning.XuiClientProvision;
 import com.parazit.panel.domain.xui.provisioning.XuiProvisionStatus;
 import com.parazit.panel.infrastructure.persistence.repository.SpringDataUuidRepository;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SpringDataXuiClientProvisionRepository extends SpringDataUuidRepository<XuiClientProvision> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select provision from XuiClientProvision provision where provision.id = :id")
+    Optional<XuiClientProvision> findByIdForUpdate(@Param("id") UUID id);
 
     Optional<XuiClientProvision> findByPlanSelectionId(UUID planSelectionId);
 

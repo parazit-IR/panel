@@ -33,6 +33,11 @@ public class ManualPaymentReviewRepositoryAdapter
     }
 
     @Override
+    public Optional<ManualPaymentReview> findByReceiptIdForUpdate(UUID receiptId) {
+        return repository.findWithLockByReceiptId(Objects.requireNonNull(receiptId, "receiptId must not be null"));
+    }
+
+    @Override
     public Optional<ManualPaymentReview> findClaimedByReceiptId(UUID receiptId) {
         return repository.findByReceiptIdAndStatus(
                 Objects.requireNonNull(receiptId, "receiptId must not be null"),
