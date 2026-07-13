@@ -91,6 +91,70 @@ public class TelegramMessageCatalog {
             case "telegram.plans.purchase_placeholder" -> fa
                     ? "برای تکمیل خرید، بخش پرداخت داخل بات در مرحله بعدی فعال می‌شود."
                     : "In-bot payment completion will be enabled in a later step.";
+            case "telegram.purchase.disabled" -> fa
+                    ? "🔐 فروش اشتراک جدید در حال حاضر موقتاً غیرفعال است.\n\nسرویس‌های قبلی شما همچنان فعال هستند و از بخش «سرویس‌های من» قابل مدیریت‌اند."
+                    : "🔐 New subscription sales are temporarily disabled.\n\nYour existing services remain active and can be managed from My services.";
+            case "telegram.purchase.resume_at" -> fa ? "زمان تقریبی فعال‌شدن مجدد" : "Estimated resume time";
+            case "telegram.purchase.plan_unavailable" -> fa
+                    ? "این پلن در حال حاضر برای خرید در دسترس نیست.\n\nلطفاً دوباره پلن موردنظر را انتخاب کنید."
+                    : "This plan is not currently available for purchase.\n\nPlease choose a plan again.";
+            case "telegram.purchase.choose_plan" -> fa ? "تعرفه موردنظر را انتخاب کنید." : "Choose a tariff.";
+            case "telegram.purchase.select_plan" -> fa ? "انتخاب این پلن" : "Select this plan";
+            case "telegram.purchase.preinvoice_title" -> fa ? "🧾 پیش‌فاکتور شما" : "🧾 Your pre-invoice";
+            case "telegram.purchase.customer" -> fa ? "👤 نام کاربر" : "👤 Customer";
+            case "telegram.purchase.service_name" -> fa ? "🔐 نام سرویس" : "🔐 Service name";
+            case "telegram.purchase.plan" -> fa ? "📦 پلن" : "📦 Plan";
+            case "telegram.purchase.duration" -> fa ? "📅 مدت اعتبار" : "📅 Duration";
+            case "telegram.purchase.traffic" -> fa ? "📊 حجم" : "📊 Traffic";
+            case "telegram.purchase.devices" -> fa ? "📱 تعداد دستگاه" : "📱 Devices";
+            case "telegram.purchase.description" -> fa ? "📝 توضیحات" : "📝 Description";
+            case "telegram.purchase.original_amount" -> fa ? "💵 مبلغ" : "💵 Amount";
+            case "telegram.purchase.discount" -> fa ? "🎁 ثبت کد تخفیف" : "🎁 Apply discount code";
+            case "telegram.purchase.final_amount" -> fa ? "مبلغ قابل پرداخت" : "Payable amount";
+            case "telegram.purchase.selection_expiry" -> fa ? "⏳ اعتبار پیش‌فاکتور" : "⏳ Pre-invoice expires";
+            case "telegram.purchase.pay_and_receive" -> fa ? "💰 پرداخت و دریافت سرویس" : "💰 Pay and receive service";
+            case "telegram.purchase.choose_other_plan" -> fa ? "⬅️ انتخاب پلن دیگر" : "⬅️ Choose another plan";
+            case "telegram.purchase.discount_unavailable" -> fa
+                    ? "🎁 امکان ثبت کد تخفیف هنوز فعال نشده است."
+                    : "🎁 Discount code entry is not enabled yet.";
+            case "telegram.purchase.payment_methods_title" -> fa ? "💳 روش پرداخت را انتخاب کنید." : "💳 Choose a payment method.";
+            case "telegram.purchase.no_payment_method" -> fa
+                    ? "در حال حاضر هیچ روش پرداختی فعال نیست.\n\nلطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
+                    : "No payment method is currently active.\n\nPlease try again later or contact support.";
+            case "telegram.purchase.manual_payment" -> fa ? "💳 کارت‌به‌کارت" : "💳 Card-to-card";
+            case "telegram.purchase.online_payment" -> fa ? "🌐 پرداخت آنلاین" : "🌐 Online payment";
+            case "telegram.purchase.manual_payment_disabled" -> fa ? "پرداخت کارت‌به‌کارت در حال حاضر فعال نیست." : "Manual card payment is currently disabled.";
+            case "telegram.purchase.online_payment_disabled" -> fa ? "پرداخت آنلاین در حال حاضر فعال نیست." : "Online payment is currently disabled.";
+            case "telegram.purchase.copy_amount" -> fa ? "📋 کپی مبلغ" : "📋 Copy amount";
+            case "telegram.purchase.copy_card" -> fa ? "💳 کپی شماره کارت" : "💳 Copy card";
+            case "telegram.purchase.upload_receipt" -> fa ? "✅ پرداخت کردم | ارسال رسید" : "✅ I paid | Upload receipt";
+            case "telegram.purchase.check_status" -> fa ? "🔄 بررسی وضعیت" : "🔄 Check status";
+            case "telegram.purchase.cancel_payment" -> fa ? "❌ لغو پرداخت" : "❌ Cancel payment";
+            case "telegram.purchase.preinvoice_expired" -> fa
+                    ? "این پیش‌فاکتور منقضی شده است.\n\nلطفاً دوباره پلن موردنظر را انتخاب کنید."
+                    : "This pre-invoice has expired.\n\nPlease choose the plan again.";
+            case "telegram.purchase.price_snapshot_note" -> fa
+                    ? "مبلغ این پیش‌فاکتور بر اساس اطلاعات همین انتخاب محاسبه شده است."
+                    : "This pre-invoice amount is based on this selection snapshot.";
+            case "telegram.purchase.show_plans" -> fa ? "مشاهده پلن‌ها" : "Show plans";
+            case "telegram.purchase.back_to_preinvoice" -> fa ? "⬅️ بازگشت به پیش‌فاکتور" : "⬅️ Back to pre-invoice";
+            case "telegram.purchase.manual_payment_title" -> fa ? "💳 پرداخت کارت‌به‌کارت" : "💳 Card-to-card payment";
+            case "telegram.purchase.base_amount" -> fa ? "💵 مبلغ سفارش" : "💵 Order amount";
+            case "telegram.purchase.exact_payable_amount" -> fa ? "✅ مبلغ دقیق قابل واریز" : "✅ Exact payable amount";
+            case "telegram.purchase.card_number" -> fa ? "💳 شماره کارت" : "💳 Card number";
+            case "telegram.purchase.card_holder" -> fa ? "👤 به نام" : "👤 Card holder";
+            case "telegram.purchase.payment_expiry" -> fa ? "⏳ اعتبار پرداخت" : "⏳ Payment expires";
+            case "telegram.purchase.manual_warning" -> fa
+                    ? "⚠️ لطفاً مبلغ دقیق اعلام‌شده را واریز کنید.\nپس از پرداخت، رسید را از طریق دکمه زیر ارسال کنید."
+                    : "⚠️ Please transfer the exact announced amount.\nAfter payment, send the receipt using the button below.";
+            case "telegram.purchase.online_payment_title" -> fa ? "🌐 پرداخت آنلاین" : "🌐 Online payment";
+            case "telegram.purchase.online_description" -> fa
+                    ? "برای ورود به صفحه امن پرداخت، دکمه زیر را بزنید."
+                    : "Press the button below to open the secure payment page.";
+            case "telegram.purchase.open_payment_page" -> fa ? "🌐 ورود به صفحه پرداخت" : "🌐 Open payment page";
+            case "telegram.purchase.payment_action_unavailable" -> fa
+                    ? "این عملیات از داخل بات هنوز تکمیل نشده است. وضعیت پرداخت شما تغییری نکرد."
+                    : "This in-bot action is not completed yet. Your payment status was not changed.";
             case "telegram.pagination.previous" -> fa ? "قبلی" : "Previous";
             case "telegram.pagination.next" -> fa ? "بعدی" : "Next";
             case "telegram.tariffs.title" -> fa ? "💵 تعرفه اشتراک‌ها" : "💵 Subscription tariffs";

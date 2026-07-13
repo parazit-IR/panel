@@ -71,3 +71,25 @@ flowchart TD
     FAQ --> Home
     Support --> Home
 ```
+## Task 44 Purchase Navigation
+
+```mermaid
+flowchart TD
+    A[Plan catalog] --> B[Plan details]
+    B --> C[Pre-invoice]
+    C --> D[Payment methods]
+    D --> E[Payment details]
+    D --> C
+    C --> A
+    E --> F[Home]
+```
+
+Home exits the visible UI flow and restores the persistent main menu. It does not cancel orders, payments, or purchase sessions.
+
+Back is explicit by page:
+
+- Payment methods back to pre-invoice.
+- Pre-invoice back to plan catalog.
+- Plan details back to plan catalog.
+
+Stale or expired purchase callbacks route to a safe expired-pre-invoice message.

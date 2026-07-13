@@ -276,12 +276,17 @@ public class TelegramBotApiClient implements TelegramBotClient {
         if (keyboard == null || keyboard.rows().isEmpty()) {
             return null;
         }
-        List<List<Map<String, String>>> rows = new ArrayList<>();
+        List<List<Map<String, Object>>> rows = new ArrayList<>();
         for (TelegramInlineKeyboardRow row : keyboard.rows()) {
-            List<Map<String, String>> buttons = new ArrayList<>();
+            List<Map<String, Object>> buttons = new ArrayList<>();
             for (TelegramInlineButton button : row.buttons()) {
                 if (button.type() == TelegramInlineButtonType.URL) {
                     buttons.add(Map.of("text", button.text(), "url", button.value()));
+                } else if (button.type() == TelegramInlineButtonType.COPY_TEXT) {
+                    buttons.add(Map.of(
+                            "text", button.text(),
+                            "copy_text", Map.of("text", button.value())
+                    ));
                 } else {
                     buttons.add(Map.of("text", button.text(), "callback_data", button.value()));
                 }

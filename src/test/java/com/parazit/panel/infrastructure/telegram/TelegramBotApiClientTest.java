@@ -128,6 +128,28 @@ class TelegramBotApiClientTest {
     }
 
     @Test
+    void serializesCopyTextButtonsWithoutCallbackData() throws Exception {
+        server.enqueue(json("""
+                {"ok":true,"result":{"message_id":80}}
+                """));
+
+        client.sendMessage(new SendTelegramMessageCommand(
+                42L,
+                "manual",
+                TelegramParseMode.HTML,
+                TelegramInlineKeyboard.ofRows(List.of(new TelegramInlineKeyboardRow(List.of(
+                        TelegramInlineButton.copyText("📋 کپی مبلغ", "501596")
+                )))),
+                true,
+                null
+        ));
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"copy_text\":{\"text\":\"501596\"}");
+        assertThat(body).doesNotContain("callback_data");
+    }
+
+    @Test
     void mapsMessageAndCallbackUpdates() {
         server.enqueue(json("""
                 {"ok":true,"result":[

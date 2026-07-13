@@ -45,3 +45,8 @@ flowchart TD
     Tutorials[📚 آموزش] --> TutorialMenu[Platform tutorial menu]
     Support[☎️ پشتیبانی] --> SupportPage[FAQ and support URL]
 ```
+## Task 44 Purchase Entry
+
+The persistent `🔐 خرید اشتراک` button now opens the selectable purchase catalog.
+
+If new purchases are disabled by `app.sales.new-purchase-enabled=false`, the button remains visible but returns a safe localized disabled-sales message. No `PlanSelection`, `Order`, `Payment`, or Telegram purchase session is created in that state.

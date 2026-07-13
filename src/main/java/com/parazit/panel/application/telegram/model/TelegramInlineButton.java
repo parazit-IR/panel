@@ -28,6 +28,10 @@ public record TelegramInlineButton(
         return new TelegramInlineButton(text, TelegramInlineButtonType.URL, url);
     }
 
+    public static TelegramInlineButton copyText(String text, String value) {
+        return new TelegramInlineButton(text, TelegramInlineButtonType.COPY_TEXT, value);
+    }
+
     @Override
     public String toString() {
         return "TelegramInlineButton[type=%s,text=%s]".formatted(type, text);

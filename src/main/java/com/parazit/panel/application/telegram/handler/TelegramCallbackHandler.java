@@ -41,6 +41,7 @@ import com.parazit.panel.application.telegram.faq.TelegramFaqListHandler;
 import com.parazit.panel.application.telegram.account.TelegramCustomerAccountHandler;
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuAction;
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuHandler;
+import com.parazit.panel.application.telegram.purchase.TelegramPurchaseFlowHandler;
 import com.parazit.panel.application.telegram.service.TelegramMyServicesHandler;
 import com.parazit.panel.application.telegram.service.TelegramServiceDetailsHandler;
 import com.parazit.panel.application.telegram.service.TelegramServiceSearchHandler;
@@ -91,6 +92,7 @@ public class TelegramCallbackHandler {
     private final TelegramServiceSearchHandler serviceSearchHandler;
     private final PaymentsTelegramCommandHandler paymentsTelegramCommandHandler;
     private final SettingsTelegramCommandHandler settingsTelegramCommandHandler;
+    private final TelegramPurchaseFlowHandler purchaseFlowHandler;
 
     public TelegramCallbackHandler(
             TelegramCallbackDataCodec callbackDataCodec,
@@ -122,7 +124,8 @@ public class TelegramCallbackHandler {
             TelegramServiceDetailsHandler serviceDetailsHandler,
             TelegramServiceSearchHandler serviceSearchHandler,
             PaymentsTelegramCommandHandler paymentsTelegramCommandHandler,
-            SettingsTelegramCommandHandler settingsTelegramCommandHandler
+            SettingsTelegramCommandHandler settingsTelegramCommandHandler,
+            TelegramPurchaseFlowHandler purchaseFlowHandler
     ) {
         this.callbackDataCodec = Objects.requireNonNull(callbackDataCodec, "callbackDataCodec must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
@@ -154,6 +157,7 @@ public class TelegramCallbackHandler {
         this.serviceSearchHandler = Objects.requireNonNull(serviceSearchHandler, "serviceSearchHandler must not be null");
         this.paymentsTelegramCommandHandler = Objects.requireNonNull(paymentsTelegramCommandHandler, "paymentsTelegramCommandHandler must not be null");
         this.settingsTelegramCommandHandler = Objects.requireNonNull(settingsTelegramCommandHandler, "settingsTelegramCommandHandler must not be null");
+        this.purchaseFlowHandler = Objects.requireNonNull(purchaseFlowHandler, "purchaseFlowHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, String callbackData) {
@@ -187,6 +191,15 @@ public class TelegramCallbackHandler {
             case SHOW_TARIFFS -> actions.addAll(tariffCatalogHandler.handle(context, 1).actions());
             case SHOW_TARIFF_PAGE -> actions.addAll(tariffCatalogHandler.handle(context, configIndex(payload)).actions());
             case BUY_SUBSCRIPTION -> actions.addAll(mainMenuHandler.handle(context, TelegramMainMenuAction.BUY_SUBSCRIPTION).actions());
+            case SHOW_PLAN_CATALOG, BACK_TO_PLAN_CATALOG -> actions.addAll(purchaseFlowHandler.showPlanCatalog(context).actions());
+            case SHOW_PLAN_DETAILS, BACK_TO_PLAN_DETAILS -> actions.addAll(purchaseFlowHandler.showPlanDetails(context, requireSubscription(payload)).actions());
+            case SELECT_PLAN -> actions.addAll(purchaseFlowHandler.selectPlan(context, requireSubscription(payload)).actions());
+            case SHOW_PRE_INVOICE, BACK_TO_PRE_INVOICE -> actions.addAll(purchaseFlowHandler.showPreInvoice(context, requireSubscription(payload)).actions());
+            case CONTINUE_TO_PAYMENT, SHOW_PAYMENT_METHODS -> actions.addAll(purchaseFlowHandler.continueToPayment(context, requireSubscription(payload)).actions());
+            case SELECT_MANUAL_PAYMENT -> actions.addAll(purchaseFlowHandler.selectManual(context, requireSubscription(payload)).actions());
+            case SELECT_ONLINE_PAYMENT -> actions.addAll(purchaseFlowHandler.selectOnline(context, requireSubscription(payload)).actions());
+            case APPLY_DISCOUNT_PLACEHOLDER -> actions.addAll(purchaseFlowHandler.discountUnavailable(context).actions());
+            case UPLOAD_MANUAL_RECEIPT, REFRESH_PAYMENT_STATUS, REQUEST_CANCEL_PAYMENT, VIEW_PAYMENT -> actions.addAll(purchaseFlowHandler.paymentActionUnavailable(context).actions());
             case SHOW_TUTORIALS, BACK_TO_TUTORIALS -> actions.addAll(tutorialMenuHandler.handle(context).actions());
             case SHOW_TUTORIAL_PLATFORM -> actions.addAll(tutorialDetailHandler.handle(context, requireReference(payload)).actions());
             case SHOW_DOWNLOAD_LINKS -> actions.addAll(downloadLinksHandler.handle(context).actions());

@@ -37,3 +37,29 @@ sequenceDiagram
 ```
 
 Logs include safe IDs and action names only. They must not include bot token, callback secret, subscription token, subscription URL, VLESS URI, QR bytes, XUI credentials, or payment data.
+## Task 44 Purchase Security
+
+Purchase callbacks must not carry:
+
+- Plan price
+- Amount
+- Currency
+- Card number
+- Provider URL
+- Provider authority
+- Wallet values
+- Discount values
+
+The server reloads user, session, plan selection, order, and payment ownership before every sensitive purchase action.
+
+```mermaid
+flowchart TD
+    A[Callback] --> B[Verify signature and expiry]
+    B --> C[Resolve Telegram user]
+    C --> D[Load server-side resource]
+    D --> E{Owner matches?}
+    E -- No --> F[Safe denial]
+    E -- Yes --> G[Execute action]
+```
+
+Manual payment copy buttons use Telegram `copy_text`; copied values are not callback data and must not be logged. Online payment URL buttons are rendered as URL buttons and are not callback data.

@@ -75,4 +75,8 @@ public class TelegramKeyboardFactory {
     public TelegramInlineKeyboardRow row(TelegramInlineButton... buttons) {
         return new TelegramInlineKeyboardRow(List.of(buttons));
     }
+
+    public TelegramInlineButton copyText(String text, String value) {
+        return TelegramInlineButton.copyText(text, value);
+    }
 }
