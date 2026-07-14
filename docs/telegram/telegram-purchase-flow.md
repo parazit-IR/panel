@@ -54,3 +54,8 @@ The new-purchase path remains `PurchaseFlowType.NEW_SUBSCRIPTION` and continues 
 ## Wallet Payment
 
 Task 50 adds a Wallet method to the purchase flow after a trusted Order exists. The button leads to a server-side balance preview and one-time confirmation before any debit occurs. External manual and online payments remain available according to existing sales controls.
+## Discount Codes
+
+Task 51 enables the discount button on the purchase pre-invoice. The Telegram handler creates or reuses the trusted `Order`, stores only the order id in a bounded code-entry session, and delegates all validation and pricing to the promotion application service.
+
+Payment methods use the resulting `Order.finalAmount`.

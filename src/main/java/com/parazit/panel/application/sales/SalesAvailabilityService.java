@@ -51,7 +51,7 @@ public class SalesAvailabilityService {
             case TRIAL -> availability(capability, true, sales.trialEnabled(), "TRIAL_UNAVAILABLE", "telegram.feature.trial_unavailable", now);
             case WALLET_PAYMENT -> availability(capability, true, walletPaymentAvailable(), "WALLET_UNAVAILABLE", "telegram.feature.wallet_unavailable", now);
             case DISCOUNT_CODE -> availability(capability, true, sales.discountCodeEnabled(), "DISCOUNT_UNAVAILABLE", "telegram.purchase.discount_unavailable", now);
-            case GIFT_CODE -> availability(capability, false, sales.giftCodeEnabled(), "GIFT_CODE_UNAVAILABLE", "telegram.main.coming_soon", now);
+            case GIFT_CODE -> availability(capability, true, sales.giftCodeEnabled(), "GIFT_CODE_UNAVAILABLE", "telegram.promotion.invalid_gift_code", now);
         };
     }
 

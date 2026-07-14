@@ -27,3 +27,6 @@ Wallet top-up approval credits the wallet through the wallet ledger use case wit
 ## Wallet Order Payments
 
 Wallet is an internal Payment method, not a new Payment target. A Wallet Payment is approved only after the Wallet ledger debit is posted in the same transaction, then the existing OrderType dispatcher handles new-subscription or renewal side effects.
+## Discount Finalization
+
+When an order payment is approved, `PaymentApprovalService` finalizes any reserved discount redemption before dispatching the paid order. The paid amount is not recalculated at approval time; it remains the trusted `Order.finalAmount` used when the payment was created.

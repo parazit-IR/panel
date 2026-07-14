@@ -217,11 +217,11 @@ public class TelegramRenewalFlowHandler {
     public TelegramResponsePlan preInvoice(TelegramInteractionContext context, UUID purchaseSessionId) {
         try {
             RenewalPreInvoiceResult result = preInvoiceUseCase.get(new GetRenewalPreInvoiceCommand(context.telegramUserId(), purchaseSessionId));
-            List<TelegramInlineKeyboardRow> rows = List.of(
-                    keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.renewal.pay_and_renew"), TelegramCallbackAction.CONFIRM_RENEWAL_ORDER, context.telegramUserId(), result.purchaseSessionId(), null, null, context.receivedAt())),
-                    keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.renewal.choose_other_plan"), TelegramCallbackAction.LIST_RENEWAL_PLANS, context.telegramUserId(), result.targetSubscriptionId(), 1, null, context.receivedAt())),
-                    keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.navigation.back"), TelegramCallbackAction.BACK_TO_RENEWAL_TARGET, context.telegramUserId(), result.targetSubscriptionId(), 1, null, context.receivedAt()), homeButton(context))
-            );
+            List<TelegramInlineKeyboardRow> rows = new ArrayList<>();
+            rows.add(keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.renewal.pay_and_renew"), TelegramCallbackAction.CONFIRM_RENEWAL_ORDER, context.telegramUserId(), result.purchaseSessionId(), null, null, context.receivedAt())));
+            rows.add(keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.purchase.discount"), TelegramCallbackAction.START_RENEWAL_DISCOUNT_CODE_ENTRY, context.telegramUserId(), result.purchaseSessionId(), null, null, context.receivedAt())));
+            rows.add(keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.renewal.choose_other_plan"), TelegramCallbackAction.LIST_RENEWAL_PLANS, context.telegramUserId(), result.targetSubscriptionId(), 1, null, context.receivedAt())));
+            rows.add(keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.navigation.back"), TelegramCallbackAction.BACK_TO_RENEWAL_TARGET, context.telegramUserId(), result.targetSubscriptionId(), 1, null, context.receivedAt()), homeButton(context)));
             return message(context, formatter.preInvoice(context.language(), result), keyboardFactory.rows(rows), "renewal:preinvoice");
         } catch (RenewalFlowException exception) {
             return failure(context, exception.messageKey());

@@ -84,7 +84,13 @@ public enum TelegramCallbackAction {
     CONFIRM_WALLET_ORDER_PAYMENT("ar"),
     SHOW_WALLET_PAYMENT_RESULT("as"),
     TOP_UP_FOR_ORDER("at"),
-    SELECT_OTHER_PAYMENT_METHOD("au");
+    SELECT_OTHER_PAYMENT_METHOD("au"),
+    START_DISCOUNT_CODE_ENTRY("av"),
+    REMOVE_DISCOUNT_CODE("aw"),
+    SHOW_DISCOUNTED_PREINVOICE("ax"),
+    START_GIFT_CODE_ENTRY("ay"),
+    SHOW_GIFT_CODE_RESULT("az"),
+    START_RENEWAL_DISCOUNT_CODE_ENTRY("ba");
 
     private final String code;
 

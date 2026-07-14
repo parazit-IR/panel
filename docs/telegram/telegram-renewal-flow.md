@@ -65,3 +65,6 @@ flowchart TD
 ## Wallet Renewal Payment
 
 Task 50 adds Wallet as a renewal Order payment method. On success, the existing renewal payment approval path creates or reuses the Renewal Outbox; no direct 3x-ui call occurs from Telegram or Wallet code.
+## Discount Codes
+
+Renewal pre-invoices can accept a discount code before payment method selection. The discount is applied to the renewal `Order`; it does not mutate the renewal snapshot, subscription, or 3x-ui state.

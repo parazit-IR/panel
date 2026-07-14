@@ -26,3 +26,6 @@ PostgreSQL enforces non-negative balances, positive transaction amounts, one ide
 ## Task 50 PURCHASE Debits
 
 Wallet purchases are recorded as `WalletTransactionType.PURCHASE` with direction `DEBIT`, reference type `ORDER`, and reference id equal to the paid Order id. The ledger idempotency key is `wallet-purchase:{orderId}`.
+## Gift Code Credits
+
+Gift-code redemption credits the wallet through the immutable ledger using `WalletTransactionType.GIFT_CODE`. The ledger reference points to the promotion redemption record, not raw code text.

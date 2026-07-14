@@ -23,3 +23,6 @@ Task 48 does not implement admin dashboard adjustments, refunds, wallet top-up, 
 ## Wallet Payment Checks
 
 For wallet order payment incidents, reconcile the Order, approved WALLET Payment, and PURCHASE wallet transaction. Do not issue automatic refunds in Task 50; investigate inconsistencies and use manual operational correction policy.
+## Promotion Checks
+
+For discount or gift-code issues, inspect `promotion_redemptions` with the related order or wallet transaction. Do not ask customers for raw codes in logs or tickets; use masked code values and redemption ids for support tracing.

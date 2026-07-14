@@ -115,7 +115,7 @@ public class PaymentService implements CreatePaymentUseCase, GetPaymentUseCase {
         if (!order.getUserId().equals(command.userId())) {
             throw new PaymentConflictException("Payment user does not match order owner");
         }
-        if (order.getAmount() != command.amount()) {
+        if (order.getFinalAmount() != command.amount()) {
             throw new PaymentConflictException("Payment amount does not match order amount");
         }
         if (!order.getCurrency().equalsIgnoreCase(command.currency())) {

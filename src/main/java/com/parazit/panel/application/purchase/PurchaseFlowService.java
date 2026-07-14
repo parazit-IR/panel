@@ -283,6 +283,12 @@ public class PurchaseFlowService implements
     }
 
     private PurchasePreInvoiceResult toPreInvoice(User user, TelegramPurchaseSession session, PlanSelection selection) {
+        Order order = orderRepository.findByPlanSelectionId(selection.getId())
+                .filter(existing -> existing.getUserId().equals(user.getId()))
+                .orElse(null);
+        long originalAmount = order == null ? selection.getPriceAmountSnapshot() : order.getBaseAmount();
+        long discountAmount = order == null ? 0L : order.getDiscountAmount();
+        long finalAmount = order == null ? selection.getPriceAmountSnapshot() : order.getFinalAmount();
         return new PurchasePreInvoiceResult(
                 session.getId(),
                 selection.getId(),
@@ -293,11 +299,11 @@ public class PurchaseFlowService implements
                 selection.getDurationDaysSnapshot(),
                 optionalLong(selection.getTrafficLimitBytesSnapshot()),
                 optionalInt(selection.getMaxDevicesSnapshot()),
-                selection.getPriceAmountSnapshot(),
-                0L,
-                selection.getPriceAmountSnapshot(),
+                originalAmount,
+                discountAmount,
+                finalAmount,
                 selection.getCurrencySnapshot(),
-                false,
+                salesAvailabilityService.availability(com.parazit.panel.application.sales.SalesCapability.DISCOUNT_CODE).enabled(),
                 salesAvailabilityService.walletPaymentAvailable(),
                 salesAvailabilityService.manualPaymentAvailable(),
                 salesAvailabilityService.onlinePaymentAvailable(),

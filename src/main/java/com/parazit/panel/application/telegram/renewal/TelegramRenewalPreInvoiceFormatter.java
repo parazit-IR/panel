@@ -103,6 +103,10 @@ public class TelegramRenewalPreInvoiceFormatter {
         append(builder, "⏳ " + catalog.text(language, "telegram.renewal.plan_duration"), text.duration(result.renewalDuration(), language));
         append(builder, "📊 " + catalog.text(language, "telegram.renewal.traffic_policy"), trafficPolicy(result.trafficPolicy(), language, result.renewalTrafficBytes()));
         append(builder, "📅 " + catalog.text(language, "telegram.renewal.proposed_expiry"), dateTime(language, result.proposedExpiryAt()));
+        long discount = result.originalAmount().amount() - result.finalAmount().amount();
+        if (discount > 0) {
+            append(builder, "🎁 " + catalog.text(language, "telegram.purchase.discount"), money.formatAmount(discount, result.finalAmount().currency().name(), language));
+        }
         append(builder, "💵 " + catalog.text(language, "telegram.renewal.amount"), money.formatAmount(result.finalAmount().amount(), result.finalAmount().currency().name(), language));
         builder.append(fa(language)
                 ? "⚠️ تمدید پس از تأیید پرداخت روی همین سرویس اعمال خواهد شد."

@@ -357,6 +357,11 @@ public class RenewalFlowService implements
                 now
         );
         Money amount = new Money(selection.getPriceAmountSnapshot(), selection.getCurrencySnapshot());
+        Order order = orderRepository.findByPlanSelectionId(selection.getId())
+                .filter(existing -> existing.getUserId().equals(user.getId()))
+                .orElse(null);
+        Money original = order == null ? amount : new Money(order.getBaseAmount(), selection.getCurrencySnapshot());
+        Money finalAmount = order == null ? amount : new Money(order.getFinalAmount(), selection.getCurrencySnapshot());
         return new RenewalPreInvoiceResult(
                 session.getId(),
                 selection.getId(),
@@ -375,8 +380,8 @@ public class RenewalFlowService implements
                 properties.defaultTrafficPolicy(),
                 properties.expiryPolicy(),
                 proposedExpiry,
-                amount,
-                amount,
+                original,
+                finalAmount,
                 selection.getCurrencySnapshot(),
                 selection.getExpiresAt(),
                 salesAvailabilityService.manualPaymentAvailable(),

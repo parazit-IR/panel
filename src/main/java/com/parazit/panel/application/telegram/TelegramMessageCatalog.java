@@ -117,6 +117,42 @@ public class TelegramMessageCatalog {
             case "telegram.purchase.discount_unavailable" -> fa
                     ? "🎁 امکان ثبت کد تخفیف هنوز فعال نشده است."
                     : "🎁 Discount code entry is not enabled yet.";
+            case "telegram.promotion.discount_prompt" -> fa
+                    ? "🎁 کد تخفیف را ارسال کنید.\n\nکد شما فقط برای همین سفارش بررسی می‌شود."
+                    : "🎁 Send the discount code.\n\nIt will be checked only for this order.";
+            case "telegram.promotion.gift_prompt" -> fa
+                    ? "🎁 کد هدیه را ارسال کنید."
+                    : "🎁 Send the gift code.";
+            case "telegram.promotion.discount_success" -> fa
+                    ? "✅ کد تخفیف با موفقیت اعمال شد.\n\nمبلغ اولیه:\n{originalAmount}\n\nمبلغ تخفیف:\n{discountAmount}\n\nمبلغ نهایی:\n{finalAmount}"
+                    : "✅ Discount code applied.\n\nOriginal amount:\n{originalAmount}\n\nDiscount:\n{discountAmount}\n\nFinal amount:\n{finalAmount}";
+            case "telegram.promotion.gift_success" -> fa
+                    ? "🎉 کد هدیه با موفقیت ثبت شد.\n\nمبلغ هدیه:\n{creditedAmount}\n\nموجودی جدید کیف پول:\n{balanceAfter}"
+                    : "🎉 Gift code redeemed.\n\nGift amount:\n{creditedAmount}\n\nNew wallet balance:\n{balanceAfter}";
+            case "telegram.promotion.invalid_code" -> fa
+                    ? "کد واردشده معتبر نیست یا امکان استفاده از آن وجود ندارد."
+                    : "The code is invalid or cannot be used.";
+            case "telegram.promotion.invalid_gift_code" -> fa
+                    ? "کد هدیه معتبر نیست یا امکان استفاده از آن وجود ندارد."
+                    : "The gift code is invalid or cannot be used.";
+            case "telegram.promotion.minimum_not_met" -> fa
+                    ? "مبلغ سفارش برای استفاده از این کد کافی نیست."
+                    : "The order amount is not enough for this code.";
+            case "telegram.promotion.not_eligible_for_plan" -> fa
+                    ? "این کد برای پلن انتخاب‌شده قابل استفاده نیست."
+                    : "This code is not available for the selected plan.";
+            case "telegram.promotion.user_limit" -> fa
+                    ? "شما قبلاً از این کد استفاده کرده‌اید."
+                    : "You have already used this code.";
+            case "telegram.promotion.gift_user_limit" -> fa
+                    ? "این کد هدیه قبلاً توسط شما استفاده شده است."
+                    : "You have already used this gift code.";
+            case "telegram.promotion.payment_exists" -> fa
+                    ? "برای این سفارش پرداخت ایجاد شده است و کد تخفیف قابل تغییر نیست."
+                    : "A payment already exists for this order, so the discount cannot be changed.";
+            case "telegram.promotion.zero_final_not_allowed" -> fa
+                    ? "این کد مبلغ سفارش را به صفر می‌رساند و در حال حاضر قابل استفاده نیست."
+                    : "This code would make the order free, which is not supported right now.";
             case "telegram.purchase.payment_methods_title" -> fa ? "💳 روش پرداخت را انتخاب کنید." : "💳 Choose a payment method.";
             case "telegram.purchase.no_payment_method" -> fa
                     ? "در حال حاضر هیچ روش پرداختی فعال نیست.\n\nلطفاً بعداً دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
@@ -254,6 +290,7 @@ public class TelegramMessageCatalog {
             case "telegram.wallet.debit" -> fa ? "➖ کاهش موجودی" : "➖ Debit";
             case "telegram.wallet.balance_after" -> fa ? "موجودی پس از تراکنش" : "Balance after transaction";
             case "telegram.wallet.top_up" -> fa ? "➕ افزایش موجودی" : "➕ Top up";
+            case "telegram.wallet.gift_code" -> fa ? "🎁 ثبت کد هدیه" : "🎁 Redeem gift code";
             case "telegram.wallet.top_up_unavailable" -> fa
                     ? "➕ امکان افزایش موجودی کیف پول در حال حاضر فعال نشده است."
                     : "➕ Wallet top-up is not enabled yet.";

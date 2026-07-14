@@ -261,7 +261,7 @@ public class TelegramPurchaseFlowHandler {
         )));
         rows.add(keyboardFactory.row(keyboardFactory.button(
                 catalog.text(context.language(), "telegram.purchase.discount"),
-                TelegramCallbackAction.APPLY_DISCOUNT_PLACEHOLDER,
+                TelegramCallbackAction.START_DISCOUNT_CODE_ENTRY,
                 context.telegramUserId(),
                 result.purchaseSessionId(),
                 null,

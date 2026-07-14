@@ -58,6 +58,12 @@ public class Order extends BaseEntity {
     @Column(name = "final_amount", nullable = false)
     private long finalAmount;
 
+    @Column(name = "discount_amount", nullable = false)
+    private long discountAmount;
+
+    @Column(name = "applied_discount_code_id")
+    private UUID appliedDiscountCodeId;
+
     @Column(name = "currency", nullable = false, length = 8, updatable = false)
     private String currency;
 
@@ -84,6 +90,7 @@ public class Order extends BaseEntity {
         this.amount = requirePositiveOrZero(amount, "amount");
         this.baseAmount = this.amount;
         this.finalAmount = this.amount;
+        this.discountAmount = 0L;
         this.currency = normalizeCurrency(currency);
         this.type = OrderType.NEW_SUBSCRIPTION;
         this.status = OrderStatus.CREATED;
@@ -154,6 +161,25 @@ public class Order extends BaseEntity {
         }
         requireStatus(OrderStatus.CREATED, "mark payment pending");
         status = OrderStatus.PAYMENT_PENDING;
+    }
+
+    public void applyDiscount(UUID discountCodeId, long discountAmount) {
+        Objects.requireNonNull(discountCodeId, "discountCodeId must not be null");
+        requireDiscountable();
+        long requiredDiscount = requirePositiveOrZero(discountAmount, "discountAmount");
+        if (requiredDiscount <= 0 || requiredDiscount >= baseAmount) {
+            throw new IllegalArgumentException("discountAmount must be positive and less than baseAmount");
+        }
+        this.discountAmount = requiredDiscount;
+        this.finalAmount = baseAmount - requiredDiscount;
+        this.appliedDiscountCodeId = discountCodeId;
+    }
+
+    public void removeDiscount() {
+        requireDiscountable();
+        this.discountAmount = 0L;
+        this.finalAmount = baseAmount;
+        this.appliedDiscountCodeId = null;
     }
 
     public void markPaid(Instant paidAt) {
@@ -350,6 +376,14 @@ public class Order extends BaseEntity {
         return finalAmount;
     }
 
+    public long getDiscountAmount() {
+        return discountAmount;
+    }
+
+    public UUID getAppliedDiscountCodeId() {
+        return appliedDiscountCodeId;
+    }
+
     public Instant getPaidAt() {
         return paidAt;
     }
@@ -373,6 +407,15 @@ public class Order extends BaseEntity {
     private void requireStatus(OrderStatus expected, String action) {
         if (status != expected) {
             throw invalidTransition(action);
+        }
+    }
+
+    private void requireDiscountable() {
+        if (status != OrderStatus.CREATED && status != OrderStatus.PAYMENT_PENDING) {
+            throw invalidTransition("change discount");
+        }
+        if (paidAt != null) {
+            throw invalidTransition("change discount");
         }
     }
 

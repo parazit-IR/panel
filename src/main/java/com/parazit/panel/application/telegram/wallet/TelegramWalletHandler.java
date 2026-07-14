@@ -212,6 +212,15 @@ public class TelegramWalletHandler {
             )));
         }
         rows.add(keyboardFactory.row(keyboardFactory.button(
+                catalog.text(context.language(), "telegram.wallet.gift_code"),
+                TelegramCallbackAction.START_GIFT_CODE_ENTRY,
+                context.telegramUserId(),
+                null,
+                null,
+                null,
+                context.receivedAt()
+        )));
+        rows.add(keyboardFactory.row(keyboardFactory.button(
                 labelProvider.label(context.language(), TelegramNavigationAction.HOME),
                 TelegramCallbackAction.BACK_TO_MAIN,
                 context.telegramUserId(),

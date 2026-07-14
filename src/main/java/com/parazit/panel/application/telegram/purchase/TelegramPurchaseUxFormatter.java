@@ -78,7 +78,7 @@ public class TelegramPurchaseUxFormatter {
             append(builder, catalog.text(language, "telegram.purchase.devices"), numbers.formatNumber(result.maxDevices().getAsInt(), language));
         }
         append(builder, catalog.text(language, "telegram.purchase.original_amount"), numbers.formatAmount(result.originalAmount(), result.currency().name(), language));
-        if (result.discountFeatureAvailable()) {
+        if (result.discountAmount() > 0) {
             append(builder, catalog.text(language, "telegram.purchase.discount"), numbers.formatAmount(result.discountAmount(), result.currency().name(), language));
         }
         append(builder, catalog.text(language, "telegram.purchase.final_amount"), numbers.formatAmount(result.finalAmount(), result.currency().name(), language));

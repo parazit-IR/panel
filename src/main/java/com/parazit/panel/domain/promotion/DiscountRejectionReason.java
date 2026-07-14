@@ -1,0 +1,20 @@
+package com.parazit.panel.domain.promotion;
+
+public enum DiscountRejectionReason {
+    NONE,
+    FEATURE_DISABLED,
+    INVALID_CODE,
+    NOT_ACTIVE,
+    NOT_STARTED,
+    EXPIRED,
+    EXHAUSTED,
+    USER_LIMIT_REACHED,
+    WRONG_ORDER_TYPE,
+    PLAN_NOT_ELIGIBLE,
+    MINIMUM_AMOUNT_NOT_MET,
+    CURRENCY_MISMATCH,
+    ORDER_NOT_ELIGIBLE,
+    PAYMENT_EXISTS,
+    STACKING_NOT_ALLOWED,
+    ZERO_FINAL_AMOUNT_NOT_ALLOWED
+}

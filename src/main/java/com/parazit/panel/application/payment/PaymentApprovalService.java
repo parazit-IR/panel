@@ -6,6 +6,8 @@ import com.parazit.panel.domain.payment.Payment;
 import com.parazit.panel.domain.payment.PaymentStatus;
 import com.parazit.panel.domain.payment.repository.PaymentRepository;
 import com.parazit.panel.application.port.in.wallet.topup.HandleApprovedWalletTopUpUseCase;
+import com.parazit.panel.application.port.in.promotion.FinalizeDiscountRedemptionUseCase;
+import com.parazit.panel.application.promotion.command.FinalizeDiscountRedemptionCommand;
 import com.parazit.panel.application.wallet.topup.command.HandleApprovedWalletTopUpCommand;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
@@ -20,17 +22,20 @@ public class PaymentApprovalService {
     private final OrderRepository orderRepository;
     private final OrderPaymentApprovedDispatcher dispatcher;
     private final HandleApprovedWalletTopUpUseCase walletTopUpHandler;
+    private final FinalizeDiscountRedemptionUseCase finalizeDiscountRedemptionUseCase;
 
     public PaymentApprovalService(
             PaymentRepository paymentRepository,
             OrderRepository orderRepository,
             OrderPaymentApprovedDispatcher dispatcher,
-            HandleApprovedWalletTopUpUseCase walletTopUpHandler
+            HandleApprovedWalletTopUpUseCase walletTopUpHandler,
+            FinalizeDiscountRedemptionUseCase finalizeDiscountRedemptionUseCase
     ) {
         this.paymentRepository = Objects.requireNonNull(paymentRepository, "paymentRepository must not be null");
         this.orderRepository = Objects.requireNonNull(orderRepository, "orderRepository must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
         this.walletTopUpHandler = Objects.requireNonNull(walletTopUpHandler, "walletTopUpHandler must not be null");
+        this.finalizeDiscountRedemptionUseCase = Objects.requireNonNull(finalizeDiscountRedemptionUseCase, "finalizeDiscountRedemptionUseCase must not be null");
     }
 
     @Transactional
@@ -49,6 +54,7 @@ public class PaymentApprovalService {
 
         if (payment.getStatus() == PaymentStatus.APPROVED) {
             assertSameReference(payment, command.providerReference());
+            finalizeDiscount(payment, order);
             ApprovedOrderDispatchResult dispatchResult = dispatcher.dispatch(command, payment, order);
             return new PaymentApprovalResult(
                     payment.getId(),
@@ -67,6 +73,7 @@ public class PaymentApprovalService {
         order.markPaid(command.approvedAt());
         paymentRepository.save(payment);
         orderRepository.save(order);
+        finalizeDiscount(payment, order);
 
         ApprovedOrderDispatchResult dispatchResult = dispatcher.dispatch(command, payment, order);
         return new PaymentApprovalResult(
@@ -139,5 +146,16 @@ public class PaymentApprovalService {
                 + ':'
                 + (command.providerReference() == null ? "" : command.providerReference());
         return UUID.nameUUIDFromBytes(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void finalizeDiscount(Payment payment, Order order) {
+        if (order.getAppliedDiscountCodeId() == null) {
+            return;
+        }
+        finalizeDiscountRedemptionUseCase.finalizeDiscount(new FinalizeDiscountRedemptionCommand(
+                order.getId(),
+                payment.getId(),
+                UUID.nameUUIDFromBytes(("discount-finalize:" + order.getId() + ":" + payment.getId()).getBytes(StandardCharsets.UTF_8))
+        ));
     }
 }
