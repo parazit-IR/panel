@@ -18,6 +18,8 @@ public class OrderRepositoryAdapter extends JpaRepositoryAdapter<Order, UUID> im
             OrderStatus.CREATED,
             OrderStatus.PAYMENT_PENDING,
             OrderStatus.PAID,
+            OrderStatus.RENEWAL_PENDING,
+            OrderStatus.RENEWAL_REVIEW_REQUIRED,
             OrderStatus.PROVISIONING,
             OrderStatus.PROVISIONING_FAILED
     );

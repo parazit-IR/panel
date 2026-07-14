@@ -13,20 +13,23 @@ flowchart TD
     E --> F[Subscription created after provisioning]
 ```
 
-Renewal in Task 45:
+Renewal after Task 46:
 
 ```mermaid
 flowchart TD
     A[PlanSelection RENEWAL] --> B[OrderType.RENEWAL]
-    B --> C[Payment method handoff]
-    C --> D[Task 45 stop]
-    D --> E[No provisioning outbox]
-    D --> F[No new subscription]
+    B --> C[Payment]
+    C --> D[Approved]
+    D --> E[Order RENEWAL_PENDING]
+    E --> F[Renewal outbox PENDING]
+    F --> G[Task 46 stop before remote renewal]
 ```
 
 Dispatch rule:
 
 ```text
 OrderType.NEW_SUBSCRIPTION -> existing new-service provisioning
-OrderType.RENEWAL -> renewal path not implemented in Task 45
+OrderType.RENEWAL -> renewal outbox only
 ```
+
+Renewal orders must never enter the new-subscription provisioning worker. A renewal in `RENEWAL_REVIEW_REQUIRED` means payment is approved but the target failed safety validation and needs operator review.

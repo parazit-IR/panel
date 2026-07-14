@@ -66,7 +66,8 @@ public enum TelegramCallbackAction {
     SHOW_RENEWAL_PRE_INVOICE("9"),
     CONFIRM_RENEWAL_ORDER("aa"),
     BACK_TO_RENEWAL_TARGET("ab"),
-    BACK_TO_RENEWABLE_SERVICES("ac");
+    BACK_TO_RENEWABLE_SERVICES("ac"),
+    REFRESH_RENEWAL_STATUS("ad");
 
     private final String code;
 

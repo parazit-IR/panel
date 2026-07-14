@@ -62,6 +62,24 @@ public class CompleteZarinpalVerificationTransaction {
     }
 
     @Transactional
+    public CompletedZarinpalVerification reconcileApproved(UUID paymentId, UUID attemptId) {
+        Payment payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new PaymentNotFoundException(paymentId));
+        ZarinpalPaymentAttempt attempt = attemptRepository.findById(attemptId).orElseThrow();
+        java.time.Instant approvedAt = payment.getApprovedAt() == null ? clock.now() : payment.getApprovedAt();
+        paymentApprovalService.approve(new ApprovePaymentCommand(
+                payment.getId(),
+                PaymentApprovalSource.ZARINPAL_VERIFICATION,
+                attempt.getReferenceId(),
+                attempt.getAuthority(),
+                approvedAt
+        ));
+        payment = paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new PaymentNotFoundException(paymentId));
+        return new CompletedZarinpalVerification(payment, attempt);
+    }
+
+    @Transactional
     public CompletedZarinpalVerification fail(UUID paymentId, UUID attemptId, String code, String message) {
         Payment payment = paymentRepository.findById(paymentId)
                 .orElseThrow(() -> new PaymentNotFoundException(paymentId));

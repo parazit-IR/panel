@@ -10,6 +10,10 @@ public interface PaymentRepository extends UuidRepository<Payment> {
 
     Optional<Payment> findByOrderId(UUID orderId);
 
+    default Optional<Payment> findByIdForUpdate(UUID id) {
+        return findById(id);
+    }
+
     List<Payment> findAllByOrderId(UUID orderId);
 
     List<Payment> findAllByUserId(UUID userId);

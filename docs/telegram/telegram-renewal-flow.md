@@ -40,12 +40,14 @@ Callbacks are signed, time-bounded, and user-bound. They do not contain price, t
 
 Expired selections render the localized expired pre-invoice message and require selecting the service and plan again.
 
-Task 45 boundary:
+Task 46 post-payment boundary:
 
 ```mermaid
 flowchart TD
-    A[Payment method displayed] --> Stop[Stop]
-    Stop --> X[No payment approval side effects]
-    Stop --> Y[No renewal outbox]
-    Stop --> Z[No subscription or 3x-ui mutation]
+    A[Renewal payment approved] --> B[Renewal queued message]
+    B --> C[Refresh renewal status]
+    A --> D[Renewal outbox PENDING]
+    D --> Stop[Stop before Task 47]
+    Stop --> X[No subscription mutation]
+    Stop --> Y[No 3x-ui mutation]
 ```

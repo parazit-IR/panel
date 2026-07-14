@@ -2,6 +2,7 @@ package com.parazit.panel.application.telegram.renewal;
 
 import com.parazit.panel.application.port.in.renewal.CreateRenewalOrderUseCase;
 import com.parazit.panel.application.port.in.renewal.GetRenewalPreInvoiceUseCase;
+import com.parazit.panel.application.port.in.renewal.GetRenewalStatusUseCase;
 import com.parazit.panel.application.port.in.renewal.GetRenewalTargetDetailsUseCase;
 import com.parazit.panel.application.port.in.renewal.ListRenewableServicesUseCase;
 import com.parazit.panel.application.port.in.renewal.ListRenewalPlansUseCase;
@@ -10,6 +11,7 @@ import com.parazit.panel.application.purchase.result.AvailablePaymentMethodResul
 import com.parazit.panel.application.renewal.RenewalFlowException;
 import com.parazit.panel.application.renewal.command.CreateRenewalOrderCommand;
 import com.parazit.panel.application.renewal.command.GetRenewalPreInvoiceCommand;
+import com.parazit.panel.application.renewal.command.GetRenewalStatusCommand;
 import com.parazit.panel.application.renewal.command.GetRenewalTargetDetailsCommand;
 import com.parazit.panel.application.renewal.command.ListRenewableServicesCommand;
 import com.parazit.panel.application.renewal.command.ListRenewalPlansCommand;
@@ -51,8 +53,10 @@ public class TelegramRenewalFlowHandler {
     private final SelectRenewalPlanUseCase selectPlanUseCase;
     private final GetRenewalPreInvoiceUseCase preInvoiceUseCase;
     private final CreateRenewalOrderUseCase createOrderUseCase;
+    private final GetRenewalStatusUseCase statusUseCase;
     private final SalesAvailabilityService salesAvailabilityService;
     private final TelegramRenewalPreInvoiceFormatter formatter;
+    private final TelegramRenewalStatusFormatter statusFormatter;
     private final TelegramKeyboardFactory keyboardFactory;
     private final TelegramMessageCatalog catalog;
     private final TelegramMenuLabelProvider labelProvider;
@@ -66,8 +70,10 @@ public class TelegramRenewalFlowHandler {
             SelectRenewalPlanUseCase selectPlanUseCase,
             GetRenewalPreInvoiceUseCase preInvoiceUseCase,
             CreateRenewalOrderUseCase createOrderUseCase,
+            GetRenewalStatusUseCase statusUseCase,
             SalesAvailabilityService salesAvailabilityService,
             TelegramRenewalPreInvoiceFormatter formatter,
+            TelegramRenewalStatusFormatter statusFormatter,
             TelegramKeyboardFactory keyboardFactory,
             TelegramMessageCatalog catalog,
             TelegramMenuLabelProvider labelProvider,
@@ -80,8 +86,10 @@ public class TelegramRenewalFlowHandler {
         this.selectPlanUseCase = Objects.requireNonNull(selectPlanUseCase, "selectPlanUseCase must not be null");
         this.preInvoiceUseCase = Objects.requireNonNull(preInvoiceUseCase, "preInvoiceUseCase must not be null");
         this.createOrderUseCase = Objects.requireNonNull(createOrderUseCase, "createOrderUseCase must not be null");
+        this.statusUseCase = Objects.requireNonNull(statusUseCase, "statusUseCase must not be null");
         this.salesAvailabilityService = Objects.requireNonNull(salesAvailabilityService, "salesAvailabilityService must not be null");
         this.formatter = Objects.requireNonNull(formatter, "formatter must not be null");
+        this.statusFormatter = Objects.requireNonNull(statusFormatter, "statusFormatter must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
         this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
         this.labelProvider = Objects.requireNonNull(labelProvider, "labelProvider must not be null");
@@ -242,6 +250,30 @@ public class TelegramRenewalFlowHandler {
             rows.add(keyboardFactory.row(keyboardFactory.button(catalog.text(context.language(), "telegram.purchase.back_to_preinvoice"), TelegramCallbackAction.SHOW_RENEWAL_PRE_INVOICE, context.telegramUserId(), result.purchaseSessionId(), null, null, context.receivedAt())));
             rows.add(homeRow(context));
             return message(context, formatter.paymentMethods(context.language(), result), keyboardFactory.rows(rows), "renewal:payment-methods");
+        } catch (RenewalFlowException exception) {
+            return failure(context, exception.messageKey());
+        }
+    }
+
+    public TelegramResponsePlan status(TelegramInteractionContext context, UUID renewalOrderId) {
+        try {
+            var result = statusUseCase.get(new GetRenewalStatusCommand(context.telegramUserId(), renewalOrderId));
+            List<TelegramInlineKeyboardRow> rows = List.of(
+                    keyboardFactory.row(keyboardFactory.button(
+                            "🔄 بررسی وضعیت تمدید",
+                            TelegramCallbackAction.REFRESH_RENEWAL_STATUS,
+                            context.telegramUserId(),
+                            renewalOrderId,
+                            null,
+                            null,
+                            context.receivedAt()
+                    )),
+                    keyboardFactory.row(
+                            keyboardFactory.button("🛍 سرویس‌های من", TelegramCallbackAction.LIST_MY_SERVICES, context.telegramUserId(), null, null, null, context.receivedAt()),
+                            homeButton(context)
+                    )
+            );
+            return message(context, statusFormatter.format(context.language(), result), keyboardFactory.rows(rows), "renewal:status");
         } catch (RenewalFlowException exception) {
             return failure(context, exception.messageKey());
         }

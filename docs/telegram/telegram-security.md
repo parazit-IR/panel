@@ -74,3 +74,11 @@ Renewal callbacks must not carry:
 - Proposed expiry or renewal amount.
 
 Every renewal action reloads the local `User`, `Subscription`, provision, Plan, selection, session, and order as needed, then rechecks ownership and eligibility server-side.
+
+## Task 46 Renewal Approval Security
+
+Renewal payment approval uses the generic payment approval path and dispatches by persisted `OrderType`. Provider callbacks are verified before the approval service is called, and Telegram callback data is never used for renewal financial decisions.
+
+Renewal status callbacks carry only a signed order reference. The status use case reloads the user, order, payment, and renewal outbox from the database and never returns outbox payloads, provider callback bodies, subscription tokens, VLESS URIs, XUI credentials, or raw enum names.
+
+Task 46 renewal approval must not call 3x-ui, mutate subscription expiry/traffic, or create new-subscription provisioning outbox records for renewal orders.

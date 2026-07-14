@@ -47,6 +47,34 @@ public class RenewalMetrics {
         ).increment();
     }
 
+    public void renewalPaymentApproval(String result, com.parazit.panel.application.payment.PaymentApprovalSource source) {
+        meterRegistry.counter(
+                "renewal_payment_approval_total",
+                "result", safe(result),
+                "source", safe(source == null ? "unknown" : source.name())
+        ).increment();
+    }
+
+    public void renewalOutboxCreation() {
+        meterRegistry.counter("renewal_outbox_creation_total", "result", "created").increment();
+    }
+
+    public void renewalOutboxReuse() {
+        meterRegistry.counter("renewal_outbox_reuse_total", "result", "reused").increment();
+    }
+
+    public void renewalApprovalBlocked(String reason, com.parazit.panel.application.payment.PaymentApprovalSource source) {
+        meterRegistry.counter(
+                "renewal_approval_blocked_total",
+                "reason", safe(reason),
+                "source", safe(source == null ? "unknown" : source.name())
+        ).increment();
+    }
+
+    public void renewalQueuedNotification(String result) {
+        meterRegistry.counter("renewal_queued_notification_total", "result", safe(result)).increment();
+    }
+
     private static String safe(String value) {
         if (value == null || value.isBlank()) {
             return "unknown";

@@ -40,7 +40,11 @@ public class VerifyZarinpalPaymentService implements HandleZarinpalCallbackUseCa
         }
         PreparedZarinpalVerification prepared = prepareTransaction.prepare(command);
         if (prepared.alreadyApproved()) {
-            return toResult(prepared.payment(), prepared.attempt(), ZarinpalCallbackOutcome.ALREADY_APPROVED, false);
+            CompletedZarinpalVerification reconciled = completeTransaction.reconcileApproved(
+                    prepared.payment().getId(),
+                    prepared.attempt().getId()
+            );
+            return toResult(reconciled.payment(), reconciled.attempt(), ZarinpalCallbackOutcome.ALREADY_APPROVED, false);
         }
         if (prepared.cancelled()) {
             return toResult(prepared.payment(), prepared.attempt(), ZarinpalCallbackOutcome.CANCELLED, false);

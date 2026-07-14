@@ -211,6 +211,7 @@ public class TelegramCallbackHandler {
             case SELECT_RENEWAL_PLAN -> actions.addAll(renewalFlowHandler.selectPlanByIndex(context, requireSubscription(payload), configIndex(payload)).actions());
             case SHOW_RENEWAL_PRE_INVOICE -> actions.addAll(renewalFlowHandler.preInvoice(context, requireSubscription(payload)).actions());
             case CONFIRM_RENEWAL_ORDER -> actions.addAll(renewalFlowHandler.confirm(context, requireSubscription(payload)).actions());
+            case REFRESH_RENEWAL_STATUS -> actions.addAll(renewalFlowHandler.status(context, requireSubscription(payload)).actions());
             case SHOW_TUTORIALS, BACK_TO_TUTORIALS -> actions.addAll(tutorialMenuHandler.handle(context).actions());
             case SHOW_TUTORIAL_PLATFORM -> actions.addAll(tutorialDetailHandler.handle(context, requireReference(payload)).actions());
             case SHOW_DOWNLOAD_LINKS -> actions.addAll(downloadLinksHandler.handle(context).actions());

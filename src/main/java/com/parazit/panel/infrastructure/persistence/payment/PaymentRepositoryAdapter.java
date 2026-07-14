@@ -33,6 +33,11 @@ public class PaymentRepositoryAdapter extends JpaRepositoryAdapter<Payment, UUID
     }
 
     @Override
+    public Optional<Payment> findByIdForUpdate(UUID id) {
+        return repository.findByIdForUpdate(Objects.requireNonNull(id, "id must not be null"));
+    }
+
+    @Override
     public List<Payment> findAllByOrderId(UUID orderId) {
         return repository.findAllByOrderIdOrderByCreatedAtDesc(
                 Objects.requireNonNull(orderId, "orderId must not be null")

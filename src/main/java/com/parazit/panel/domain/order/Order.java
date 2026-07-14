@@ -160,6 +160,9 @@ public class Order extends BaseEntity {
         if (status == OrderStatus.PAID) {
             return;
         }
+        if (status == OrderStatus.RENEWAL_PENDING || status == OrderStatus.RENEWAL_REVIEW_REQUIRED) {
+            return;
+        }
         if (status != OrderStatus.CREATED && status != OrderStatus.PAYMENT_PENDING) {
             throw invalidTransition("mark paid");
         }
@@ -167,6 +170,41 @@ public class Order extends BaseEntity {
         status = OrderStatus.PAID;
         failureCode = null;
         failureMessage = null;
+    }
+
+    public void markRenewalPending(Instant paidAt) {
+        if (status == OrderStatus.RENEWAL_PENDING) {
+            return;
+        }
+        if (type != OrderType.RENEWAL) {
+            throw invalidTransition("mark renewal pending");
+        }
+        if (status == OrderStatus.CREATED || status == OrderStatus.PAYMENT_PENDING) {
+            markPaid(paidAt);
+        }
+        requireStatus(OrderStatus.PAID, "mark renewal pending");
+        status = OrderStatus.RENEWAL_PENDING;
+        failureCode = null;
+        failureMessage = null;
+    }
+
+    public void markRenewalReviewRequired(String failureCode, String failureMessage, Instant paidAt) {
+        Objects.requireNonNull(paidAt, "paidAt must not be null");
+        if (type != OrderType.RENEWAL) {
+            throw invalidTransition("mark renewal review required");
+        }
+        if (status == OrderStatus.RENEWAL_REVIEW_REQUIRED) {
+            this.failureCode = normalizeOptional(failureCode, 64);
+            this.failureMessage = normalizeOptional(failureMessage, 500);
+            return;
+        }
+        if (status == OrderStatus.CREATED || status == OrderStatus.PAYMENT_PENDING) {
+            markPaid(paidAt);
+        }
+        requireStatus(OrderStatus.PAID, "mark renewal review required");
+        status = OrderStatus.RENEWAL_REVIEW_REQUIRED;
+        this.failureCode = normalizeOptional(failureCode, 64);
+        this.failureMessage = normalizeOptional(failureMessage, 500);
     }
 
     public void markProvisioning(Instant now) {
