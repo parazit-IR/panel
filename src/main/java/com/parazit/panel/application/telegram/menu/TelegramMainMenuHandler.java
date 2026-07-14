@@ -14,6 +14,7 @@ import com.parazit.panel.application.telegram.model.TelegramResponseAction;
 import com.parazit.panel.application.telegram.model.TelegramResponsePlan;
 import com.parazit.panel.application.telegram.purchase.TelegramPurchaseFlowHandler;
 import com.parazit.panel.application.telegram.renewal.TelegramRenewalFlowHandler;
+import com.parazit.panel.application.telegram.wallet.TelegramWalletHandler;
 import com.parazit.panel.config.properties.TelegramBotProperties;
 import java.util.List;
 import java.util.Objects;
@@ -38,6 +39,7 @@ public class TelegramMainMenuHandler {
     private final TelegramSupportMenuHandler supportMenuHandler;
     private final TelegramPurchaseFlowHandler purchaseFlowHandler;
     private final TelegramRenewalFlowHandler renewalFlowHandler;
+    private final TelegramWalletHandler walletHandler;
 
     public TelegramMainMenuHandler(
             TelegramMenuFeatureAvailabilityService availabilityService,
@@ -51,7 +53,8 @@ public class TelegramMainMenuHandler {
             TelegramTutorialMenuHandler tutorialMenuHandler,
             TelegramSupportMenuHandler supportMenuHandler,
             TelegramPurchaseFlowHandler purchaseFlowHandler,
-            TelegramRenewalFlowHandler renewalFlowHandler
+            TelegramRenewalFlowHandler renewalFlowHandler,
+            TelegramWalletHandler walletHandler
     ) {
         this.availabilityService = Objects.requireNonNull(availabilityService, "availabilityService must not be null");
         this.unavailableFormatter = Objects.requireNonNull(unavailableFormatter, "unavailableFormatter must not be null");
@@ -65,6 +68,7 @@ public class TelegramMainMenuHandler {
         this.supportMenuHandler = Objects.requireNonNull(supportMenuHandler, "supportMenuHandler must not be null");
         this.purchaseFlowHandler = Objects.requireNonNull(purchaseFlowHandler, "purchaseFlowHandler must not be null");
         this.renewalFlowHandler = Objects.requireNonNull(renewalFlowHandler, "renewalFlowHandler must not be null");
+        this.walletHandler = Objects.requireNonNull(walletHandler, "walletHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, TelegramMainMenuAction action) {
@@ -99,7 +103,8 @@ public class TelegramMainMenuHandler {
             case MY_SERVICES -> subscriptionsHandler.handle(context);
             case SHOW_TUTORIALS -> tutorialMenuHandler.handle(context);
             case SHOW_SUPPORT -> supportMenuHandler.handle(context);
-            case REQUEST_TRIAL, SHOW_WALLET -> unavailable(context, availability);
+            case SHOW_WALLET -> walletHandler.show(context);
+            case REQUEST_TRIAL -> unavailable(context, availability);
         };
     }
 

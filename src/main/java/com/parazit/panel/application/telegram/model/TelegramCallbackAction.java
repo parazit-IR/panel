@@ -67,7 +67,12 @@ public enum TelegramCallbackAction {
     CONFIRM_RENEWAL_ORDER("aa"),
     BACK_TO_RENEWAL_TARGET("ab"),
     BACK_TO_RENEWABLE_SERVICES("ac"),
-    REFRESH_RENEWAL_STATUS("ad");
+    REFRESH_RENEWAL_STATUS("ad"),
+    SHOW_WALLET("ae"),
+    WALLET_HISTORY("af"),
+    WALLET_HISTORY_PAGE("ag"),
+    WALLET_TOP_UP("ah"),
+    BACK_TO_WALLET("ai");
 
     private final String code;
 

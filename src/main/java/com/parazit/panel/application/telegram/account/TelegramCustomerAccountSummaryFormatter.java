@@ -3,6 +3,7 @@ package com.parazit.panel.application.telegram.account;
 import com.parazit.panel.application.customer.result.CustomerAccountSummaryResult;
 import com.parazit.panel.application.telegram.TelegramMessageCatalog;
 import com.parazit.panel.application.telegram.TelegramMessageFormatter;
+import com.parazit.panel.application.telegram.TelegramPersianTextFormatter;
 import com.parazit.panel.application.telegram.service.TelegramCustomerTextFormatter;
 import com.parazit.panel.config.properties.CustomerAccountTelegramProperties;
 import java.util.Objects;
@@ -13,17 +14,20 @@ public class TelegramCustomerAccountSummaryFormatter {
 
     private final TelegramMessageCatalog catalog;
     private final TelegramMessageFormatter formatter;
+    private final TelegramPersianTextFormatter persianTextFormatter;
     private final TelegramCustomerTextFormatter textFormatter;
     private final CustomerAccountTelegramProperties properties;
 
     public TelegramCustomerAccountSummaryFormatter(
             TelegramMessageCatalog catalog,
             TelegramMessageFormatter formatter,
+            TelegramPersianTextFormatter persianTextFormatter,
             TelegramCustomerTextFormatter textFormatter,
             CustomerAccountTelegramProperties properties
     ) {
         this.catalog = Objects.requireNonNull(catalog, "catalog must not be null");
         this.formatter = Objects.requireNonNull(formatter, "formatter must not be null");
+        this.persianTextFormatter = Objects.requireNonNull(persianTextFormatter, "persianTextFormatter must not be null");
         this.textFormatter = Objects.requireNonNull(textFormatter, "textFormatter must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
     }
@@ -49,6 +53,8 @@ public class TelegramCustomerAccountSummaryFormatter {
             append(text, catalog.text(language, "telegram.account.pending_payments"), textFormatter.number(result.pendingPaymentCount(), language));
         }
         result.phoneNumberMasked().ifPresent(value -> append(text, catalog.text(language, "telegram.account.phone"), formatter.html(value)));
+        result.walletBalance().ifPresent(value -> append(text, catalog.text(language, "telegram.account.wallet_balance"),
+                persianTextFormatter.formatAmount(value.amount(), value.currency().name(), language)));
         result.customerGroup().ifPresent(value -> append(text, catalog.text(language, "telegram.account.customer_group"), formatter.html(value)));
         return text.toString().trim();
     }

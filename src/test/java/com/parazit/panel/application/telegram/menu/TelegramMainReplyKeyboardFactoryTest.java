@@ -10,7 +10,9 @@ import com.parazit.panel.config.properties.SalesControlProperties;
 import com.parazit.panel.config.properties.SubscriptionProperties;
 import com.parazit.panel.config.properties.TelegramFeaturePlaceholderProperties;
 import com.parazit.panel.config.properties.TelegramMenuProperties;
+import com.parazit.panel.config.properties.WalletProperties;
 import com.parazit.panel.config.properties.ZarinpalProperties;
+import com.parazit.panel.domain.plan.CurrencyCode;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -52,6 +54,7 @@ class TelegramMainReplyKeyboardFactoryTest {
                 new TelegramFeaturePlaceholderProperties(false, false, false, false, false),
                 new PaymentProperties(false, "", Duration.ofMinutes(30)),
                 subscriptionProperties(),
+                new WalletProperties(true, CurrencyCode.IRT, 10, 50, false, true, true, 3),
                 salesAvailabilityService()
         );
     }

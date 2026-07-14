@@ -60,6 +60,7 @@ public class TelegramCustomerAccountHandler {
                         context.receivedAt()
                 )),
                 keyboardFactory.row(
+                        keyboardFactory.button(catalog.text(context.language(), "telegram.main.wallet"), TelegramCallbackAction.SHOW_WALLET, context.telegramUserId(), 1, "", context.receivedAt()),
                         keyboardFactory.button(catalog.text(context.language(), "telegram.account.payments"), TelegramCallbackAction.SHOW_PAYMENTS, context.telegramUserId(), 1, "", context.receivedAt()),
                         keyboardFactory.button(catalog.text(context.language(), "telegram.account.settings"), TelegramCallbackAction.SHOW_NOTIFICATION_SETTINGS, context.telegramUserId(), 1, "", context.receivedAt())
                 ),

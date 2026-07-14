@@ -186,6 +186,15 @@ app:
     manual-payment-disabled-message: "${SALES_MANUAL_PAYMENT_DISABLED_MESSAGE:}"
     online-payment-disabled-message: "${SALES_ONLINE_PAYMENT_DISABLED_MESSAGE:}"
     sales-resume-at: "${SALES_RESUME_AT:}"
+  wallet:
+    enabled: "${WALLET_ENABLED:true}"
+    currency: "${WALLET_CURRENCY:IRT}"
+    history-page-size: "${WALLET_HISTORY_PAGE_SIZE:10}"
+    max-history-page-size: "${WALLET_MAX_HISTORY_PAGE_SIZE:50}"
+    auto-create-on-user-registration: "${WALLET_AUTO_CREATE_ON_USER_REGISTRATION:false}"
+    show-transaction-history: "${WALLET_SHOW_TRANSACTION_HISTORY:true}"
+    show-top-up-placeholder: "${WALLET_SHOW_TOP_UP_PLACEHOLDER:true}"
+    optimistic-retry-count: "${WALLET_OPTIMISTIC_RETRY_COUNT:3}"
   renewal:
     enabled: "${RENEWAL_ENABLED:true}"
     renewal-order-ttl: "${RENEWAL_ORDER_TTL:PT30M}"

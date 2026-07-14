@@ -51,6 +51,7 @@ import com.parazit.panel.application.telegram.tariff.TelegramTariffCatalogHandle
 import com.parazit.panel.application.telegram.tutorial.TelegramDownloadLinksHandler;
 import com.parazit.panel.application.telegram.tutorial.TelegramTutorialDetailHandler;
 import com.parazit.panel.application.telegram.tutorial.TelegramTutorialMenuHandler;
+import com.parazit.panel.application.telegram.wallet.TelegramWalletHandler;
 import com.parazit.panel.config.properties.QrCodeProperties;
 import com.parazit.panel.config.properties.TelegramBotProperties;
 import com.parazit.panel.domain.telegram.TelegramSensitiveAction;
@@ -95,6 +96,7 @@ public class TelegramCallbackHandler {
     private final SettingsTelegramCommandHandler settingsTelegramCommandHandler;
     private final TelegramPurchaseFlowHandler purchaseFlowHandler;
     private final TelegramRenewalFlowHandler renewalFlowHandler;
+    private final TelegramWalletHandler walletHandler;
 
     public TelegramCallbackHandler(
             TelegramCallbackDataCodec callbackDataCodec,
@@ -128,7 +130,8 @@ public class TelegramCallbackHandler {
             PaymentsTelegramCommandHandler paymentsTelegramCommandHandler,
             SettingsTelegramCommandHandler settingsTelegramCommandHandler,
             TelegramPurchaseFlowHandler purchaseFlowHandler,
-            TelegramRenewalFlowHandler renewalFlowHandler
+            TelegramRenewalFlowHandler renewalFlowHandler,
+            TelegramWalletHandler walletHandler
     ) {
         this.callbackDataCodec = Objects.requireNonNull(callbackDataCodec, "callbackDataCodec must not be null");
         this.keyboardFactory = Objects.requireNonNull(keyboardFactory, "keyboardFactory must not be null");
@@ -162,6 +165,7 @@ public class TelegramCallbackHandler {
         this.settingsTelegramCommandHandler = Objects.requireNonNull(settingsTelegramCommandHandler, "settingsTelegramCommandHandler must not be null");
         this.purchaseFlowHandler = Objects.requireNonNull(purchaseFlowHandler, "purchaseFlowHandler must not be null");
         this.renewalFlowHandler = Objects.requireNonNull(renewalFlowHandler, "renewalFlowHandler must not be null");
+        this.walletHandler = Objects.requireNonNull(walletHandler, "walletHandler must not be null");
     }
 
     public TelegramResponsePlan handle(TelegramInteractionContext context, String callbackData) {
@@ -212,6 +216,10 @@ public class TelegramCallbackHandler {
             case SHOW_RENEWAL_PRE_INVOICE -> actions.addAll(renewalFlowHandler.preInvoice(context, requireSubscription(payload)).actions());
             case CONFIRM_RENEWAL_ORDER -> actions.addAll(renewalFlowHandler.confirm(context, requireSubscription(payload)).actions());
             case REFRESH_RENEWAL_STATUS -> actions.addAll(renewalFlowHandler.status(context, requireSubscription(payload)).actions());
+            case SHOW_WALLET, BACK_TO_WALLET -> actions.addAll(walletHandler.show(context).actions());
+            case WALLET_HISTORY -> actions.addAll(walletHandler.history(context, 1).actions());
+            case WALLET_HISTORY_PAGE -> actions.addAll(walletHandler.history(context, configIndex(payload)).actions());
+            case WALLET_TOP_UP -> actions.addAll(walletHandler.topUpUnavailable(context).actions());
             case SHOW_TUTORIALS, BACK_TO_TUTORIALS -> actions.addAll(tutorialMenuHandler.handle(context).actions());
             case SHOW_TUTORIAL_PLATFORM -> actions.addAll(tutorialDetailHandler.handle(context, requireReference(payload)).actions());
             case SHOW_DOWNLOAD_LINKS -> actions.addAll(downloadLinksHandler.handle(context).actions());

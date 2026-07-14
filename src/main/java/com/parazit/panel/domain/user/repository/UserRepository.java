@@ -8,6 +8,10 @@ public interface UserRepository extends UuidRepository<User> {
 
     Optional<User> findByTelegramUserId(Long telegramUserId);
 
+    default Optional<User> findByIdForUpdate(java.util.UUID userId) {
+        return findById(userId);
+    }
+
     default Optional<User> findByTelegramUserIdForUpdate(Long telegramUserId) {
         return findByTelegramUserId(telegramUserId);
     }

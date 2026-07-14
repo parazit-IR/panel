@@ -34,3 +34,6 @@ Privacy rules:
 - No database UUID is shown.
 - No raw phone number is shown.
 - No wallet/referral/discount value is fabricated.
+## Wallet Balance
+
+When wallet support is enabled and the customer already has a wallet, the account summary includes the current wallet balance. Opening the wallet page lazily creates a zero-balance wallet; viewing unrelated account summary data does not create a wallet.

@@ -1,5 +1,6 @@
 package com.parazit.panel.application.customer.result;
 
+import com.parazit.panel.domain.order.Money;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,7 +20,7 @@ public record CustomerAccountSummaryResult(
         long pendingPaymentCount,
         Optional<String> referralCode,
         Optional<String> phoneNumberMasked,
-        Optional<String> walletBalance,
+        Optional<Money> walletBalance,
         Optional<String> customerGroup,
         long discountUsageCount
 ) {

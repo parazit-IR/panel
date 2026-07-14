@@ -4,6 +4,7 @@ import com.parazit.panel.config.properties.PaymentProperties;
 import com.parazit.panel.config.properties.SubscriptionProperties;
 import com.parazit.panel.config.properties.TelegramFeaturePlaceholderProperties;
 import com.parazit.panel.config.properties.TelegramMenuProperties;
+import com.parazit.panel.config.properties.WalletProperties;
 import com.parazit.panel.application.sales.SalesAvailabilityService;
 import com.parazit.panel.application.sales.SalesCapability;
 import java.util.Objects;
@@ -16,6 +17,7 @@ public class TelegramMenuFeatureAvailabilityService {
     private final TelegramFeaturePlaceholderProperties placeholderProperties;
     private final PaymentProperties paymentProperties;
     private final SubscriptionProperties subscriptionProperties;
+    private final WalletProperties walletProperties;
     private final SalesAvailabilityService salesAvailabilityService;
 
     public TelegramMenuFeatureAvailabilityService(
@@ -23,12 +25,14 @@ public class TelegramMenuFeatureAvailabilityService {
             TelegramFeaturePlaceholderProperties placeholderProperties,
             PaymentProperties paymentProperties,
             SubscriptionProperties subscriptionProperties,
+            WalletProperties walletProperties,
             SalesAvailabilityService salesAvailabilityService
     ) {
         this.menuProperties = Objects.requireNonNull(menuProperties, "menuProperties must not be null");
         this.placeholderProperties = Objects.requireNonNull(placeholderProperties, "placeholderProperties must not be null");
         this.paymentProperties = Objects.requireNonNull(paymentProperties, "paymentProperties must not be null");
         this.subscriptionProperties = Objects.requireNonNull(subscriptionProperties, "subscriptionProperties must not be null");
+        this.walletProperties = Objects.requireNonNull(walletProperties, "walletProperties must not be null");
         this.salesAvailabilityService = Objects.requireNonNull(salesAvailabilityService, "salesAvailabilityService must not be null");
     }
 
@@ -54,7 +58,7 @@ public class TelegramMenuFeatureAvailabilityService {
                     ? TelegramMenuFeatureAvailability.available()
                     : TelegramMenuFeatureAvailability.hidden();
             case SHOW_WALLET -> menuProperties.showWallet()
-                    ? availability(placeholderProperties.walletAvailable(), "telegram.feature.wallet_unavailable")
+                    ? availability(walletProperties.enabled(), "telegram.feature.wallet_unavailable")
                     : TelegramMenuFeatureAvailability.hidden();
             case SHOW_TUTORIALS -> menuProperties.showTutorials()
                     ? TelegramMenuFeatureAvailability.available()

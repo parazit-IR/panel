@@ -240,6 +240,26 @@ public class TelegramMessageCatalog {
             case "telegram.account.discount_usage" -> fa ? "🎟 تعداد تخفیف‌های استفاده‌شده" : "🎟 Used discounts";
             case "telegram.account.payments" -> fa ? "💳 پرداخت‌های من" : "💳 My payments";
             case "telegram.account.settings" -> fa ? "⚙️ تنظیمات اعلان‌ها" : "⚙️ Notification settings";
+            case "telegram.wallet.title" -> fa ? "💰 کیف پول" : "💰 Wallet";
+            case "telegram.wallet.balance" -> fa ? "موجودی فعلی شما" : "Current balance";
+            case "telegram.wallet.transaction_count" -> fa ? "تعداد تراکنش‌ها" : "Transaction count";
+            case "telegram.wallet.last_transaction" -> fa ? "آخرین تغییر" : "Last change";
+            case "telegram.wallet.no_transaction" -> fa ? "بدون تراکنش" : "No transactions";
+            case "telegram.wallet.history" -> fa ? "📜 تاریخچه تراکنش‌ها" : "📜 Transaction history";
+            case "telegram.wallet.history_empty" -> fa
+                    ? "📜 هنوز تراکنشی برای کیف پول شما ثبت نشده است."
+                    : "📜 Your wallet has no transactions yet.";
+            case "telegram.wallet.credit" -> fa ? "➕ افزایش موجودی" : "➕ Credit";
+            case "telegram.wallet.debit" -> fa ? "➖ کاهش موجودی" : "➖ Debit";
+            case "telegram.wallet.balance_after" -> fa ? "موجودی پس از تراکنش" : "Balance after transaction";
+            case "telegram.wallet.top_up" -> fa ? "➕ افزایش موجودی" : "➕ Top up";
+            case "telegram.wallet.top_up_unavailable" -> fa
+                    ? "➕ امکان افزایش موجودی کیف پول در حال حاضر فعال نشده است."
+                    : "➕ Wallet top-up is not enabled yet.";
+            case "telegram.wallet.locked" -> fa ? "کیف پول شما موقتاً قفل شده است." : "Your wallet is temporarily locked.";
+            case "telegram.wallet.closed" -> fa ? "کیف پول شما بسته شده است." : "Your wallet is closed.";
+            case "telegram.wallet.previous" -> fa ? "قبلی" : "Previous";
+            case "telegram.wallet.next" -> fa ? "بعدی" : "Next";
             case "telegram.services.title" -> fa ? "🛍 اشتراک‌های خریداری‌شده توسط شما" : "🛍 Your purchased services";
             case "telegram.services.description" -> fa
                     ? "برای مشاهده اطلاعات و مدیریت سرویس، روی نام آن کلیک کنید.\n\nبرای پیدا کردن سریع‌تر سرویس می‌توانید از جست‌وجوی سریع استفاده کنید."

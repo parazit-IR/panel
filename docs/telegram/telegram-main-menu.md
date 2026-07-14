@@ -55,3 +55,7 @@ If new purchases are disabled by `app.sales.new-purchase-enabled=false`, the but
 ## Task 45 Renewal Entry
 
 The persistent `♻️ تمدید سرویس` button lists renewable services owned by the Telegram user. When renewal sales are disabled, the button remains visible but returns a safe localized unavailable message and creates no session, selection, order, or payment.
+## Wallet
+
+Task 48 routes the wallet menu item to the real wallet summary when `app.wallet.enabled=true`.
+The top-up button remains a placeholder and does not create a payment.
