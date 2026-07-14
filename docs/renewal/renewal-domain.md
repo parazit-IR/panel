@@ -28,5 +28,7 @@ flowchart LR
     P[Payment approved] --> T{Order type}
     T -->|NEW_SUBSCRIPTION| N[Existing provisioning outbox]
     T -->|RENEWAL| R[Renewal path not implemented in Task 45]
-    R --> Stop[No subscription mutation, no XUI call]
+R --> Stop[No subscription mutation, no XUI call]
 ```
+
+Task 47 applies the paid renewal to the existing XUI client only after a Renewal Outbox row is claimed. It updates local Subscription and provision state after remote success and writes immutable renewal history.

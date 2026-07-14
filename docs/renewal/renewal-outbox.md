@@ -17,3 +17,5 @@ flowchart LR
 ```
 
 The payload excludes subscription tokens, VLESS URI, XUI credentials, provider callback bodies, card data, and Telegram messages. Task 46 only persists the pending request.
+
+Task 47 adds execution-step tracking and a deterministic target payload to avoid double extension during retries. The outbox remains the single retry authority for remote renewal execution.

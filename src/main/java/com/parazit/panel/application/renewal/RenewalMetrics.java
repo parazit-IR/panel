@@ -75,6 +75,40 @@ public class RenewalMetrics {
         meterRegistry.counter("renewal_queued_notification_total", "result", safe(result)).increment();
     }
 
+    public void renewalWorkerPoll(String result) {
+        meterRegistry.counter("renewal_worker_poll_total", "result", safe(result)).increment();
+    }
+
+    public void renewalOutboxClaim(String result) {
+        meterRegistry.counter("renewal_outbox_claim_total", "result", safe(result)).increment();
+    }
+
+    public void renewalApply(String result, String trafficPolicy) {
+        meterRegistry.counter(
+                "renewal_apply_total",
+                "result", safe(result),
+                "traffic_policy", safe(trafficPolicy)
+        ).increment();
+    }
+
+    public void renewalRetryScheduled(String failureClass) {
+        meterRegistry.counter(
+                "renewal_retry_scheduled_total",
+                "failure_class", safe(failureClass)
+        ).increment();
+    }
+
+    public void renewalPermanentFailure(String failureClass) {
+        meterRegistry.counter(
+                "renewal_permanent_failure_total",
+                "failure_class", safe(failureClass)
+        ).increment();
+    }
+
+    public void renewalCompletionNotification(String result) {
+        meterRegistry.counter("renewal_completion_notification_total", "result", safe(result)).increment();
+    }
+
     private static String safe(String value) {
         if (value == null || value.isBlank()) {
             return "unknown";

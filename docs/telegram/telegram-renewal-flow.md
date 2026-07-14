@@ -51,3 +51,13 @@ flowchart TD
     Stop --> X[No subscription mutation]
     Stop --> Y[No 3x-ui mutation]
 ```
+
+Task 47 completion boundary:
+
+```mermaid
+flowchart TD
+    A[Renewal outbox PENDING] --> B[Existing 3x-ui client updated]
+    B --> C[Local subscription/provision refreshed]
+    C --> D[Success notification]
+    B --> E[Manual review on unsafe failure]
+```

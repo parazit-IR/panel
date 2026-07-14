@@ -200,6 +200,18 @@ app:
     require-successful-provision: "${RENEWAL_REQUIRE_SUCCESSFUL_PROVISION:true}"
     require-remote-client-reference: "${RENEWAL_REQUIRE_REMOTE_CLIENT_REFERENCE:true}"
     maximum-concurrent-open-renewals-per-subscription: "${RENEWAL_MAX_OPEN_PER_SUBSCRIPTION:1}"
+    worker:
+      enabled: "${RENEWAL_WORKER_ENABLED:true}"
+      poll-interval: "${RENEWAL_WORKER_POLL_INTERVAL:PT5S}"
+      batch-size: "${RENEWAL_WORKER_BATCH_SIZE:10}"
+      lock-timeout: "${RENEWAL_WORKER_LOCK_TIMEOUT:PT2M}"
+      remote-timeout: "${RENEWAL_WORKER_REMOTE_TIMEOUT:PT20S}"
+      max-attempts: "${RENEWAL_WORKER_MAX_ATTEMPTS:8}"
+      initial-backoff: "${RENEWAL_WORKER_INITIAL_BACKOFF:PT10S}"
+      max-backoff: "${RENEWAL_WORKER_MAX_BACKOFF:PT30M}"
+      backoff-multiplier: "${RENEWAL_WORKER_BACKOFF_MULTIPLIER:2.0}"
+      worker-id: "${RENEWAL_WORKER_ID:}"
+      process-on-startup: "${RENEWAL_WORKER_PROCESS_ON_STARTUP:true}"
   panel:
     enabled: "${PANEL_ENABLED:false}"
     url: "${PANEL_URL}"

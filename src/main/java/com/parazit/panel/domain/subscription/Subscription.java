@@ -216,6 +216,25 @@ public class Subscription extends BaseEntity {
         status = SubscriptionStatus.EXPIRED;
     }
 
+    public void applyRenewal(Instant newExpiresAt, Instant now) {
+        Instant requiredExpiresAt = Objects.requireNonNull(newExpiresAt, "newExpiresAt must not be null");
+        Objects.requireNonNull(now, "now must not be null");
+        if (status == SubscriptionStatus.REVOKED || status == SubscriptionStatus.INVALID) {
+            throw new IllegalStateException("cannot renew subscription with status " + status);
+        }
+        if (status == SubscriptionStatus.SUSPENDED) {
+            throw new IllegalStateException("cannot automatically renew suspended subscription");
+        }
+        if (!requiredExpiresAt.isAfter(now)) {
+            throw new IllegalArgumentException("newExpiresAt must be in the future");
+        }
+        expiresAt = requiredExpiresAt;
+        status = SubscriptionStatus.ACTIVE;
+        if (activatedAt == null) {
+            activatedAt = now;
+        }
+    }
+
     public void markInvalid() {
         if (status == SubscriptionStatus.INVALID) {
             return;

@@ -232,6 +232,40 @@ public class Order extends BaseEntity {
         failureMessage = null;
     }
 
+    public void markRenewalCompleted(Instant completedAt) {
+        if (status == OrderStatus.COMPLETED) {
+            return;
+        }
+        if (type != OrderType.RENEWAL) {
+            throw invalidTransition("complete renewal");
+        }
+        requireStatus(OrderStatus.RENEWAL_PENDING, "complete renewal");
+        this.completedAt = Objects.requireNonNull(completedAt, "completedAt must not be null");
+        status = OrderStatus.COMPLETED;
+        failureCode = null;
+        failureMessage = null;
+    }
+
+    public void markRenewalExecutionReviewRequired(String failureCode, String failureMessage, Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        if (type != OrderType.RENEWAL) {
+            throw invalidTransition("mark renewal review required");
+        }
+        if (status == OrderStatus.RENEWAL_REVIEW_REQUIRED) {
+            this.failureCode = normalizeOptional(failureCode, 64);
+            this.failureMessage = normalizeOptional(failureMessage, 500);
+            return;
+        }
+        if (status == OrderStatus.CREATED || status == OrderStatus.PAYMENT_PENDING || status == OrderStatus.PAID) {
+            markRenewalReviewRequired(failureCode, failureMessage, now);
+            return;
+        }
+        requireStatus(OrderStatus.RENEWAL_PENDING, "mark renewal review required");
+        status = OrderStatus.RENEWAL_REVIEW_REQUIRED;
+        this.failureCode = normalizeOptional(failureCode, 64);
+        this.failureMessage = normalizeOptional(failureMessage, 500);
+    }
+
     public void markProvisioningFailed(String failureCode, String failureMessage) {
         if (status == OrderStatus.PROVISIONING_FAILED) {
             this.failureCode = normalizeOptional(failureCode, 64);

@@ -27,4 +27,35 @@ class TelegramRenewalStatusMapperTest {
                 "fa"
         )).isEqualTo("نیازمند بررسی");
     }
+
+    @Test
+    void mapsProcessingCompletedRetryAndDeadStatesWithoutRawEnums() {
+        assertThat(mapper.renewalLabel(
+                OrderStatus.RENEWAL_PENDING,
+                PaymentStatus.APPROVED,
+                RenewalOutboxStatus.PROCESSING,
+                "fa"
+        )).isEqualTo("در حال اعمال تمدید");
+
+        assertThat(mapper.renewalLabel(
+                OrderStatus.COMPLETED,
+                PaymentStatus.APPROVED,
+                RenewalOutboxStatus.PROCESSED,
+                "fa"
+        )).isEqualTo("تمدید انجام شد");
+
+        assertThat(mapper.renewalLabel(
+                OrderStatus.RENEWAL_PENDING,
+                PaymentStatus.APPROVED,
+                RenewalOutboxStatus.FAILED,
+                "fa"
+        )).isEqualTo("تلاش مجدد در حال برنامه‌ریزی است");
+
+        assertThat(mapper.renewalLabel(
+                OrderStatus.RENEWAL_PENDING,
+                PaymentStatus.APPROVED,
+                RenewalOutboxStatus.DEAD,
+                "fa"
+        )).isEqualTo("تمدید ناموفق");
+    }
 }

@@ -30,8 +30,20 @@ public class TelegramRenewalStatusMapper {
         if (orderStatus == OrderStatus.RENEWAL_REVIEW_REQUIRED) {
             return fa(language) ? "نیازمند بررسی" : "Review required";
         }
+        if (orderStatus == OrderStatus.COMPLETED) {
+            return fa(language) ? "تمدید انجام شد" : "Renewal completed";
+        }
+        if (outboxStatus == RenewalOutboxStatus.PROCESSING) {
+            return fa(language) ? "در حال اعمال تمدید" : "Applying renewal";
+        }
         if (outboxStatus == RenewalOutboxStatus.PENDING) {
             return fa(language) ? "تمدید در صف اجرا" : "Renewal queued";
+        }
+        if (outboxStatus == RenewalOutboxStatus.FAILED) {
+            return fa(language) ? "تلاش مجدد در حال برنامه‌ریزی است" : "Retry scheduled";
+        }
+        if (outboxStatus == RenewalOutboxStatus.DEAD) {
+            return fa(language) ? "تمدید ناموفق" : "Renewal failed";
         }
         if (paymentStatus == PaymentStatus.APPROVED
                 && (orderStatus == OrderStatus.PAID || orderStatus == OrderStatus.RENEWAL_PENDING)) {

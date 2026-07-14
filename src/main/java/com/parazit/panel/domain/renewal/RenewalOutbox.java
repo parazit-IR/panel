@@ -75,6 +75,17 @@ public class RenewalOutbox extends BaseEntity {
     @Column(name = "processed_at")
     private Instant processedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "execution_step", nullable = false, length = 40)
+    private RenewalExecutionStep executionStep;
+
+    @Column(name = "target_payload_version", length = PAYLOAD_VERSION_MAX_LENGTH)
+    private String targetPayloadVersion;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "target_payload", columnDefinition = "jsonb")
+    private String targetPayload;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;
@@ -101,6 +112,7 @@ public class RenewalOutbox extends BaseEntity {
         this.payload = requireText(payload, "payload", 20_000);
         this.availableAt = Objects.requireNonNull(availableAt, "availableAt must not be null");
         this.status = RenewalOutboxStatus.PENDING;
+        this.executionStep = RenewalExecutionStep.NOT_STARTED;
     }
 
     public static RenewalOutbox create(
@@ -179,8 +191,93 @@ public class RenewalOutbox extends BaseEntity {
         return processedAt;
     }
 
+    public RenewalExecutionStep getExecutionStep() {
+        return executionStep == null ? RenewalExecutionStep.NOT_STARTED : executionStep;
+    }
+
+    public String getTargetPayloadVersion() {
+        return targetPayloadVersion;
+    }
+
+    public String getTargetPayload() {
+        return targetPayload;
+    }
+
     public long getVersion() {
         return version;
+    }
+
+    public boolean isTerminal() {
+        return status == RenewalOutboxStatus.PROCESSED || status == RenewalOutboxStatus.DEAD;
+    }
+
+    public boolean isProcessingStale(Instant now, java.time.Duration timeout) {
+        Objects.requireNonNull(now, "now must not be null");
+        Objects.requireNonNull(timeout, "timeout must not be null");
+        return status == RenewalOutboxStatus.PROCESSING
+                && lockedAt != null
+                && !lockedAt.isAfter(now.minus(timeout));
+    }
+
+    public void markProcessing(String workerId, Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        if (status != RenewalOutboxStatus.PENDING && status != RenewalOutboxStatus.FAILED) {
+            throw new IllegalStateException("cannot process renewal outbox with status " + status);
+        }
+        status = RenewalOutboxStatus.PROCESSING;
+        lockedAt = now;
+        lockedBy = normalizeOptional(workerId, 128);
+        attempts = Math.addExact(attempts, 1);
+        lastErrorCode = null;
+    }
+
+    public void storeTarget(String targetPayloadVersion, String targetPayload) {
+        if (this.targetPayload != null) {
+            return;
+        }
+        this.targetPayloadVersion = requireText(targetPayloadVersion, "targetPayloadVersion", PAYLOAD_VERSION_MAX_LENGTH);
+        this.targetPayload = requireText(targetPayload, "targetPayload", 20_000);
+        this.executionStep = RenewalExecutionStep.TARGET_CALCULATED;
+    }
+
+    public void markStep(RenewalExecutionStep step) {
+        this.executionStep = Objects.requireNonNull(step, "step must not be null");
+    }
+
+    public void markProcessed(Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        if (status == RenewalOutboxStatus.PROCESSED) {
+            return;
+        }
+        status = RenewalOutboxStatus.PROCESSED;
+        executionStep = RenewalExecutionStep.COMPLETED;
+        processedAt = now;
+        availableAt = now;
+        lockedAt = null;
+        lockedBy = null;
+        lastErrorCode = null;
+    }
+
+    public void markRetry(String errorCode, Instant availableAt, Instant now) {
+        Objects.requireNonNull(availableAt, "availableAt must not be null");
+        Objects.requireNonNull(now, "now must not be null");
+        if (status != RenewalOutboxStatus.PROCESSING) {
+            return;
+        }
+        status = RenewalOutboxStatus.FAILED;
+        this.availableAt = availableAt;
+        lockedAt = null;
+        lockedBy = null;
+        lastErrorCode = normalizeOptional(errorCode, ERROR_CODE_MAX_LENGTH);
+    }
+
+    public void markDead(String errorCode, Instant now) {
+        Objects.requireNonNull(now, "now must not be null");
+        status = RenewalOutboxStatus.DEAD;
+        availableAt = now;
+        lockedAt = null;
+        lockedBy = null;
+        lastErrorCode = normalizeOptional(errorCode, ERROR_CODE_MAX_LENGTH);
     }
 
     @Override
@@ -192,6 +289,17 @@ public class RenewalOutbox extends BaseEntity {
                 + ", status=" + status
                 + ", eventType=" + eventType
                 + "]";
+    }
+
+    private static String normalizeOptional(String value, int maxLength) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.isBlank()) {
+            return null;
+        }
+        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 
     private static String requireText(String value, String fieldName, int maxLength) {
