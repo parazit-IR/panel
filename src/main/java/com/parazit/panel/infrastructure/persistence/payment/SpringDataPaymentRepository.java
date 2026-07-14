@@ -19,13 +19,19 @@ public interface SpringDataPaymentRepository extends SpringDataUuidRepository<Pa
 
     Optional<Payment> findFirstByOrderIdOrderByCreatedAtDesc(UUID orderId);
 
+    Optional<Payment> findFirstByWalletTopUpRequestIdOrderByCreatedAtDesc(UUID walletTopUpRequestId);
+
     List<Payment> findAllByOrderIdOrderByCreatedAtDesc(UUID orderId);
+
+    List<Payment> findAllByWalletTopUpRequestIdOrderByCreatedAtDesc(UUID walletTopUpRequestId);
 
     List<Payment> findAllByUserIdOrderByCreatedAtDesc(UUID userId);
 
     List<Payment> findAllByStatusOrderByExpiresAtAsc(PaymentStatus status);
 
     boolean existsByOrderIdAndStatus(UUID orderId, PaymentStatus status);
+
+    boolean existsByWalletTopUpRequestIdAndStatus(UUID walletTopUpRequestId, PaymentStatus status);
 
     long countByUserIdAndStatusIn(UUID userId, List<PaymentStatus> statuses);
 }

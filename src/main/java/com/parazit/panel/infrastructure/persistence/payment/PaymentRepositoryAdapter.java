@@ -33,6 +33,13 @@ public class PaymentRepositoryAdapter extends JpaRepositoryAdapter<Payment, UUID
     }
 
     @Override
+    public Optional<Payment> findByWalletTopUpRequestId(UUID walletTopUpRequestId) {
+        return repository.findFirstByWalletTopUpRequestIdOrderByCreatedAtDesc(
+                Objects.requireNonNull(walletTopUpRequestId, "walletTopUpRequestId must not be null")
+        );
+    }
+
+    @Override
     public Optional<Payment> findByIdForUpdate(UUID id) {
         return repository.findByIdForUpdate(Objects.requireNonNull(id, "id must not be null"));
     }
@@ -41,6 +48,13 @@ public class PaymentRepositoryAdapter extends JpaRepositoryAdapter<Payment, UUID
     public List<Payment> findAllByOrderId(UUID orderId) {
         return repository.findAllByOrderIdOrderByCreatedAtDesc(
                 Objects.requireNonNull(orderId, "orderId must not be null")
+        );
+    }
+
+    @Override
+    public List<Payment> findAllByWalletTopUpRequestId(UUID walletTopUpRequestId) {
+        return repository.findAllByWalletTopUpRequestIdOrderByCreatedAtDesc(
+                Objects.requireNonNull(walletTopUpRequestId, "walletTopUpRequestId must not be null")
         );
     }
 
@@ -60,6 +74,14 @@ public class PaymentRepositoryAdapter extends JpaRepositoryAdapter<Payment, UUID
     public boolean existsApprovedPaymentForOrder(UUID orderId) {
         return repository.existsByOrderIdAndStatus(
                 Objects.requireNonNull(orderId, "orderId must not be null"),
+                PaymentStatus.APPROVED
+        );
+    }
+
+    @Override
+    public boolean existsApprovedPaymentForWalletTopUpRequest(UUID walletTopUpRequestId) {
+        return repository.existsByWalletTopUpRequestIdAndStatus(
+                Objects.requireNonNull(walletTopUpRequestId, "walletTopUpRequestId must not be null"),
                 PaymentStatus.APPROVED
         );
     }

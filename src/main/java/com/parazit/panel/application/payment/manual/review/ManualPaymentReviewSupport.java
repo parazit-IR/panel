@@ -11,6 +11,8 @@ import com.parazit.panel.domain.payment.manual.receipt.ManualPaymentReceipt;
 import com.parazit.panel.domain.payment.manual.receipt.ManualPaymentReceiptStatus;
 import com.parazit.panel.domain.payment.manual.repository.ManualCardPaymentInstructionRepository;
 import com.parazit.panel.domain.payment.repository.PaymentRepository;
+import com.parazit.panel.domain.wallet.topup.WalletTopUpRequest;
+import com.parazit.panel.domain.wallet.topup.repository.WalletTopUpRequestRepository;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -20,23 +22,28 @@ class ManualPaymentReviewSupport {
 
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
+    private final WalletTopUpRequestRepository walletTopUpRequestRepository;
     private final ManualCardPaymentInstructionRepository instructionRepository;
 
     ManualPaymentReviewSupport(
             PaymentRepository paymentRepository,
             OrderRepository orderRepository,
+            WalletTopUpRequestRepository walletTopUpRequestRepository,
             ManualCardPaymentInstructionRepository instructionRepository
     ) {
         this.paymentRepository = Objects.requireNonNull(paymentRepository, "paymentRepository must not be null");
         this.orderRepository = Objects.requireNonNull(orderRepository, "orderRepository must not be null");
+        this.walletTopUpRequestRepository = Objects.requireNonNull(walletTopUpRequestRepository, "walletTopUpRequestRepository must not be null");
         this.instructionRepository = Objects.requireNonNull(instructionRepository, "instructionRepository must not be null");
     }
 
     ManualReviewContext loadQueuedContext(ManualPaymentReceipt receipt) {
         Payment payment = paymentRepository.findById(receipt.getPaymentId())
                 .orElseThrow(() -> new ManualPaymentReviewNotAllowedException("Payment for receipt could not be found"));
-        Order order = orderRepository.findById(payment.getOrderId())
-                .orElseThrow(() -> new ManualPaymentReviewNotAllowedException("Order for payment could not be found"));
+        Order order = payment.targetsOrder()
+                ? orderRepository.findById(payment.getOrderId())
+                        .orElseThrow(() -> new ManualPaymentReviewNotAllowedException("Order for payment could not be found"))
+                : null;
         ManualCardPaymentInstruction instruction = instructionRepository.findById(receipt.getInstructionId())
                 .orElseThrow(() -> new ManualPaymentReviewNotAllowedException("Manual payment instruction could not be found"));
         validateLinkage(receipt, payment, order, instruction);
@@ -63,11 +70,13 @@ class ManualPaymentReviewSupport {
 
     void saveReviewState(ManualReviewContext context) {
         paymentRepository.save(context.payment());
-        orderRepository.save(context.order());
+        if (context.order() != null) {
+            orderRepository.save(context.order());
+        }
         instructionRepository.save(context.instruction());
     }
 
-    private static void validateLinkage(
+    private void validateLinkage(
             ManualPaymentReceipt receipt,
             Payment payment,
             Order order,
@@ -77,11 +86,25 @@ class ManualPaymentReviewSupport {
         if (!receipt.getPaymentId().equals(paymentId) || !instruction.getPaymentId().equals(paymentId)) {
             throw new ManualPaymentReviewNotAllowedException("Receipt, instruction, and payment do not match");
         }
-        if (!payment.getOrderId().equals(order.getId())) {
-            throw new ManualPaymentReviewNotAllowedException("Payment and order do not match");
+        if (payment.targetsOrder()) {
+            if (order == null || !payment.getOrderId().equals(order.getId())) {
+                throw new ManualPaymentReviewNotAllowedException("Payment and order do not match");
+            }
+            if (!payment.getUserId().equals(order.getUserId()) || !receipt.getUserId().equals(payment.getUserId())) {
+                throw new ManualPaymentReviewNotAllowedException("Receipt ownership does not match payment owner");
+            }
+            return;
         }
-        if (!payment.getUserId().equals(order.getUserId()) || !receipt.getUserId().equals(payment.getUserId())) {
-            throw new ManualPaymentReviewNotAllowedException("Receipt ownership does not match payment owner");
+        if (payment.getWalletTopUpRequestId() == null) {
+            throw new ManualPaymentReviewNotAllowedException("Payment target is invalid");
+        }
+        WalletTopUpRequest request = walletTopUpRequestRepository.findById(payment.getWalletTopUpRequestId())
+                .orElseThrow(() -> new ManualPaymentReviewNotAllowedException("Wallet top-up request could not be found"));
+        if (!payment.getUserId().equals(request.getUserId())
+                || !receipt.getUserId().equals(payment.getUserId())
+                || request.getRequestedAmount() != payment.getBaseAmount()
+                || !request.getCurrency().equalsIgnoreCase(payment.getCurrency())) {
+            throw new ManualPaymentReviewNotAllowedException("Wallet top-up payment ownership does not match");
         }
     }
 

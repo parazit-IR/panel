@@ -72,7 +72,14 @@ public enum TelegramCallbackAction {
     WALLET_HISTORY("af"),
     WALLET_HISTORY_PAGE("ag"),
     WALLET_TOP_UP("ah"),
-    BACK_TO_WALLET("ai");
+    BACK_TO_WALLET("ai"),
+    START_WALLET_TOP_UP("aj"),
+    SELECT_WALLET_TOP_UP_MANUAL_PAYMENT("ak"),
+    SELECT_WALLET_TOP_UP_ONLINE_PAYMENT("al"),
+    SHOW_WALLET_TOP_UP_STATUS("am"),
+    REFRESH_WALLET_TOP_UP_STATUS("an"),
+    CHANGE_WALLET_TOP_UP_AMOUNT("ao"),
+    CANCEL_WALLET_TOP_UP("ap");
 
     private final String code;
 

@@ -8,6 +8,7 @@ import com.parazit.panel.application.telegram.menu.TelegramMainMenuHandler;
 import com.parazit.panel.application.telegram.menu.TelegramMainMenuTextRouter;
 import com.parazit.panel.application.telegram.menu.TelegramMenuMetrics;
 import com.parazit.panel.application.telegram.service.TelegramServiceSearchHandler;
+import com.parazit.panel.application.telegram.wallet.TelegramWalletHandler;
 import com.parazit.panel.application.telegram.model.TelegramInlineKeyboard;
 import com.parazit.panel.application.telegram.model.TelegramCommand;
 import com.parazit.panel.application.telegram.model.TelegramInteractionContext;
@@ -43,6 +44,7 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
     private final TelegramMainMenuHandler mainMenuHandler;
     private final TelegramMenuMetrics metrics;
     private final TelegramServiceSearchHandler serviceSearchHandler;
+    private final TelegramWalletHandler walletHandler;
 
     public TelegramUpdateProcessor(
             ClaimTelegramUpdateTransaction claimTransaction,
@@ -58,7 +60,8 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
             TelegramMainMenuTextRouter mainMenuTextRouter,
             TelegramMainMenuHandler mainMenuHandler,
             TelegramMenuMetrics metrics,
-            TelegramServiceSearchHandler serviceSearchHandler
+            TelegramServiceSearchHandler serviceSearchHandler,
+            TelegramWalletHandler walletHandler
     ) {
         this.claimTransaction = Objects.requireNonNull(claimTransaction, "claimTransaction must not be null");
         this.completeTransaction = Objects.requireNonNull(completeTransaction, "completeTransaction must not be null");
@@ -74,6 +77,7 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
         this.mainMenuHandler = Objects.requireNonNull(mainMenuHandler, "mainMenuHandler must not be null");
         this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
         this.serviceSearchHandler = Objects.requireNonNull(serviceSearchHandler, "serviceSearchHandler must not be null");
+        this.walletHandler = Objects.requireNonNull(walletHandler, "walletHandler must not be null");
     }
 
     @Override
@@ -145,8 +149,13 @@ public class TelegramUpdateProcessor implements ProcessTelegramUpdateUseCase {
             if (command != TelegramCommand.UNKNOWN) {
                 if (command == TelegramCommand.MENU || command == TelegramCommand.CANCEL) {
                     serviceSearchHandler.clear(context.telegramUserId());
+                    walletHandler.clearTopUpSession(context.telegramUserId());
                 }
                 return commandRouter.route(command, context);
+            }
+            Optional<TelegramResponsePlan> topUpPlan = walletHandler.handleAmountIfAwaiting(context, text);
+            if (topUpPlan.isPresent()) {
+                return topUpPlan.get();
             }
             Optional<TelegramResponsePlan> searchPlan = serviceSearchHandler.handleIfAwaiting(context, text);
             if (searchPlan.isPresent()) {

@@ -13,6 +13,8 @@ public class PaymentResultMapper {
         return new PaymentResult(
                 payment.getId(),
                 payment.getOrderId(),
+                payment.getTargetType(),
+                payment.getWalletTopUpRequestId(),
                 payment.getUserId(),
                 payment.getMethod(),
                 payment.getStatus(),

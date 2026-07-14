@@ -13,12 +13,13 @@ import com.parazit.panel.domain.payment.PaymentMethod;
 import com.parazit.panel.domain.payment.PaymentStatus;
 import com.parazit.panel.domain.payment.manual.ManualCardPaymentInstruction;
 import com.parazit.panel.domain.payment.manual.ManualPaymentDestination;
-import com.parazit.panel.domain.payment.manual.ManualPaymentInstructionStatus;
 import com.parazit.panel.domain.payment.manual.repository.ManualCardPaymentInstructionRepository;
 import com.parazit.panel.domain.payment.repository.PaymentRepository;
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserStatus;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.wallet.topup.WalletTopUpRequest;
+import com.parazit.panel.domain.wallet.topup.repository.WalletTopUpRequestRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -32,6 +33,7 @@ public class ManualCardPaymentReservationTransaction {
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
+    private final WalletTopUpRequestRepository walletTopUpRequestRepository;
     private final ManualCardPaymentInstructionRepository instructionRepository;
     private final ManualPaymentDestinationProvider destinationProvider;
     private final ManualPaymentProperties properties;
@@ -41,6 +43,7 @@ public class ManualCardPaymentReservationTransaction {
             PaymentRepository paymentRepository,
             OrderRepository orderRepository,
             UserRepository userRepository,
+            WalletTopUpRequestRepository walletTopUpRequestRepository,
             ManualCardPaymentInstructionRepository instructionRepository,
             ManualPaymentDestinationProvider destinationProvider,
             ManualPaymentProperties properties,
@@ -49,6 +52,7 @@ public class ManualCardPaymentReservationTransaction {
         this.paymentRepository = Objects.requireNonNull(paymentRepository, "paymentRepository must not be null");
         this.orderRepository = Objects.requireNonNull(orderRepository, "orderRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.walletTopUpRequestRepository = Objects.requireNonNull(walletTopUpRequestRepository, "walletTopUpRequestRepository must not be null");
         this.instructionRepository = Objects.requireNonNull(instructionRepository, "instructionRepository must not be null");
         this.destinationProvider = Objects.requireNonNull(destinationProvider, "destinationProvider must not be null");
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
@@ -165,18 +169,39 @@ public class ManualCardPaymentReservationTransaction {
         if (payment.getPayableAmount() <= 0) {
             throw new ManualCardPaymentNotAllowedException("Payment amount must be positive");
         }
-        Order order = orderRepository.findById(payment.getOrderId())
-                .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
-        if (!order.getUserId().equals(user.getId())) {
-            throw new ManualPaymentInstructionConflictException("Order owner does not match payment owner");
-        }
-        if (paymentRepository.existsApprovedPaymentForOrder(order.getId())) {
-            throw new ManualPaymentInstructionConflictException("Order already has an approved payment");
-        }
+        validateTarget(payment, user);
         if (!payment.getExpiresAt().isAfter(clock.now())) {
             throw new ManualCardPaymentNotAllowedException("Payment is expired");
         }
         return payment;
+    }
+
+    private void validateTarget(Payment payment, User user) {
+        if (payment.targetsOrder()) {
+            Order order = orderRepository.findById(payment.getOrderId())
+                    .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
+            if (!order.getUserId().equals(user.getId())) {
+                throw new ManualPaymentInstructionConflictException("Order owner does not match payment owner");
+            }
+            if (paymentRepository.existsApprovedPaymentForOrder(order.getId())) {
+                throw new ManualPaymentInstructionConflictException("Order already has an approved payment");
+            }
+            return;
+        }
+        if (payment.getWalletTopUpRequestId() == null) {
+            throw new ManualPaymentInstructionConflictException("Payment target is invalid");
+        }
+        WalletTopUpRequest request = walletTopUpRequestRepository.findById(payment.getWalletTopUpRequestId())
+                .orElseThrow(() -> new ManualPaymentInstructionConflictException("Wallet top-up request could not be found"));
+        if (!request.getUserId().equals(user.getId())
+                || !request.getId().equals(payment.getWalletTopUpRequestId())
+                || request.getRequestedAmount() != payment.getBaseAmount()
+                || !request.getCurrency().equalsIgnoreCase(payment.getCurrency())) {
+            throw new ManualPaymentInstructionConflictException("Wallet top-up payment target does not match");
+        }
+        if (paymentRepository.existsApprovedPaymentForWalletTopUpRequest(request.getId())) {
+            throw new ManualPaymentInstructionConflictException("Wallet top-up already has an approved payment");
+        }
     }
 
     private ManualPaymentDestination destination() {

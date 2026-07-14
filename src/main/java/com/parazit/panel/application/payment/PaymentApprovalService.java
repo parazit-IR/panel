@@ -5,7 +5,11 @@ import com.parazit.panel.domain.order.repository.OrderRepository;
 import com.parazit.panel.domain.payment.Payment;
 import com.parazit.panel.domain.payment.PaymentStatus;
 import com.parazit.panel.domain.payment.repository.PaymentRepository;
+import com.parazit.panel.application.port.in.wallet.topup.HandleApprovedWalletTopUpUseCase;
+import com.parazit.panel.application.wallet.topup.command.HandleApprovedWalletTopUpCommand;
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,15 +19,18 @@ public class PaymentApprovalService {
     private final PaymentRepository paymentRepository;
     private final OrderRepository orderRepository;
     private final OrderPaymentApprovedDispatcher dispatcher;
+    private final HandleApprovedWalletTopUpUseCase walletTopUpHandler;
 
     public PaymentApprovalService(
             PaymentRepository paymentRepository,
             OrderRepository orderRepository,
-            OrderPaymentApprovedDispatcher dispatcher
+            OrderPaymentApprovedDispatcher dispatcher,
+            HandleApprovedWalletTopUpUseCase walletTopUpHandler
     ) {
         this.paymentRepository = Objects.requireNonNull(paymentRepository, "paymentRepository must not be null");
         this.orderRepository = Objects.requireNonNull(orderRepository, "orderRepository must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
+        this.walletTopUpHandler = Objects.requireNonNull(walletTopUpHandler, "walletTopUpHandler must not be null");
     }
 
     @Transactional
@@ -31,6 +38,9 @@ public class PaymentApprovalService {
         Objects.requireNonNull(command, "command must not be null");
         Payment payment = paymentRepository.findByIdForUpdate(command.paymentId())
                 .orElseThrow(() -> new PaymentNotFoundException(command.paymentId()));
+        if (payment.targetsWalletTopUp()) {
+            return approveWalletTopUp(command, payment);
+        }
         Order order = orderRepository.findByIdForUpdate(payment.getOrderId())
                 .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
         if (!payment.getUserId().equals(order.getUserId())) {
@@ -70,6 +80,48 @@ public class PaymentApprovalService {
         );
     }
 
+    private PaymentApprovalResult approveWalletTopUp(ApprovePaymentCommand command, Payment payment) {
+        if (payment.getWalletTopUpRequestId() == null) {
+            throw new PaymentApprovalException("Wallet top-up payment target is missing");
+        }
+        if (payment.getStatus() == PaymentStatus.APPROVED) {
+            assertSameReference(payment, command.providerReference());
+            walletTopUpHandler.handle(new HandleApprovedWalletTopUpCommand(
+                    payment.getId(),
+                    payment.getWalletTopUpRequestId(),
+                    approvalRequestId(command, payment)
+            ));
+            return new PaymentApprovalResult(
+                    payment.getId(),
+                    null,
+                    payment.getStatus(),
+                    null,
+                    null,
+                    false,
+                    false
+            );
+        }
+        if (paymentRepository.existsApprovedPaymentForWalletTopUpRequest(payment.getWalletTopUpRequestId())) {
+            throw new PaymentApprovalException("Wallet top-up already has an approved payment");
+        }
+        payment.markApproved(command.approvedAt(), command.providerReference(), command.providerAuthority());
+        paymentRepository.save(payment);
+        walletTopUpHandler.handle(new HandleApprovedWalletTopUpCommand(
+                payment.getId(),
+                payment.getWalletTopUpRequestId(),
+                approvalRequestId(command, payment)
+        ));
+        return new PaymentApprovalResult(
+                payment.getId(),
+                null,
+                payment.getStatus(),
+                null,
+                null,
+                true,
+                false
+        );
+    }
+
     private static void assertSameReference(Payment payment, String providerReference) {
         if (providerReference == null) {
             return;
@@ -77,5 +129,15 @@ public class PaymentApprovalService {
         if (payment.getGatewayTransactionId() != null && !payment.getGatewayTransactionId().equals(providerReference)) {
             throw new PaymentApprovalException("Payment was already approved with a different reference");
         }
+    }
+
+    private static UUID approvalRequestId(ApprovePaymentCommand command, Payment payment) {
+        String raw = "wallet-top-up-approval:"
+                + payment.getId()
+                + ':'
+                + command.source()
+                + ':'
+                + (command.providerReference() == null ? "" : command.providerReference());
+        return UUID.nameUUIDFromBytes(raw.getBytes(StandardCharsets.UTF_8));
     }
 }

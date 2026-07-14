@@ -20,6 +20,8 @@ import com.parazit.panel.domain.payment.repository.PaymentRepository;
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.UserStatus;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.wallet.topup.WalletTopUpRequest;
+import com.parazit.panel.domain.wallet.topup.repository.WalletTopUpRequestRepository;
 import java.time.Instant;
 import java.util.Objects;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -31,6 +33,7 @@ public class PrepareManualPaymentReceiptTransaction {
 
     private final UserRepository userRepository;
     private final OrderRepository orderRepository;
+    private final WalletTopUpRequestRepository walletTopUpRequestRepository;
     private final PaymentRepository paymentRepository;
     private final ManualCardPaymentInstructionRepository instructionRepository;
     private final ManualPaymentReceiptRepository receiptRepository;
@@ -39,6 +42,7 @@ public class PrepareManualPaymentReceiptTransaction {
     public PrepareManualPaymentReceiptTransaction(
             UserRepository userRepository,
             OrderRepository orderRepository,
+            WalletTopUpRequestRepository walletTopUpRequestRepository,
             PaymentRepository paymentRepository,
             ManualCardPaymentInstructionRepository instructionRepository,
             ManualPaymentReceiptRepository receiptRepository,
@@ -46,6 +50,7 @@ public class PrepareManualPaymentReceiptTransaction {
     ) {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.orderRepository = Objects.requireNonNull(orderRepository, "orderRepository must not be null");
+        this.walletTopUpRequestRepository = Objects.requireNonNull(walletTopUpRequestRepository, "walletTopUpRequestRepository must not be null");
         this.paymentRepository = Objects.requireNonNull(paymentRepository, "paymentRepository must not be null");
         this.instructionRepository = Objects.requireNonNull(instructionRepository, "instructionRepository must not be null");
         this.receiptRepository = Objects.requireNonNull(receiptRepository, "receiptRepository must not be null");
@@ -133,12 +138,30 @@ public class PrepareManualPaymentReceiptTransaction {
         if (!payment.getExpiresAt().isAfter(clock.now())) {
             throw new ManualPaymentReceiptSubmissionNotAllowedException("Payment is expired");
         }
-        Order order = orderRepository.findById(payment.getOrderId())
-                .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
-        if (!order.getUserId().equals(user.getId())) {
-            throw new ManualPaymentReceiptSubmissionNotAllowedException("Order owner does not match payment owner");
-        }
+        validateTarget(payment, user);
         return payment;
+    }
+
+    private void validateTarget(Payment payment, User user) {
+        if (payment.targetsOrder()) {
+            Order order = orderRepository.findById(payment.getOrderId())
+                    .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
+            if (!order.getUserId().equals(user.getId())) {
+                throw new ManualPaymentReceiptSubmissionNotAllowedException("Order owner does not match payment owner");
+            }
+            return;
+        }
+        if (payment.getWalletTopUpRequestId() == null) {
+            throw new ManualPaymentReceiptSubmissionNotAllowedException("Payment target is invalid");
+        }
+        WalletTopUpRequest request = walletTopUpRequestRepository.findById(payment.getWalletTopUpRequestId())
+                .orElseThrow(() -> new ManualPaymentReceiptSubmissionNotAllowedException("Wallet top-up request could not be found"));
+        if (!request.getUserId().equals(user.getId())
+                || !request.getId().equals(payment.getWalletTopUpRequestId())
+                || request.getRequestedAmount() != payment.getBaseAmount()
+                || !request.getCurrency().equalsIgnoreCase(payment.getCurrency())) {
+            throw new ManualPaymentReceiptSubmissionNotAllowedException("Wallet top-up payment target does not match");
+        }
     }
 
     private Payment loadOwnedPayment(java.util.UUID paymentId, User user) {

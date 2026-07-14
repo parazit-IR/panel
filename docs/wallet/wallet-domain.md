@@ -9,7 +9,7 @@ Task 48 introduces one customer wallet per `User`.
 - A new wallet starts `ACTIVE` with zero `IRT`.
 - Wallet ownership is immutable through `user_id`.
 - Balance changes are only allowed through wallet domain methods and application use cases.
-- Task 48 does not implement top-up payments, wallet purchases, refunds, gifts, referrals, discounts, or withdrawals.
+- Task 49 implements top-up payments. Wallet purchases, refunds, gifts, referrals, discounts, cashback, transfers, withdrawals, and Task 50 behavior remain out of scope.
 
 ```mermaid
 flowchart TD

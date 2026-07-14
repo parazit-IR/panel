@@ -35,7 +35,7 @@ public class ManualPaymentReviewResultMapper {
                 review.isAmountMatched(),
                 review.isDuplicateHashDetected(),
                 payment.getStatus(),
-                order.getStatus(),
+                order == null ? null : order.getStatus(),
                 receipt.getStatus(),
                 instruction.getStatus(),
                 changed

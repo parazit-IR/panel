@@ -256,6 +256,25 @@ public class TelegramMessageCatalog {
             case "telegram.wallet.top_up_unavailable" -> fa
                     ? "➕ امکان افزایش موجودی کیف پول در حال حاضر فعال نشده است."
                     : "➕ Wallet top-up is not enabled yet.";
+            case "telegram.wallet.top_up_prompt" -> fa
+                    ? "➕ افزایش موجودی کیف پول\n\nمبلغ موردنظر را به تومان وارد کنید.\n\nحداقل:\n{minimumAmount}\n\nحداکثر:\n{maximumAmount}"
+                    : "➕ Wallet top-up\n\nEnter the amount.\n\nMinimum:\n{minimumAmount}\n\nMaximum:\n{maximumAmount}";
+            case "telegram.wallet.top_up_invalid_amount" -> fa
+                    ? "مبلغ واردشده معتبر نیست."
+                    : "The amount is not valid.";
+            case "telegram.wallet.top_up_invoice" -> fa
+                    ? "🧾 پیش‌فاکتور شارژ کیف پول\n\n💰 مبلغ شارژ:\n{amount}\n\n⏳ اعتبار درخواست:\n{expiresAt}\n\nروش پرداخت را انتخاب کنید."
+                    : "🧾 Wallet top-up invoice\n\nAmount:\n{amount}\n\nRequest expires:\n{expiresAt}\n\nChoose a payment method.";
+            case "telegram.wallet.top_up_manual" -> fa
+                    ? "💳 شارژ کیف پول با کارت‌به‌کارت\n\nمبلغ شارژ:\n{requestedAmount}\n\nمبلغ دقیق قابل واریز:\n{payableAmount}\n\nشماره کارت:\n{card}\n\nاعتبار پرداخت:\n{expiresAt}\n\nپس از پرداخت، رسید را ارسال کنید."
+                    : "💳 Wallet top-up by card transfer\n\nTop-up amount:\n{requestedAmount}\n\nExact payable amount:\n{payableAmount}\n\nCard:\n{card}\n\nPayment expires:\n{expiresAt}\n\nSend the receipt after payment.";
+            case "telegram.wallet.top_up_online" -> fa
+                    ? "🌐 پرداخت آنلاین شارژ کیف پول\n\nمبلغ شارژ:\n{amount}\n\nاعتبار درخواست:\n{expiresAt}\n\nبرای ادامه، وارد صفحه پرداخت شوید."
+                    : "🌐 Online wallet top-up\n\nAmount:\n{amount}\n\nRequest expires:\n{expiresAt}\n\nOpen the payment page to continue.";
+            case "telegram.wallet.top_up_status" -> fa
+                    ? "🔄 وضعیت شارژ کیف پول\n\nمبلغ:\n{amount}\n\nوضعیت شارژ:\n{topUpStatus}\n\nوضعیت پرداخت:\n{paymentStatus}\n\nموجودی پس از شارژ:\n{balanceAfter}"
+                    : "🔄 Wallet top-up status\n\nAmount:\n{amount}\n\nTop-up status:\n{topUpStatus}\n\nPayment status:\n{paymentStatus}\n\nBalance after credit:\n{balanceAfter}";
+            case "telegram.wallet.change_amount" -> fa ? "⬅️ تغییر مبلغ" : "⬅️ Change amount";
             case "telegram.wallet.locked" -> fa ? "کیف پول شما موقتاً قفل شده است." : "Your wallet is temporarily locked.";
             case "telegram.wallet.closed" -> fa ? "کیف پول شما بسته شده است." : "Your wallet is closed.";
             case "telegram.wallet.previous" -> fa ? "قبلی" : "Previous";

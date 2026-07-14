@@ -54,6 +54,7 @@ import com.parazit.panel.application.telegram.tutorial.TelegramTutorialMenuHandl
 import com.parazit.panel.application.telegram.wallet.TelegramWalletHandler;
 import com.parazit.panel.config.properties.QrCodeProperties;
 import com.parazit.panel.config.properties.TelegramBotProperties;
+import com.parazit.panel.domain.payment.PaymentMethod;
 import com.parazit.panel.domain.telegram.TelegramSensitiveAction;
 import java.util.ArrayList;
 import java.util.List;
@@ -220,6 +221,14 @@ public class TelegramCallbackHandler {
             case WALLET_HISTORY -> actions.addAll(walletHandler.history(context, 1).actions());
             case WALLET_HISTORY_PAGE -> actions.addAll(walletHandler.history(context, configIndex(payload)).actions());
             case WALLET_TOP_UP -> actions.addAll(walletHandler.topUpUnavailable(context).actions());
+            case START_WALLET_TOP_UP, CHANGE_WALLET_TOP_UP_AMOUNT -> actions.addAll(walletHandler.startTopUp(context).actions());
+            case SELECT_WALLET_TOP_UP_MANUAL_PAYMENT -> actions.addAll(walletHandler.selectTopUpPayment(context, requireSubscription(payload), PaymentMethod.CARD_TO_CARD).actions());
+            case SELECT_WALLET_TOP_UP_ONLINE_PAYMENT -> actions.addAll(walletHandler.selectTopUpPayment(context, requireSubscription(payload), PaymentMethod.ZARINPAL).actions());
+            case SHOW_WALLET_TOP_UP_STATUS, REFRESH_WALLET_TOP_UP_STATUS -> actions.addAll(walletHandler.topUpStatus(context, requireSubscription(payload)).actions());
+            case CANCEL_WALLET_TOP_UP -> {
+                walletHandler.clearTopUpSession(context.telegramUserId());
+                actions.addAll(walletHandler.show(context).actions());
+            }
             case SHOW_TUTORIALS, BACK_TO_TUTORIALS -> actions.addAll(tutorialMenuHandler.handle(context).actions());
             case SHOW_TUTORIAL_PLATFORM -> actions.addAll(tutorialDetailHandler.handle(context, requireReference(payload)).actions());
             case SHOW_DOWNLOAD_LINKS -> actions.addAll(downloadLinksHandler.handle(context).actions());

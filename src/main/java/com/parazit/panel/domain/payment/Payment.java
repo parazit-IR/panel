@@ -28,8 +28,15 @@ public class Payment extends BaseEntity {
     public static final int GATEWAY_ID_MAX_LENGTH = 128;
     public static final int REJECTION_REASON_MAX_LENGTH = 500;
 
-    @Column(name = "order_id", nullable = false, updatable = false)
+    @Column(name = "order_id", updatable = false)
     private UUID orderId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target_type", nullable = false, length = 40, updatable = false)
+    private PaymentTargetType targetType;
+
+    @Column(name = "wallet_top_up_request_id", updatable = false)
+    private UUID walletTopUpRequestId;
 
     @Column(name = "user_id", nullable = false, updatable = false)
     private UUID userId;
@@ -77,6 +84,8 @@ public class Payment extends BaseEntity {
 
     private Payment(
             UUID orderId,
+            UUID walletTopUpRequestId,
+            PaymentTargetType targetType,
             UUID userId,
             PaymentMethod method,
             long baseAmount,
@@ -84,10 +93,19 @@ public class Payment extends BaseEntity {
             String currency,
             Instant expiresAt
     ) {
-        this.orderId = Objects.requireNonNull(orderId, "orderId must not be null");
+        PaymentTargetType requiredTargetType = Objects.requireNonNull(targetType, "targetType must not be null");
+        if (requiredTargetType == PaymentTargetType.ORDER) {
+            this.orderId = Objects.requireNonNull(orderId, "orderId must not be null");
+            this.walletTopUpRequestId = null;
+            this.baseAmount = requireNonNegative(baseAmount, "baseAmount");
+        } else {
+            this.orderId = null;
+            this.walletTopUpRequestId = Objects.requireNonNull(walletTopUpRequestId, "walletTopUpRequestId must not be null");
+            this.baseAmount = requirePositive(baseAmount, "baseAmount");
+        }
+        this.targetType = requiredTargetType;
         this.userId = Objects.requireNonNull(userId, "userId must not be null");
         this.method = Objects.requireNonNull(method, "method must not be null");
-        this.baseAmount = requireNonNegative(baseAmount, "baseAmount");
         this.payableAmount = requirePayableAmount(payableAmount, baseAmount);
         this.currency = normalizeCurrency(currency);
         this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt must not be null");
@@ -103,7 +121,19 @@ public class Payment extends BaseEntity {
             String currency,
             Instant expiresAt
     ) {
-        return new Payment(orderId, userId, method, baseAmount, payableAmount, currency, expiresAt);
+        return new Payment(orderId, null, PaymentTargetType.ORDER, userId, method, baseAmount, payableAmount, currency, expiresAt);
+    }
+
+    public static Payment createWalletTopUp(
+            UUID userId,
+            UUID walletTopUpRequestId,
+            PaymentMethod method,
+            long baseAmount,
+            long payableAmount,
+            String currency,
+            Instant expiresAt
+    ) {
+        return new Payment(null, walletTopUpRequestId, PaymentTargetType.WALLET_TOP_UP, userId, method, baseAmount, payableAmount, currency, expiresAt);
     }
 
     public void markWaitingForPayment() {
@@ -252,6 +282,22 @@ public class Payment extends BaseEntity {
         return orderId;
     }
 
+    public PaymentTargetType getTargetType() {
+        return targetType == null ? PaymentTargetType.ORDER : targetType;
+    }
+
+    public UUID getWalletTopUpRequestId() {
+        return walletTopUpRequestId;
+    }
+
+    public boolean targetsOrder() {
+        return getTargetType() == PaymentTargetType.ORDER;
+    }
+
+    public boolean targetsWalletTopUp() {
+        return getTargetType() == PaymentTargetType.WALLET_TOP_UP;
+    }
+
     public UUID getUserId() {
         return userId;
     }
@@ -320,6 +366,13 @@ public class Payment extends BaseEntity {
             throw new IllegalArgumentException("payableAmount must be greater than or equal to baseAmount");
         }
         return payableAmount;
+    }
+
+    private static long requirePositive(long value, String fieldName) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(fieldName + " must be positive");
+        }
+        return value;
     }
 
     private static long requireNonNegative(long value, String fieldName) {

@@ -26,6 +26,12 @@ public class PaymentFactory {
         return Payment.create(orderId, userId, method, amount, payableAmount, currency, expiresAt);
     }
 
+    public Payment createWalletTopUp(UUID userId, UUID walletTopUpRequestId, PaymentMethod method, long amount, String currency) {
+        Instant expiresAt = clock.now().plus(properties.defaultExpiration());
+        long payableAmount = calculatePayableAmount(amount, method);
+        return Payment.createWalletTopUp(userId, walletTopUpRequestId, method, amount, payableAmount, currency, expiresAt);
+    }
+
     private long calculatePayableAmount(long baseAmount, PaymentMethod method) {
         Objects.requireNonNull(method, "method must not be null");
         return baseAmount;

@@ -4,6 +4,11 @@ import com.parazit.panel.application.telegram.TelegramMessageCatalog;
 import com.parazit.panel.application.telegram.TelegramMessageFormatter;
 import com.parazit.panel.application.telegram.TelegramPersianTextFormatter;
 import com.parazit.panel.application.wallet.result.CustomerWalletResult;
+import com.parazit.panel.application.wallet.topup.result.WalletTopUpPaymentResult;
+import com.parazit.panel.application.wallet.topup.result.WalletTopUpRequestResult;
+import com.parazit.panel.application.wallet.topup.result.WalletTopUpStatusResult;
+import com.parazit.panel.config.properties.WalletTopUpProperties;
+import com.parazit.panel.domain.order.Money;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
 
@@ -39,8 +44,64 @@ public class TelegramWalletFormatter {
         return text.toString().trim();
     }
 
-    private String amount(com.parazit.panel.domain.order.Money money, String language) {
+    public String topUpPrompt(WalletTopUpProperties properties, String language) {
+        return catalog.text(language, "telegram.wallet.top_up_prompt")
+                .replace("{minimumAmount}", amount(properties.minimumMoney(), language))
+                .replace("{maximumAmount}", amount(properties.maximumMoney(), language));
+    }
+
+    public String topUpConfirmation(WalletTopUpRequestResult result, String language) {
+        return catalog.text(language, "telegram.wallet.top_up_invoice")
+                .replace("{amount}", amount(result.amount(), language))
+                .replace("{expiresAt}", dateFormatter.formatDate(result.expiresAt()));
+    }
+
+    public String manualTopUp(WalletTopUpPaymentResult result, String language) {
+        var instruction = result.manualPayment().instruction();
+        return catalog.text(language, "telegram.wallet.top_up_manual")
+                .replace("{requestedAmount}", amount(result.amount(), language))
+                .replace("{payableAmount}", textFormatter.formatAmount(instruction.payableAmount(), instruction.currency(), language))
+                .replace("{card}", instruction.cardNumberFormatted())
+                .replace("{expiresAt}", dateFormatter.formatDate(instruction.expiresAt()));
+    }
+
+    public String onlineTopUp(WalletTopUpPaymentResult result, String language) {
+        return catalog.text(language, "telegram.wallet.top_up_online")
+                .replace("{amount}", amount(result.amount(), language))
+                .replace("{expiresAt}", dateFormatter.formatDate(result.expiresAt()));
+    }
+
+    public String topUpStatus(WalletTopUpStatusResult result, String language) {
+        String balance = result.balanceAfter() == null ? "-" : amount(result.balanceAfter(), language);
+        String paymentStatus = result.paymentStatus() == null ? "-" : result.paymentStatus().name();
+        return catalog.text(language, "telegram.wallet.top_up_status")
+                .replace("{amount}", amount(result.amount(), language))
+                .replace("{topUpStatus}", statusLabel(result.topUpStatus().name(), language))
+                .replace("{paymentStatus}", statusLabel(paymentStatus, language))
+                .replace("{balanceAfter}", balance);
+    }
+
+    private String amount(Money money, String language) {
         return textFormatter.formatAmount(money.amount(), money.currency().name(), language);
+    }
+
+    private String statusLabel(String status, String language) {
+        boolean fa = language != null && language.toUpperCase(java.util.Locale.ROOT).startsWith("FA");
+        if (!fa) {
+            return status.replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
+        }
+        return switch (status) {
+            case "AWAITING_PAYMENT_METHOD" -> "در انتظار انتخاب روش پرداخت";
+            case "PENDING_PAYMENT", "WAITING_FOR_PAYMENT" -> "در انتظار پرداخت";
+            case "WAITING_FOR_REVIEW", "RECEIPT_SUBMITTED" -> "در انتظار بررسی رسید";
+            case "PAYMENT_APPROVED", "APPROVED" -> "پرداخت تأیید شد";
+            case "CREDITED" -> "کیف پول شارژ شد";
+            case "CANCELLED" -> "لغوشده";
+            case "EXPIRED" -> "منقضی‌شده";
+            case "FAILED" -> "نیازمند بررسی";
+            case "-" -> "-";
+            default -> "در حال بررسی";
+        };
     }
 
     private static void append(StringBuilder text, String label, String value) {

@@ -36,7 +36,7 @@ public class ManualPaymentReview extends BaseEntity {
     @Column(name = "payment_id", nullable = false, updatable = false)
     private UUID paymentId;
 
-    @Column(name = "order_id", nullable = false, updatable = false)
+    @Column(name = "order_id", updatable = false)
     private UUID orderId;
 
     @Enumerated(EnumType.STRING)
@@ -87,7 +87,7 @@ public class ManualPaymentReview extends BaseEntity {
     ) {
         this.receiptId = Objects.requireNonNull(receiptId, "receiptId must not be null");
         this.paymentId = Objects.requireNonNull(paymentId, "paymentId must not be null");
-        this.orderId = Objects.requireNonNull(orderId, "orderId must not be null");
+        this.orderId = orderId;
         this.expectedAmount = requirePositive(expectedAmount, "expectedAmount");
         this.claimedAmount = requirePositive(claimedAmount, "claimedAmount");
         this.amountMatched = expectedAmount == claimedAmount;

@@ -15,6 +15,8 @@ import com.parazit.panel.domain.payment.zarinpal.ZarinpalPaymentAttempt;
 import com.parazit.panel.domain.payment.zarinpal.repository.ZarinpalPaymentAttemptRepository;
 import com.parazit.panel.domain.user.User;
 import com.parazit.panel.domain.user.repository.UserRepository;
+import com.parazit.panel.domain.wallet.topup.WalletTopUpRequest;
+import com.parazit.panel.domain.wallet.topup.repository.WalletTopUpRequestRepository;
 import java.time.Instant;
 import java.util.Objects;
 import org.springframework.stereotype.Component;
@@ -27,6 +29,7 @@ public class PrepareZarinpalRequestTransaction {
     private final ZarinpalPaymentAttemptRepository attemptRepository;
     private final UserRepository userRepository;
     private final OrderRepository orderRepository;
+    private final WalletTopUpRequestRepository walletTopUpRequestRepository;
     private final ZarinpalAmountConverter amountConverter;
     private final SystemClockPort clock;
 
@@ -35,6 +38,7 @@ public class PrepareZarinpalRequestTransaction {
             ZarinpalPaymentAttemptRepository attemptRepository,
             UserRepository userRepository,
             OrderRepository orderRepository,
+            WalletTopUpRequestRepository walletTopUpRequestRepository,
             ZarinpalAmountConverter amountConverter,
             SystemClockPort clock
     ) {
@@ -42,6 +46,7 @@ public class PrepareZarinpalRequestTransaction {
         this.attemptRepository = Objects.requireNonNull(attemptRepository, "attemptRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.orderRepository = Objects.requireNonNull(orderRepository, "orderRepository must not be null");
+        this.walletTopUpRequestRepository = Objects.requireNonNull(walletTopUpRequestRepository, "walletTopUpRequestRepository must not be null");
         this.amountConverter = Objects.requireNonNull(amountConverter, "amountConverter must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -99,19 +104,39 @@ public class PrepareZarinpalRequestTransaction {
         if (payment.getPayableAmount() <= 0) {
             throw new ZarinpalPaymentNotAllowedException("Payment amount must be positive");
         }
-        Order order = orderRepository.findById(payment.getOrderId())
-                .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
-        if (!order.getUserId().equals(user.getId())) {
-            throw new PaymentVerificationConflictException("Order owner does not match payment owner");
-        }
-        if (paymentRepository.existsApprovedPaymentForOrder(order.getId())) {
-            throw new PaymentVerificationConflictException("Order already has an approved payment");
-        }
+        validateTarget(payment, user);
         Instant now = clock.now();
         if (!payment.getExpiresAt().isAfter(now)) {
             throw new ZarinpalPaymentNotAllowedException("Payment is expired");
         }
         return payment;
+    }
+
+    private void validateTarget(Payment payment, User user) {
+        if (payment.targetsOrder()) {
+            Order order = orderRepository.findById(payment.getOrderId())
+                    .orElseThrow(() -> new PaymentOrderNotFoundException(payment.getOrderId()));
+            if (!order.getUserId().equals(user.getId())) {
+                throw new PaymentVerificationConflictException("Order owner does not match payment owner");
+            }
+            if (paymentRepository.existsApprovedPaymentForOrder(order.getId())) {
+                throw new PaymentVerificationConflictException("Order already has an approved payment");
+            }
+            return;
+        }
+        if (payment.getWalletTopUpRequestId() == null) {
+            throw new PaymentVerificationConflictException("Payment target is invalid");
+        }
+        WalletTopUpRequest request = walletTopUpRequestRepository.findById(payment.getWalletTopUpRequestId())
+                .orElseThrow(() -> new PaymentVerificationConflictException("Wallet top-up request could not be found"));
+        if (!request.getUserId().equals(user.getId())
+                || request.getRequestedAmount() != payment.getBaseAmount()
+                || !request.getCurrency().equalsIgnoreCase(payment.getCurrency())) {
+            throw new PaymentVerificationConflictException("Wallet top-up payment target does not match");
+        }
+        if (paymentRepository.existsApprovedPaymentForWalletTopUpRequest(request.getId())) {
+            throw new PaymentVerificationConflictException("Wallet top-up already has an approved payment");
+        }
     }
 
     private void validateCommand(InitializeZarinpalPaymentCommand command) {

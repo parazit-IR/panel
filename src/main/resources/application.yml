@@ -195,6 +195,15 @@ app:
     show-transaction-history: "${WALLET_SHOW_TRANSACTION_HISTORY:true}"
     show-top-up-placeholder: "${WALLET_SHOW_TOP_UP_PLACEHOLDER:true}"
     optimistic-retry-count: "${WALLET_OPTIMISTIC_RETRY_COUNT:3}"
+    top-up:
+      enabled: "${WALLET_TOP_UP_ENABLED:true}"
+      currency: "${WALLET_TOP_UP_CURRENCY:IRT}"
+      minimum-amount: "${WALLET_TOP_UP_MINIMUM_AMOUNT:1000}"
+      maximum-amount: "${WALLET_TOP_UP_MAXIMUM_AMOUNT:10000000}"
+      request-ttl: "${WALLET_TOP_UP_REQUEST_TTL:PT30M}"
+      max-pending-requests-per-user: "${WALLET_TOP_UP_MAX_PENDING_REQUESTS_PER_USER:3}"
+      manual-payment-enabled: "${WALLET_TOP_UP_MANUAL_PAYMENT_ENABLED:true}"
+      online-payment-enabled: "${WALLET_TOP_UP_ONLINE_PAYMENT_ENABLED:false}"
   renewal:
     enabled: "${RENEWAL_ENABLED:true}"
     renewal-order-ttl: "${RENEWAL_ORDER_TTL:PT30M}"
