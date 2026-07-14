@@ -23,3 +23,7 @@ Task 49 extends `Payment` with a typed target:
 - `WALLET_TOP_UP` payments reference `wallet_top_up_request_id` and never create an `Order`.
 
 Wallet top-up approval credits the wallet through the wallet ledger use case with an idempotency key derived from the top-up request.
+
+## Wallet Order Payments
+
+Wallet is an internal Payment method, not a new Payment target. A Wallet Payment is approved only after the Wallet ledger debit is posted in the same transaction, then the existing OrderType dispatcher handles new-subscription or renewal side effects.

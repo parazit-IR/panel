@@ -41,12 +41,43 @@ public class TelegramSensitiveActionService {
     }
 
     @Transactional
+    public TelegramSensitiveAction createWalletOrderPayment(long telegramUserId, UUID orderId) {
+        TelegramSensitiveAction action = TelegramSensitiveAction.pendingWalletOrderPayment(
+                telegramUserId,
+                orderId,
+                clock.now().plus(properties.callbackTtl())
+        );
+        return repository.save(action);
+    }
+
+    @Transactional
     public Optional<TelegramSensitiveAction> claimRotation(UUID actionId, long telegramUserId, String resultFingerprint) {
         Instant now = clock.now();
         TelegramSensitiveAction action = repository.findByIdForUpdate(actionId)
                 .orElseThrow(() -> new IllegalArgumentException("sensitive action not found"));
         if (!Objects.equals(action.getTelegramUserId(), telegramUserId)
                 || action.getType() != TelegramSensitiveActionType.ROTATE_SUBSCRIPTION_TOKEN) {
+            throw new IllegalArgumentException("sensitive action ownership mismatch");
+        }
+        if (action.getStatus() == TelegramSensitiveActionStatus.COMPLETED) {
+            return Optional.empty();
+        }
+        action.expire(now);
+        if (!action.isPendingAt(now)) {
+            repository.save(action);
+            return Optional.empty();
+        }
+        action.complete(now, resultFingerprint);
+        return Optional.of(repository.save(action));
+    }
+
+    @Transactional
+    public Optional<TelegramSensitiveAction> claimWalletOrderPayment(UUID actionId, long telegramUserId, String resultFingerprint) {
+        Instant now = clock.now();
+        TelegramSensitiveAction action = repository.findByIdForUpdate(actionId)
+                .orElseThrow(() -> new IllegalArgumentException("sensitive action not found"));
+        if (!Objects.equals(action.getTelegramUserId(), telegramUserId)
+                || action.getType() != TelegramSensitiveActionType.CONFIRM_WALLET_ORDER_PAYMENT) {
             throw new IllegalArgumentException("sensitive action ownership mismatch");
         }
         if (action.getStatus() == TelegramSensitiveActionStatus.COMPLETED) {

@@ -298,7 +298,7 @@ public class PurchaseFlowService implements
                 selection.getPriceAmountSnapshot(),
                 selection.getCurrencySnapshot(),
                 false,
-                false,
+                salesAvailabilityService.walletPaymentAvailable(),
                 salesAvailabilityService.manualPaymentAvailable(),
                 salesAvailabilityService.onlinePaymentAvailable(),
                 selection.getExpiresAt(),
@@ -323,6 +323,14 @@ public class PurchaseFlowService implements
                                 20,
                                 PaymentMethodCapability.ONLINE_REDIRECT,
                                 "ONLINE_PAYMENT_DISABLED"
+                        ),
+                        new AvailablePaymentMethodResult(
+                                PaymentMethod.WALLET,
+                                salesAvailabilityService.walletPaymentAvailable(),
+                                "telegram.purchase.wallet_payment",
+                                30,
+                                PaymentMethodCapability.INTERNAL_BALANCE,
+                                "WALLET_PAYMENT_DISABLED"
                         )
                 ).stream()
                 .filter(AvailablePaymentMethodResult::enabled)

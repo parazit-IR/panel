@@ -21,6 +21,8 @@ public interface SpringDataPaymentRepository extends SpringDataUuidRepository<Pa
 
     Optional<Payment> findFirstByWalletTopUpRequestIdOrderByCreatedAtDesc(UUID walletTopUpRequestId);
 
+    Optional<Payment> findByWalletTransactionId(UUID walletTransactionId);
+
     List<Payment> findAllByOrderIdOrderByCreatedAtDesc(UUID orderId);
 
     List<Payment> findAllByWalletTopUpRequestIdOrderByCreatedAtDesc(UUID walletTopUpRequestId);

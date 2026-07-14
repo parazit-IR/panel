@@ -22,3 +22,7 @@ flowchart LR
 ## Constraints
 
 PostgreSQL enforces non-negative balances, positive transaction amounts, one idempotency key per wallet, and credit/debit balance equations.
+
+## Task 50 PURCHASE Debits
+
+Wallet purchases are recorded as `WalletTransactionType.PURCHASE` with direction `DEBIT`, reference type `ORDER`, and reference id equal to the paid Order id. The ledger idempotency key is `wallet-purchase:{orderId}`.

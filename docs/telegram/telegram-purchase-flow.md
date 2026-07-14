@@ -50,3 +50,7 @@ flowchart TD
 ```
 
 The new-purchase path remains `PurchaseFlowType.NEW_SUBSCRIPTION` and continues to use `OrderType.NEW_SUBSCRIPTION`.
+
+## Wallet Payment
+
+Task 50 adds a Wallet method to the purchase flow after a trusted Order exists. The button leads to a server-side balance preview and one-time confirmation before any debit occurs. External manual and online payments remain available according to existing sales controls.

@@ -12,6 +12,8 @@ public interface PaymentRepository extends UuidRepository<Payment> {
 
     Optional<Payment> findByWalletTopUpRequestId(UUID walletTopUpRequestId);
 
+    Optional<Payment> findByWalletTransactionId(UUID walletTransactionId);
+
     default Optional<Payment> findByIdForUpdate(UUID id) {
         return findById(id);
     }

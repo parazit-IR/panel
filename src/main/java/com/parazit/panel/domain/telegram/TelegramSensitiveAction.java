@@ -17,6 +17,7 @@ import java.util.UUID;
         indexes = {
                 @Index(name = "idx_telegram_sensitive_actions_user", columnList = "telegram_user_id"),
                 @Index(name = "idx_telegram_sensitive_actions_subscription", columnList = "subscription_id"),
+                @Index(name = "idx_telegram_sensitive_actions_resource", columnList = "resource_id"),
                 @Index(name = "idx_telegram_sensitive_actions_status", columnList = "status"),
                 @Index(name = "idx_telegram_sensitive_actions_expires_at", columnList = "expires_at")
         }
@@ -28,8 +29,11 @@ public class TelegramSensitiveAction extends BaseEntity {
     @Column(name = "telegram_user_id", nullable = false, updatable = false)
     private Long telegramUserId;
 
-    @Column(name = "subscription_id", nullable = false, updatable = false)
+    @Column(name = "subscription_id", updatable = false)
     private UUID subscriptionId;
+
+    @Column(name = "resource_id", updatable = false)
+    private UUID resourceId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type", nullable = false, length = 64)
@@ -54,6 +58,7 @@ public class TelegramSensitiveAction extends BaseEntity {
     private TelegramSensitiveAction(
             long telegramUserId,
             UUID subscriptionId,
+            UUID resourceId,
             TelegramSensitiveActionType type,
             Instant expiresAt
     ) {
@@ -61,8 +66,10 @@ public class TelegramSensitiveAction extends BaseEntity {
             throw new IllegalArgumentException("telegramUserId must be positive");
         }
         this.telegramUserId = telegramUserId;
-        this.subscriptionId = Objects.requireNonNull(subscriptionId, "subscriptionId must not be null");
+        this.subscriptionId = subscriptionId;
+        this.resourceId = resourceId;
         this.type = Objects.requireNonNull(type, "type must not be null");
+        validateTarget(this.type, this.subscriptionId, this.resourceId);
         this.status = TelegramSensitiveActionStatus.PENDING;
         this.expiresAt = Objects.requireNonNull(expiresAt, "expiresAt must not be null");
     }
@@ -71,7 +78,18 @@ public class TelegramSensitiveAction extends BaseEntity {
         return new TelegramSensitiveAction(
                 telegramUserId,
                 subscriptionId,
+                null,
                 TelegramSensitiveActionType.ROTATE_SUBSCRIPTION_TOKEN,
+                expiresAt
+        );
+    }
+
+    public static TelegramSensitiveAction pendingWalletOrderPayment(long telegramUserId, UUID orderId, Instant expiresAt) {
+        return new TelegramSensitiveAction(
+                telegramUserId,
+                null,
+                Objects.requireNonNull(orderId, "orderId must not be null"),
+                TelegramSensitiveActionType.CONFIRM_WALLET_ORDER_PAYMENT,
                 expiresAt
         );
     }
@@ -112,6 +130,10 @@ public class TelegramSensitiveAction extends BaseEntity {
         return subscriptionId;
     }
 
+    public UUID getResourceId() {
+        return resourceId;
+    }
+
     public TelegramSensitiveActionType getType() {
         return type;
     }
@@ -145,5 +167,14 @@ public class TelegramSensitiveAction extends BaseEntity {
         return normalized.length() <= RESULT_FINGERPRINT_MAX_LENGTH
                 ? normalized
                 : normalized.substring(0, RESULT_FINGERPRINT_MAX_LENGTH);
+    }
+
+    private static void validateTarget(TelegramSensitiveActionType type, UUID subscriptionId, UUID resourceId) {
+        if (type == TelegramSensitiveActionType.ROTATE_SUBSCRIPTION_TOKEN && subscriptionId == null) {
+            throw new IllegalArgumentException("subscriptionId is required for rotation");
+        }
+        if (type == TelegramSensitiveActionType.CONFIRM_WALLET_ORDER_PAYMENT && resourceId == null) {
+            throw new IllegalArgumentException("resourceId is required for wallet order payment");
+        }
     }
 }

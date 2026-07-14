@@ -123,6 +123,7 @@ public class TelegramMessageCatalog {
                     : "No payment method is currently active.\n\nPlease try again later or contact support.";
             case "telegram.purchase.manual_payment" -> fa ? "💳 کارت‌به‌کارت" : "💳 Card-to-card";
             case "telegram.purchase.online_payment" -> fa ? "🌐 پرداخت آنلاین" : "🌐 Online payment";
+            case "telegram.purchase.wallet_payment" -> fa ? "💰 پرداخت با کیف پول" : "💰 Pay with wallet";
             case "telegram.purchase.manual_payment_disabled" -> fa ? "پرداخت کارت‌به‌کارت در حال حاضر فعال نیست." : "Manual card payment is currently disabled.";
             case "telegram.purchase.online_payment_disabled" -> fa ? "پرداخت آنلاین در حال حاضر فعال نیست." : "Online payment is currently disabled.";
             case "telegram.purchase.copy_amount" -> fa ? "📋 کپی مبلغ" : "📋 Copy amount";
@@ -256,6 +257,28 @@ public class TelegramMessageCatalog {
             case "telegram.wallet.top_up_unavailable" -> fa
                     ? "➕ امکان افزایش موجودی کیف پول در حال حاضر فعال نشده است."
                     : "➕ Wallet top-up is not enabled yet.";
+            case "telegram.wallet.payment_confirm" -> fa ? "✅ تأیید پرداخت" : "✅ Confirm payment";
+            case "telegram.wallet.payment_confirmation" -> fa
+                    ? "💰 پرداخت با کیف پول\n\nمبلغ سفارش:\n{orderAmount}\n\nموجودی فعلی:\n{walletBalance}\n\nموجودی پس از پرداخت:\n{projectedBalance}"
+                    : "💰 Pay with wallet\n\nOrder amount:\n{orderAmount}\n\nCurrent balance:\n{walletBalance}\n\nBalance after payment:\n{projectedBalance}";
+            case "telegram.wallet.payment_insufficient" -> fa
+                    ? "⚠️ موجودی کیف پول کافی نیست.\n\nمبلغ موردنیاز:\n{orderAmount}\n\nموجودی فعلی:\n{walletBalance}\n\nکسری موجودی:\n{shortfall}"
+                    : "⚠️ Wallet balance is not sufficient.\n\nRequired amount:\n{orderAmount}\n\nCurrent balance:\n{walletBalance}\n\nShortfall:\n{shortfall}";
+            case "telegram.wallet.payment_success_new" -> fa
+                    ? "✅ پرداخت با کیف پول با موفقیت انجام شد.\n\n💵 مبلغ پرداخت:\n{amount}\n\n💰 موجودی جدید:\n{balanceAfter}\n\nسرویس شما در حال ساخت است."
+                    : "✅ Wallet payment succeeded.\n\nPaid amount:\n{amount}\n\nNew balance:\n{balanceAfter}\n\nYour service is being created.";
+            case "telegram.wallet.payment_success_renewal" -> fa
+                    ? "✅ پرداخت تمدید با کیف پول انجام شد.\n\n💵 مبلغ پرداخت:\n{amount}\n\n💰 موجودی جدید:\n{balanceAfter}\n\nتمدید سرویس در صف اجرا قرار گرفت."
+                    : "✅ Renewal wallet payment succeeded.\n\nPaid amount:\n{amount}\n\nNew balance:\n{balanceAfter}\n\nThe renewal was queued.";
+            case "telegram.wallet.payment_conflict" -> fa
+                    ? "برای این سفارش یک پرداخت فعال یا تأییدشده وجود دارد. لطفاً وضعیت پرداخت را بررسی کنید."
+                    : "This order already has an active or approved payment. Please check payment status.";
+            case "telegram.wallet.payment_unavailable" -> fa
+                    ? "پرداخت با کیف پول برای این سفارش در دسترس نیست."
+                    : "Wallet payment is not available for this order.";
+            case "telegram.wallet.payment_expired" -> fa
+                    ? "تأیید پرداخت با کیف پول منقضی شده است. لطفاً دوباره از پیش‌فاکتور اقدام کنید."
+                    : "Wallet payment confirmation expired. Please start again from the pre-invoice.";
             case "telegram.wallet.top_up_prompt" -> fa
                     ? "➕ افزایش موجودی کیف پول\n\nمبلغ موردنظر را به تومان وارد کنید.\n\nحداقل:\n{minimumAmount}\n\nحداکثر:\n{maximumAmount}"
                     : "➕ Wallet top-up\n\nEnter the amount.\n\nMinimum:\n{minimumAmount}\n\nMaximum:\n{maximumAmount}";

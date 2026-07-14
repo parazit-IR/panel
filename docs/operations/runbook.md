@@ -19,3 +19,7 @@ If reconciliation fails:
 4. Apply a future compensating adjustment workflow when available.
 
 Task 48 does not implement admin dashboard adjustments, refunds, wallet top-up, or wallet purchase.
+
+## Wallet Payment Checks
+
+For wallet order payment incidents, reconcile the Order, approved WALLET Payment, and PURCHASE wallet transaction. Do not issue automatic refunds in Task 50; investigate inconsistencies and use manual operational correction policy.

@@ -163,11 +163,9 @@ public class TelegramPurchaseFlowHandler {
             for (AvailablePaymentMethodResult method : result.methods()) {
                 rows.add(keyboardFactory.row(keyboardFactory.button(
                         catalog.text(context.language(), method.displayLabelKey()),
-                        method.method() == PaymentMethod.CARD_TO_CARD
-                                ? TelegramCallbackAction.SELECT_MANUAL_PAYMENT
-                                : TelegramCallbackAction.SELECT_ONLINE_PAYMENT,
+                        paymentAction(method.method()),
                         context.telegramUserId(),
-                        result.purchaseSessionId(),
+                        method.method() == PaymentMethod.WALLET ? result.orderId() : result.purchaseSessionId(),
                         null,
                         null,
                         context.receivedAt()
@@ -320,6 +318,16 @@ public class TelegramPurchaseFlowHandler {
                 properties.disableLinkPreview(),
                 null
         ), false)), key);
+    }
+
+    private static TelegramCallbackAction paymentAction(PaymentMethod method) {
+        if (method == PaymentMethod.CARD_TO_CARD) {
+            return TelegramCallbackAction.SELECT_MANUAL_PAYMENT;
+        }
+        if (method == PaymentMethod.WALLET) {
+            return TelegramCallbackAction.PAY_ORDER_WITH_WALLET;
+        }
+        return TelegramCallbackAction.SELECT_ONLINE_PAYMENT;
     }
 
     private TelegramInlineKeyboardRow homeRow(TelegramInteractionContext context) {

@@ -4,6 +4,7 @@ import com.parazit.panel.application.port.out.SystemClockPort;
 import com.parazit.panel.application.port.out.payment.PaymentProcessor;
 import com.parazit.panel.config.properties.ManualPaymentProperties;
 import com.parazit.panel.config.properties.SalesControlProperties;
+import com.parazit.panel.config.properties.WalletPaymentProperties;
 import com.parazit.panel.config.properties.ZarinpalProperties;
 import com.parazit.panel.domain.payment.PaymentMethod;
 import java.time.Instant;
@@ -19,6 +20,7 @@ public class SalesAvailabilityService {
     private final SalesControlProperties sales;
     private final ManualPaymentProperties manualPayment;
     private final ZarinpalProperties zarinpal;
+    private final WalletPaymentProperties walletPayment;
     private final Set<PaymentMethod> supportedPaymentMethods;
     private final SystemClockPort clock;
 
@@ -26,12 +28,14 @@ public class SalesAvailabilityService {
             SalesControlProperties sales,
             ManualPaymentProperties manualPayment,
             ZarinpalProperties zarinpal,
+            WalletPaymentProperties walletPayment,
             List<PaymentProcessor> paymentProcessors,
             SystemClockPort clock
     ) {
         this.sales = Objects.requireNonNull(sales, "sales must not be null");
         this.manualPayment = Objects.requireNonNull(manualPayment, "manualPayment must not be null");
         this.zarinpal = Objects.requireNonNull(zarinpal, "zarinpal must not be null");
+        this.walletPayment = Objects.requireNonNull(walletPayment, "walletPayment must not be null");
         this.supportedPaymentMethods = supportedMethods(paymentProcessors);
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -45,7 +49,7 @@ public class SalesAvailabilityService {
             case ONLINE_PAYMENT -> availability(capability, true, onlinePaymentAvailable(), "ONLINE_PAYMENT_DISABLED", "telegram.purchase.online_payment_disabled", now);
             case RENEWAL -> availability(capability, true, sales.renewalEnabled(), "RENEWAL_UNAVAILABLE", "telegram.feature.renewal_unavailable", now);
             case TRIAL -> availability(capability, true, sales.trialEnabled(), "TRIAL_UNAVAILABLE", "telegram.feature.trial_unavailable", now);
-            case WALLET_PAYMENT -> availability(capability, true, sales.walletPaymentEnabled(), "WALLET_UNAVAILABLE", "telegram.feature.wallet_unavailable", now);
+            case WALLET_PAYMENT -> availability(capability, true, walletPaymentAvailable(), "WALLET_UNAVAILABLE", "telegram.feature.wallet_unavailable", now);
             case DISCOUNT_CODE -> availability(capability, true, sales.discountCodeEnabled(), "DISCOUNT_UNAVAILABLE", "telegram.purchase.discount_unavailable", now);
             case GIFT_CODE -> availability(capability, false, sales.giftCodeEnabled(), "GIFT_CODE_UNAVAILABLE", "telegram.main.coming_soon", now);
         };
@@ -65,6 +69,10 @@ public class SalesAvailabilityService {
         return sales.onlinePaymentEnabled()
                 && zarinpal.enabled()
                 && supportedPaymentMethods.contains(PaymentMethod.ZARINPAL);
+    }
+
+    public boolean walletPaymentAvailable() {
+        return sales.walletPaymentEnabled() && walletPayment.enabled();
     }
 
     public Instant salesResumeAt() {

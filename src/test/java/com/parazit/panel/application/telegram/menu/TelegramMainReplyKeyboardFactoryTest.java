@@ -11,6 +11,7 @@ import com.parazit.panel.config.properties.SubscriptionProperties;
 import com.parazit.panel.config.properties.TelegramFeaturePlaceholderProperties;
 import com.parazit.panel.config.properties.TelegramMenuProperties;
 import com.parazit.panel.config.properties.WalletProperties;
+import com.parazit.panel.config.properties.WalletPaymentProperties;
 import com.parazit.panel.config.properties.ZarinpalProperties;
 import com.parazit.panel.domain.plan.CurrencyCode;
 import java.net.URI;
@@ -64,6 +65,7 @@ class TelegramMainReplyKeyboardFactoryTest {
                 new SalesControlProperties(true, true, false, false, false, false, false, false, "", "", "", null),
                 new ManualPaymentProperties(false, Duration.ofMinutes(30), 1000, 9999, 10, "", "", "", "", true, Duration.ofMinutes(2)),
                 new ZarinpalProperties(false, "", null, null, null, null, null, null, null, null, Duration.ofSeconds(1), Duration.ofSeconds(1), 0, Duration.ofMillis(100), true, true),
+                new WalletPaymentProperties(false, true, true, CurrencyCode.IRT, 0, 0, 3, Duration.ofMinutes(15)),
                 List.of(),
                 () -> Instant.parse("2026-07-14T00:00:00Z")
         );

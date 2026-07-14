@@ -15,6 +15,7 @@ public class PaymentResultMapper {
                 payment.getOrderId(),
                 payment.getTargetType(),
                 payment.getWalletTopUpRequestId(),
+                payment.getWalletTransactionId(),
                 payment.getUserId(),
                 payment.getMethod(),
                 payment.getStatus(),

@@ -9,7 +9,9 @@ import com.parazit.panel.application.payment.result.PaymentVerificationResult;
 import com.parazit.panel.application.port.out.payment.PaymentProcessor;
 import com.parazit.panel.config.properties.ManualPaymentProperties;
 import com.parazit.panel.config.properties.SalesControlProperties;
+import com.parazit.panel.config.properties.WalletPaymentProperties;
 import com.parazit.panel.config.properties.ZarinpalProperties;
+import com.parazit.panel.domain.plan.CurrencyCode;
 import com.parazit.panel.domain.payment.PaymentMethod;
 import java.net.URI;
 import java.time.Duration;
@@ -57,7 +59,9 @@ class SalesAvailabilityServiceTest {
             ZarinpalProperties zarinpal,
             List<PaymentProcessor> processors
     ) {
-        return new SalesAvailabilityService(sales, manual, zarinpal, processors, () -> NOW);
+        return new SalesAvailabilityService(sales, manual, zarinpal,
+                new WalletPaymentProperties(true, true, true, CurrencyCode.IRT, 0, 0, 3, Duration.ofMinutes(15)),
+                processors, () -> NOW);
     }
 
     private static ManualPaymentProperties manual(boolean enabled) {

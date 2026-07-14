@@ -21,3 +21,7 @@ flowchart TD
 ## Currency
 
 The wallet uses the existing `Money` and `CurrencyCode` models. The configured Task 48 currency is `IRT`; database amounts are stored as integer base units in `BIGINT`. There is no implicit Rial/Toman conversion in the wallet domain.
+
+## Task 50 Wallet Payment
+
+Wallet order payment now uses `PaymentMethod.WALLET` against the existing `ORDER` payment target. A successful wallet debit creates an immutable `PURCHASE` ledger row, an approved wallet Payment, and then reuses the paid-order dispatcher for provisioning or renewal. Refunds and compensation remain outside Task 50.

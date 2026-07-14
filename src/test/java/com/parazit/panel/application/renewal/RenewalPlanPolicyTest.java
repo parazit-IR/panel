@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.parazit.panel.application.sales.SalesAvailabilityService;
 import com.parazit.panel.config.properties.ManualPaymentProperties;
 import com.parazit.panel.config.properties.SalesControlProperties;
+import com.parazit.panel.config.properties.WalletPaymentProperties;
 import com.parazit.panel.config.properties.ZarinpalProperties;
 import com.parazit.panel.domain.plan.CurrencyCode;
 import com.parazit.panel.domain.plan.Plan;
@@ -66,6 +67,7 @@ class RenewalPlanPolicyTest {
                 new SalesControlProperties(true, renewalEnabled, false, false, false, false, false, false, "", "", "", null),
                 new ManualPaymentProperties(false, Duration.ofMinutes(30), 1000, 9999, 10, "", "", "", "", true, Duration.ofMinutes(2)),
                 new ZarinpalProperties(false, "", URI.create("https://api.zarinpal.com"), URI.create("https://www.zarinpal.com/pg/StartPay"), "/request", "/verify", URI.create("http://localhost/callback"), URI.create("http://localhost/success"), URI.create("http://localhost/fail"), URI.create("http://localhost/cancel"), Duration.ofSeconds(1), Duration.ofSeconds(1), 0, Duration.ofMillis(100), true, true),
+                new WalletPaymentProperties(false, true, true, CurrencyCode.IRT, 0, 0, 3, Duration.ofMinutes(15)),
                 List.of(),
                 () -> NOW
         );

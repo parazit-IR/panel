@@ -40,6 +40,13 @@ public class PaymentRepositoryAdapter extends JpaRepositoryAdapter<Payment, UUID
     }
 
     @Override
+    public Optional<Payment> findByWalletTransactionId(UUID walletTransactionId) {
+        return repository.findByWalletTransactionId(
+                Objects.requireNonNull(walletTransactionId, "walletTransactionId must not be null")
+        );
+    }
+
+    @Override
     public Optional<Payment> findByIdForUpdate(UUID id) {
         return repository.findByIdForUpdate(Objects.requireNonNull(id, "id must not be null"));
     }

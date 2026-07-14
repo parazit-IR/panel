@@ -38,6 +38,9 @@ public class Payment extends BaseEntity {
     @Column(name = "wallet_top_up_request_id", updatable = false)
     private UUID walletTopUpRequestId;
 
+    @Column(name = "wallet_transaction_id")
+    private UUID walletTransactionId;
+
     @Column(name = "user_id", nullable = false, updatable = false)
     private UUID userId;
 
@@ -201,6 +204,17 @@ public class Payment extends BaseEntity {
         rejectionReason = null;
     }
 
+    public void attachWalletTransaction(UUID walletTransactionId) {
+        if (method != PaymentMethod.WALLET) {
+            throw new IllegalStateException("wallet transaction can only be attached to wallet payments");
+        }
+        UUID requiredTransactionId = Objects.requireNonNull(walletTransactionId, "walletTransactionId must not be null");
+        if (this.walletTransactionId != null && !this.walletTransactionId.equals(requiredTransactionId)) {
+            throw new IllegalStateException("wallet transaction is already attached");
+        }
+        this.walletTransactionId = requiredTransactionId;
+    }
+
     public void markRejected(Instant rejectedAt, String reason) {
         if (status == PaymentStatus.REJECTED) {
             return;
@@ -288,6 +302,10 @@ public class Payment extends BaseEntity {
 
     public UUID getWalletTopUpRequestId() {
         return walletTopUpRequestId;
+    }
+
+    public UUID getWalletTransactionId() {
+        return walletTransactionId;
     }
 
     public boolean targetsOrder() {

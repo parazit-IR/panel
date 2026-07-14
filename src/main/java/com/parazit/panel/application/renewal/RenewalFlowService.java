@@ -571,6 +571,14 @@ public class RenewalFlowService implements
                                 20,
                                 PaymentMethodCapability.ONLINE_REDIRECT,
                                 "ONLINE_PAYMENT_DISABLED"
+                        ),
+                        new AvailablePaymentMethodResult(
+                                PaymentMethod.WALLET,
+                                salesAvailabilityService.walletPaymentAvailable(),
+                                "telegram.purchase.wallet_payment",
+                                30,
+                                PaymentMethodCapability.INTERNAL_BALANCE,
+                                "WALLET_PAYMENT_DISABLED"
                         )
                 )
                 .stream()

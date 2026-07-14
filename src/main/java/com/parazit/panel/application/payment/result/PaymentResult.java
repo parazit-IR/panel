@@ -11,6 +11,7 @@ public record PaymentResult(
         UUID orderId,
         PaymentTargetType targetType,
         UUID walletTopUpRequestId,
+        UUID walletTransactionId,
         UUID userId,
         PaymentMethod method,
         PaymentStatus status,

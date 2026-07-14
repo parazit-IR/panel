@@ -61,3 +61,7 @@ flowchart TD
     C --> D[Success notification]
     B --> E[Manual review on unsafe failure]
 ```
+
+## Wallet Renewal Payment
+
+Task 50 adds Wallet as a renewal Order payment method. On success, the existing renewal payment approval path creates or reuses the Renewal Outbox; no direct 3x-ui call occurs from Telegram or Wallet code.
